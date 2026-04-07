@@ -75,6 +75,7 @@ def test_authority_aware_preference_and_conflict_note_generation() -> None:
         authority_level="regional",
         tax_year="2025-2026",
         heading_path=["ধারা 3", "করহার"],
+        text="ধারা 3 অনুযায়ী করহার 10 শতাংশ",
     )
     high_authority_hit = _hit(
         chunk_id="national-1",
@@ -83,6 +84,7 @@ def test_authority_aware_preference_and_conflict_note_generation() -> None:
         authority_level="national",
         tax_year="2024-2025",
         heading_path=["ধারা 3", "করহার"],
+        text="ধারা 3 অনুযায়ী করহার 12 শতাংশ",
     )
 
     response = run_hybrid_retrieval(
@@ -149,3 +151,41 @@ def test_hybrid_retrieval_on_tiny_synthetic_corpus() -> None:
     assert response.final_hits
     assert response.final_hits[0].chunk_id == "c1"
     assert response.evidence_summary
+
+
+def test_evidence_pack_abstains_when_subsection_query_has_no_direct_support() -> None:
+    analyzed_query = run_hybrid_retrieval(
+        query="ধারা ৩.১ অনুযায়ী করহার কী?",
+        sparse_hits_override=[],
+        dense_hits_override=[],
+    ).analyzed_query
+    fused_hits = [
+        _hit(
+            chunk_id="wrong-1",
+            score=5.0,
+            section_id="3",
+            subsection_id="3.1",
+            chunk_type="table",
+            text="ধারা 3.1 এর সংজ্ঞা",
+            heading_path=["ধারা 3.1", "সংজ্ঞা"],
+        ),
+        _hit(
+            chunk_id="wrong-2",
+            score=4.5,
+            section_id="2",
+            subsection_id="2.3",
+            chunk_type="table",
+            text="2025-2026 করহার 10 শতাংশ",
+            heading_path=["ধারা 2.3", "করহার"],
+        ),
+    ]
+
+    final_hits, evidence_summary, conflict_notes, _ = build_evidence_pack(
+        fused_hits,
+        analyzed_query,
+        final_top_k=3,
+    )
+
+    assert final_hits == []
+    assert evidence_summary == "No evidence passed the final support checks."
+    assert any("No final evidence directly supports" in note for note in conflict_notes)

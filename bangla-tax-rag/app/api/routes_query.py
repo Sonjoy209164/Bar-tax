@@ -7,6 +7,7 @@ from app.core.settings import get_settings
 from app.core.utils import preprocess_query
 from app.generation.generator import generate_answer
 from app.retrieval.dense import dense_search
+from app.retrieval.filters import filter_supportive_hits
 from app.retrieval.hybrid import run_hybrid_retrieval
 from app.retrieval.sparse import load_sparse_index, search_sparse_index
 
@@ -76,10 +77,21 @@ def _run_query_pipeline(request: QueryRequest) -> QueryAPIResponse:
     abstained: bool | None = None
     abstention_reason: str | None = None
     confidence_score: float | None = None
+    supportive_hits = filter_supportive_hits(final_hits, analyzed_query)
+    requires_exact_support = bool(analyzed_query.subsection_id) or (
+        analyzed_query.query_intent == "rate_lookup" and bool(analyzed_query.section_id)
+    )
+    if requires_exact_support:
+        if supportive_hits:
+            final_hits = supportive_hits[:effective_final_k]
+        else:
+            final_hits = []
+            conflict_notes = list(dict.fromkeys([*conflict_notes, "No final evidence directly supports the requested section or subsection."]))
     if request.generate_answer:
+        generation_hits = final_hits
         generated_answer = generate_answer(
             request.question_text,
-            final_hits,
+            generation_hits,
             analyzed_query,
             conflict_notes=conflict_notes,
         )
@@ -88,6 +100,11 @@ def _run_query_pipeline(request: QueryRequest) -> QueryAPIResponse:
         abstained = generated_answer.abstained
         abstention_reason = generated_answer.abstention_reason
         confidence_score = generated_answer.confidence_score
+        if requires_exact_support and not final_hits and not generated_answer.abstained:
+            answer_text = None
+            abstained = True
+            abstention_reason = "No final evidence directly supports the requested section or subsection."
+            confidence_score = 0.0
 
     return QueryAPIResponse(
         status="success",

@@ -4,7 +4,7 @@ from pathlib import Path
 from app.core.schemas import HybridRetrievalResponse, QuerySignals, RetrievalHit
 from app.core.utils import preprocess_query, tokenize_for_bm25
 from app.retrieval.dense import dense_search
-from app.retrieval.filters import authority_value, deduplicate_retrieval_hits
+from app.retrieval.filters import authority_value, deduplicate_retrieval_hits, filter_supportive_hits
 from app.retrieval.sparse import DEFAULT_INDEX_DIR, load_sparse_index, sparse_search
 
 logger = logging.getLogger(__name__)
@@ -40,8 +40,12 @@ def apply_hybrid_post_ranking(hit: RetrievalHit, analyzed_query: QuerySignals) -
         adjusted_score += 1.4
     if analyzed_query.section_id and adjusted_hit.section_id == analyzed_query.section_id:
         adjusted_score += 1.8
+    elif analyzed_query.section_id and adjusted_hit.section_id:
+        adjusted_score -= 1.2
     if analyzed_query.subsection_id and adjusted_hit.subsection_id == analyzed_query.subsection_id:
         adjusted_score += 2.6
+    elif analyzed_query.subsection_id:
+        adjusted_score -= 2.2
     if analyzed_query.appendix_id and adjusted_hit.intermediate_scores.get("appendix_id") == analyzed_query.appendix_id:
         adjusted_score += 1.2
     if analyzed_query.sro_id and adjusted_hit.intermediate_scores.get("sro_id") == analyzed_query.sro_id:
@@ -60,6 +64,10 @@ def apply_hybrid_post_ranking(hit: RetrievalHit, analyzed_query: QuerySignals) -
     preferred_chunk_type = preferred_chunk_types.get(analyzed_query.query_intent)
     if preferred_chunk_type and adjusted_hit.chunk_type == preferred_chunk_type:
         adjusted_score += 1.1
+    if analyzed_query.query_intent == "rate_lookup":
+        normalized_text = adjusted_hit.normalized_text
+        if "করহার" not in normalized_text and "কর হার" not in normalized_text:
+            adjusted_score -= 1.0
     adjusted_hit.score = round(adjusted_score, 6)
     adjusted_hit.intermediate_scores["postrank_score"] = adjusted_hit.score
     return adjusted_hit
@@ -92,9 +100,18 @@ def build_evidence_pack(
     reranked_hits.sort(key=lambda hit: hit.score, reverse=True)
     conflict_notes = detect_conflicts(reranked_hits[: max(final_top_k + 2, 4)])
     deduplicated_hits, dropped_duplicates = deduplicate_retrieval_hits(reranked_hits)
+    supportive_hits = filter_supportive_hits(deduplicated_hits, analyzed_query)
+    requires_exact_support = bool(analyzed_query.subsection_id) or (
+        analyzed_query.query_intent == "rate_lookup" and bool(analyzed_query.section_id)
+    )
+    if requires_exact_support and not supportive_hits:
+        conflict_notes.append("No final evidence directly supports the requested section or subsection.")
+        candidate_hits: list[RetrievalHit] = []
+    else:
+        candidate_hits = supportive_hits if supportive_hits else deduplicated_hits
     selected_hits: list[RetrievalHit] = []
     seen_chunk_types: set[str] = set()
-    for hit in deduplicated_hits:
+    for hit in candidate_hits:
         if len(selected_hits) >= final_top_k:
             break
         if hit.chunk_type not in seen_chunk_types or len(selected_hits) < 2:
@@ -104,9 +121,10 @@ def build_evidence_pack(
         selected_hits.append(hit)
     selected_hits.sort(key=lambda hit: (authority_value(hit.authority_level), hit.score), reverse=True)
     selected_hits = selected_hits[:final_top_k]
-    evidence_summary = "; ".join(
-        f"{hit.chunk_id} p.{hit.page_no} {hit.chunk_type} {hit.authority_level}"
-        for hit in selected_hits
+    evidence_summary = (
+        "; ".join(f"{hit.chunk_id} p.{hit.page_no} {hit.chunk_type} {hit.authority_level}" for hit in selected_hits)
+        if selected_hits
+        else "No evidence passed the final support checks."
     )
     return selected_hits, evidence_summary, conflict_notes, dropped_duplicates
 

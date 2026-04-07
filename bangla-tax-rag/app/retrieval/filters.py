@@ -1,4 +1,6 @@
-from app.core.schemas import ChunkRecord, RetrievalHit
+import re
+
+from app.core.schemas import ChunkRecord, QuerySignals, RetrievalHit
 
 
 AUTHORITY_RANK = {
@@ -27,6 +29,27 @@ def authority_value(authority_level: str | None) -> int:
     if authority_level is None:
         return AUTHORITY_RANK["unknown"]
     return AUTHORITY_RANK.get(authority_level.lower(), AUTHORITY_RANK["unknown"])
+
+
+def chunk_quality_score(text: str) -> float:
+    stripped_text = text.strip()
+    if not stripped_text:
+        return 0.0
+    bangla_char_count = len(re.findall(r"[\u0980-\u09ff]", stripped_text))
+    digit_count = sum(character.isdigit() for character in stripped_text)
+    alpha_count = sum(character.isalpha() for character in stripped_text)
+    length_score = min(len(stripped_text) / 120.0, 1.0)
+    bangla_score = min(bangla_char_count / 25.0, 1.0)
+    digit_penalty = min(digit_count / max(len(stripped_text), 1), 1.0)
+    alpha_score = min(alpha_count / max(len(stripped_text), 1), 1.0)
+    score = (length_score * 0.35) + (bangla_score * 0.45) + (alpha_score * 0.35) - (digit_penalty * 0.35)
+    if re.fullmatch(r"[0-9 .:/()%\-]+", stripped_text):
+        score -= 0.7
+    return max(0.0, min(1.0, score))
+
+
+def is_low_quality_chunk(text: str) -> bool:
+    return chunk_quality_score(text) < 0.22
 
 
 def passes_metadata_filters(
@@ -66,6 +89,7 @@ def filter_chunk_records(
             authority_level_min=authority_level_min,
             chunk_type=chunk_type,
         )
+        and not is_low_quality_chunk(chunk.normalized_text)
     ]
 
 
@@ -101,3 +125,30 @@ def deduplicate_retrieval_hits(
         if not should_drop:
             deduplicated_hits.append(hit)
     return deduplicated_hits, dropped_duplicates
+
+
+def hit_supports_query(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    normalized_text = hit.normalized_text.lower()
+    is_rate_lookup = analyzed_query.query_intent == "rate_lookup"
+    has_rate_language = "করহার" in normalized_text or "কর হার" in normalized_text or "tax rate" in normalized_text
+    if analyzed_query.subsection_id:
+        if hit.subsection_id == analyzed_query.subsection_id:
+            return has_rate_language if is_rate_lookup else True
+        if analyzed_query.subsection_id in normalized_text and analyzed_query.query_intent != "rate_lookup":
+            return True
+        return False
+    if analyzed_query.section_id and hit.section_id:
+        section_matches = hit.section_id == analyzed_query.section_id or analyzed_query.section_id in normalized_text
+        if not section_matches:
+            return False
+        return has_rate_language if is_rate_lookup else True
+    if is_rate_lookup:
+        return has_rate_language
+    return True
+
+
+def filter_supportive_hits(hits: list[RetrievalHit], analyzed_query: QuerySignals) -> list[RetrievalHit]:
+    if not analyzed_query.section_id and not analyzed_query.subsection_id:
+        return hits
+    supportive_hits = [hit for hit in hits if hit_supports_query(hit, analyzed_query)]
+    return supportive_hits

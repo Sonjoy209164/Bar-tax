@@ -7,7 +7,7 @@ from rank_bm25 import BM25Okapi
 
 from app.core.schemas import ChunkRecord, QuerySignals, RetrievalHit, RetrievalResponse
 from app.core.utils import preprocess_query, tokenize_for_bm25
-from app.retrieval.filters import authority_value, filter_chunk_records
+from app.retrieval.filters import authority_value, chunk_quality_score, filter_chunk_records
 
 logger = logging.getLogger(__name__)
 DEFAULT_INDEX_DIR = Path("indexes/sparse")
@@ -81,11 +81,17 @@ def load_sparse_index(index_dir: str | Path = DEFAULT_INDEX_DIR) -> SparseIndex:
 
 def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_score: float) -> float:
     boosted_score = base_score
+    quality_score = chunk_quality_score(chunk.normalized_text)
+    boosted_score += quality_score * 1.2
     if query_signals.section_reference:
         if chunk.subsection_id == query_signals.section_reference:
-            boosted_score += 3.0
+            boosted_score += 4.0
         elif chunk.section_id == query_signals.section_reference:
-            boosted_score += 2.0
+            boosted_score += 2.5
+        elif query_signals.subsection_id:
+            boosted_score -= 2.5
+        elif query_signals.section_id and chunk.section_id and chunk.section_id != query_signals.section_id:
+            boosted_score -= 1.5
     if query_signals.tax_year and chunk.tax_year == query_signals.tax_year:
         boosted_score += 1.5
     if query_signals.appendix_reference and chunk.appendix_id == query_signals.appendix_reference:
@@ -100,7 +106,13 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
     if query_signals.query_type == "example" and chunk.chunk_type == "example":
         boosted_score += 1.25
     if query_signals.query_type == "rate_lookup" and chunk.chunk_type == "table":
-        boosted_score += 1.25
+        boosted_score += 1.75
+        if "করহার" in chunk.normalized_text or "কর হার" in chunk.normalized_text:
+            boosted_score += 1.25
+        if query_signals.subsection_id and chunk.subsection_id != query_signals.subsection_id:
+            boosted_score -= 2.0
+    if query_signals.query_intent == "rate_lookup" and "করহার" not in chunk.normalized_text and "কর হার" not in chunk.normalized_text:
+        boosted_score -= 1.0
     return boosted_score
 
 

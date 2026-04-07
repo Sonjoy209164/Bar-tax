@@ -89,6 +89,46 @@ async def test_query_with_mocked_pipeline(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.anyio
+async def test_query_returns_abstention_when_no_exact_support(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.api import routes_query
+    from app.core.schemas import QueryAPIResponse, QuerySignals
+
+    def fake_run_query_pipeline(request):  # type: ignore[no-untyped-def]
+        return QueryAPIResponse(
+            status="success",
+            retrieval_mode="hybrid",
+            analyzed_query=QuerySignals(
+                original_query=request.question_text,
+                normalized_query="2025-2026 ধারা 3.1 অনুযায়ী করহার কী?",
+                section_reference="3.1",
+                section_id="3",
+                subsection_id="3.1",
+                query_type="rate_lookup",
+                query_intent="rate_lookup",
+            ),
+            final_hits=[],
+            conflict_notes=["No final evidence directly supports the requested section or subsection."],
+            answer=None,
+            citations=[],
+            abstained=True,
+            abstention_reason="No final evidence directly supports the requested section or subsection.",
+            confidence_score=0.0,
+        )
+
+    monkeypatch.setattr(routes_query, "_run_query_pipeline", fake_run_query_pipeline)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/query",
+            json={"question_text": "২০২৫-২০২৬ করবর্ষে ধারা ৩.১ অনুযায়ী করহার কী?", "retrieval_mode": "hybrid"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["final_hits"] == []
+    assert payload["abstained"] is True
+
+
+@pytest.mark.anyio
 async def test_ingest_request_validation() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/ingest", json={"doc_id": "sample-doc"})

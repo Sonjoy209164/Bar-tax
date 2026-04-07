@@ -4,7 +4,7 @@ from pathlib import Path
 from app.core.schemas import RetrievalHit
 from app.core.utils import ensure_directory
 from app.core.utils import preprocess_query, tokenize_for_bm25
-from app.retrieval.filters import authority_value, filter_chunk_records
+from app.retrieval.filters import authority_value, chunk_quality_score, filter_chunk_records
 from app.retrieval.sparse import DEFAULT_INDEX_DIR, load_chunk_records_from_jsonl
 
 
@@ -69,6 +69,24 @@ def dense_search(
         weighted_text = " ".join([chunk.doc_title, " ".join(chunk.heading_path), chunk.normalized_text])
         chunk_tokens = set(tokenize_for_bm25(weighted_text))
         score = _dense_like_score(query_tokens, chunk_tokens, chunk.authority_level)
+        score += chunk_quality_score(chunk.normalized_text) * 0.8
+        if analyzed_query.subsection_id:
+            if chunk.subsection_id == analyzed_query.subsection_id:
+                score += 1.8
+            else:
+                score -= 1.6
+        elif analyzed_query.section_id and chunk.section_id:
+            if chunk.section_id == analyzed_query.section_id:
+                score += 1.0
+            else:
+                score -= 0.8
+        if analyzed_query.query_intent == "rate_lookup":
+            if chunk.chunk_type == "table":
+                score += 1.1
+            if "করহার" in chunk.normalized_text or "কর হার" in chunk.normalized_text:
+                score += 0.9
+            else:
+                score -= 0.7
         if score <= 0:
             continue
         scored_hits.append(

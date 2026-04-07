@@ -4,5 +4,9 @@ experiment:
 retrieval:
   mode: hybrid
   top_k: 10
+  final_evidence_k: 5
 evaluation:
   enabled: true
+generation:
+  provider: mock
+  model_name: mock-grounded-generator

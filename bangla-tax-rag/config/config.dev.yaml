@@ -3,7 +3,25 @@ app:
   environment: development
   host: 0.0.0.0
   port: 8000
+paths:
+  raw_data_dir: data/raw
+  processed_data_dir: data/processed
+  sparse_index_dir: indexes/sparse
+  dense_index_dir: indexes/dense
+  results_dir: results
+  ui_backend_base_url: http://127.0.0.1:8000
 retrieval:
+  mode: hybrid
   top_k: 5
+  final_evidence_k: 3
 generation:
+  provider: openai_compatible
+  model_name: deepseek-r1:7b
+  base_url: http://127.0.0.1:11434/v1
   max_tokens: 512
+  temperature: 0.0
+  abstention_score_threshold: 0.75
+  verification_enabled: true
+embeddings:
+  provider: mock
+  model_name: mock-dense-overlap

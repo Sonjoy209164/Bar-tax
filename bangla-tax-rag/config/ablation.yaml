@@ -1,0 +1,43 @@
+experiment_groups:
+  sparse_only:
+    retrieval_mode: sparse
+    top_k: 5
+    final_evidence_k: 3
+    generation_enabled: false
+    authority_ranking: false
+    tax_year_ranking: false
+  dense_only:
+    retrieval_mode: dense
+    top_k: 5
+    final_evidence_k: 3
+    generation_enabled: false
+    authority_ranking: false
+    tax_year_ranking: false
+  hybrid:
+    retrieval_mode: hybrid
+    top_k: 5
+    final_evidence_k: 3
+    generation_enabled: false
+    authority_ranking: false
+    tax_year_ranking: false
+  hybrid_plus_authority:
+    retrieval_mode: hybrid
+    top_k: 5
+    final_evidence_k: 3
+    generation_enabled: false
+    authority_ranking: true
+    tax_year_ranking: false
+  hybrid_plus_authority_plus_tax_year:
+    retrieval_mode: hybrid
+    top_k: 5
+    final_evidence_k: 3
+    generation_enabled: false
+    authority_ranking: true
+    tax_year_ranking: true
+  full_system_with_generation:
+    retrieval_mode: hybrid
+    top_k: 5
+    final_evidence_k: 3
+    generation_enabled: true
+    authority_ranking: true
+    tax_year_ranking: true

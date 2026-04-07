@@ -1,0 +1,118 @@
+from app.core.schemas import GenerationOptions, QuerySignals, RetrievalHit
+from app.generation.generator import generate_answer
+
+
+def _hit(
+    *,
+    chunk_id: str,
+    score: float = 2.5,
+    authority_level: str = "national",
+    tax_year: str | None = "2025-2026",
+    section_id: str | None = "3",
+    subsection_id: str | None = "3.1",
+    chunk_type: str = "table",
+    text: str = "ধারা 3.1 অনুযায়ী 2025-2026 করহার 10 শতাংশ।",
+) -> RetrievalHit:
+    return RetrievalHit(
+        chunk_id=chunk_id,
+        doc_id="doc-1",
+        doc_title="Income Tax Circular 2025-2026",
+        page_no=10,
+        section_id=section_id,
+        subsection_id=subsection_id,
+        chunk_type=chunk_type,
+        authority_level=authority_level,
+        tax_year=tax_year,
+        original_text=text,
+        normalized_text=text,
+        heading_path=["ধারা 3.1", "করহার"],
+        content=text,
+        score=score,
+        intermediate_scores={},
+    )
+
+
+def _options() -> GenerationOptions:
+    return GenerationOptions(
+        provider="mock",
+        model_name="mock-grounded-generator",
+        max_generation_tokens=256,
+        temperature=0.0,
+        abstention_score_threshold=0.75,
+        verification_enabled=True,
+    )
+
+
+def _query() -> QuerySignals:
+    return QuerySignals(
+        original_query="২০২৫-২০২৬ করবর্ষে ধারা ৩.১ অনুযায়ী করহার কী?",
+        normalized_query="2025-2026 করবর্ষে ধারা 3.1 অনুযায়ী করহার কী?",
+        tax_year="2025-2026",
+        section_reference="3.1",
+        section_id="3",
+        subsection_id="3.1",
+        query_type="rate_lookup",
+        query_intent="rate_lookup",
+    )
+
+
+def test_abstention_on_empty_evidence() -> None:
+    result = generate_answer("করহার কী?", [], _query(), _options())
+
+    assert result.abstained is True
+    assert result.abstention_reason == "No evidence hits available."
+
+
+def test_abstention_on_conflicting_evidence() -> None:
+    hits = [
+        _hit(chunk_id="c1", authority_level="national", tax_year="2025-2026"),
+        _hit(chunk_id="c2", authority_level="national", tax_year="2024-2025"),
+    ]
+    result = generate_answer(
+        "করহার কী?",
+        hits,
+        _query(),
+        _options(),
+        conflict_notes=["Potential tax-year conflict between c1 and c2."],
+    )
+
+    assert result.abstained is True
+
+
+def test_verification_failure_for_unsupported_sentence() -> None:
+    hits = [_hit(chunk_id="c1")]
+    mocked_response = '{"answer_sentences":[{"sentence":"এই উত্তর সম্পূর্ণ নতুন দাবি করে।","citations":["[C9]"]}]}'
+
+    result = generate_answer("করহার কী?", hits, _query(), _options(), mocked_response=mocked_response)
+
+    assert result.abstained is True
+    assert "Invalid citation marker" in (result.abstention_reason or "")
+
+
+def test_generation_flow_using_mocked_model_response() -> None:
+    hits = [_hit(chunk_id="c1"), _hit(chunk_id="c2", text="এটি কোম্পানির জন্য প্রযোজ্য।")]
+    mocked_response = (
+        '{"answer_sentences":['
+        '{"sentence":"২০২৫-২০২৬ করবর্ষে ধারা ৩.১ অনুযায়ী করহার ১০ শতাংশ।","citations":["[C1]"]},'
+        '{"sentence":"এটি কোম্পানির জন্য প্রযোজ্য।","citations":["[C2]"]}'
+        '],"conflict_notes":[]}'
+    )
+
+    result = generate_answer("করহার কী?", hits, _query(), _options(), mocked_response=mocked_response)
+
+    assert result.abstained is False
+    assert result.verification_passed is True
+    assert result.citations[0].marker == "[C1]"
+    assert "[C1]" in result.answer_text
+    assert result.used_chunk_ids == ["c1", "c2"]
+
+
+def test_default_mock_generation_is_extractive_and_supported() -> None:
+    hits = [_hit(chunk_id="c1", text="ধারা 3.1 অনুযায়ী 2025-2026 করহার 10 শতাংশ।")]
+
+    result = generate_answer("২০২৫-২০২৬ করবর্ষে ধারা ৩.১ অনুযায়ী করহার কী?", hits, _query(), _options())
+
+    assert result.abstained is False
+    assert result.verification_passed is True
+    assert "করহার 10 শতাংশ" in result.answer_text
+    assert "[C1]" in result.answer_text

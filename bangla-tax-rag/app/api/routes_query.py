@@ -1,23 +1,122 @@
-from fastapi import APIRouter
+from pathlib import Path
 
-from app.core.schemas import QueryRequest, QueryResponse, RetrievedChunk
-from app.generation.citations import format_citations
+from fastapi import APIRouter, HTTPException, status
+
+from app.core.schemas import QueryAPIResponse, QueryRequest, RetrievalHit
+from app.core.settings import get_settings
+from app.core.utils import preprocess_query
 from app.generation.generator import generate_answer
-from app.retrieval.hybrid import hybrid_search
+from app.retrieval.dense import dense_search
+from app.retrieval.hybrid import run_hybrid_retrieval
+from app.retrieval.sparse import load_sparse_index, search_sparse_index
 
 router = APIRouter(tags=["query"])
 
 
-@router.post("/query", response_model=QueryResponse)
-async def query_documents(request: QueryRequest) -> QueryResponse:
-    retrieved_chunks = hybrid_search(request.query, top_k=request.top_k)
-    answer = generate_answer(request.query, retrieved_chunks)
-    citations = format_citations(retrieved_chunks)
-    return QueryResponse(
+def _run_query_pipeline(request: QueryRequest) -> QueryAPIResponse:
+    settings = get_settings()
+    analyzed_query = preprocess_query(request.question_text)
+    effective_top_k = request.top_k or settings.top_k
+    effective_final_k = request.final_evidence_k or settings.final_evidence_k
+    index_dir = settings.sparse_index_dir
+    if not Path(index_dir, "chunks.jsonl").exists():
+        raise FileNotFoundError(f"Sparse index not found at {index_dir}")
+
+    sparse_hits: list[RetrievalHit] = []
+    dense_hits: list[RetrievalHit] = []
+    fused_hits: list[RetrievalHit] = []
+    final_hits: list[RetrievalHit] = []
+    conflict_notes: list[str] = []
+
+    if request.retrieval_mode == "sparse":
+        sparse_response = search_sparse_index(
+            query=request.question_text,
+            index=load_sparse_index(index_dir),
+            top_k=effective_top_k,
+            tax_year=request.tax_year,
+            doc_type=request.doc_type,
+            authority_level_min=request.authority_level_min,
+            chunk_type=request.chunk_type,
+        )
+        final_hits = sparse_response.hits[:effective_final_k]
+    elif request.retrieval_mode == "dense":
+        dense_hits = [RetrievalHit(**hit) for hit in dense_search(
+            request.question_text,
+            top_k=effective_top_k,
+            tax_year=request.tax_year,
+            doc_type=request.doc_type,
+            authority_level_min=request.authority_level_min,
+            chunk_type=request.chunk_type,
+            index_dir=settings.dense_index_dir,
+        )]
+        final_hits = dense_hits[:effective_final_k]
+    elif request.retrieval_mode == "hybrid":
+        hybrid_response = run_hybrid_retrieval(
+            query=request.question_text,
+            sparse_top_k=effective_top_k,
+            dense_top_k=effective_top_k,
+            final_top_k=effective_final_k,
+            tax_year=request.tax_year,
+            doc_type=request.doc_type,
+            authority_level_min=request.authority_level_min,
+            chunk_type=request.chunk_type,
+            index_dir=index_dir,
+        )
+        analyzed_query = hybrid_response.analyzed_query
+        sparse_hits = hybrid_response.sparse_hits
+        dense_hits = hybrid_response.dense_hits
+        fused_hits = hybrid_response.fused_hits
+        final_hits = hybrid_response.final_hits
+        conflict_notes = hybrid_response.conflict_notes
+    else:
+        raise ValueError(f"Unsupported retrieval mode: {request.retrieval_mode}")
+
+    answer_text: str | None = None
+    citations = []
+    abstained: bool | None = None
+    abstention_reason: str | None = None
+    confidence_score: float | None = None
+    if request.generate_answer:
+        generated_answer = generate_answer(
+            request.question_text,
+            final_hits,
+            analyzed_query,
+            conflict_notes=conflict_notes,
+        )
+        answer_text = generated_answer.answer_text if not generated_answer.abstained else None
+        citations = generated_answer.citations
+        abstained = generated_answer.abstained
+        abstention_reason = generated_answer.abstention_reason
+        confidence_score = generated_answer.confidence_score
+
+    return QueryAPIResponse(
         status="success",
-        answer=answer,
+        retrieval_mode=request.retrieval_mode,
+        analyzed_query=analyzed_query,
+        final_hits=final_hits,
+        conflict_notes=conflict_notes,
+        answer=answer_text,
         citations=citations,
-        retrieved_chunks=[
-            RetrievedChunk(**chunk) for chunk in retrieved_chunks
-        ],
+        abstained=abstained,
+        abstention_reason=abstention_reason,
+        confidence_score=confidence_score,
+        sparse_hits=sparse_hits if request.include_intermediate_hits else [],
+        dense_hits=dense_hits if request.include_intermediate_hits else [],
+        fused_hits=fused_hits if request.include_intermediate_hits else [],
     )
+
+
+@router.post("/query", response_model=QueryAPIResponse)
+async def query_documents(request: QueryRequest) -> QueryAPIResponse:
+    try:
+        return _run_query_pipeline(request)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "missing_index", "message": str(exc)},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "invalid_request", "message": str(exc)},
+        ) from exc

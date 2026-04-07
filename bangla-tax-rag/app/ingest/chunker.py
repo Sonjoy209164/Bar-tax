@@ -1,12 +1,103 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
+import re
 
 from app.core.schemas import ChunkRecord, ParsedPage
-from app.core.utils import extract_cross_references, extract_section_ids, normalize_text
+from app.core.utils import extract_cross_references, normalize_text, select_primary_section_markers
 
 
 DEFAULT_CHUNK_SIZE = 1000
 DEFAULT_OVERLAP = 120
+MIN_BLOCK_LENGTH = 120
+TABLE_CODE_PATTERN = re.compile(r"^\d{2,4}(?:\.\d{2,4}){1,3}$")
+TABLE_SERIAL_PATTERN = re.compile(r"^\d+\.$")
+PURE_STRUCTURAL_LINE_PATTERN = re.compile(r"^(?:\(?[0-9]+\)?|[|:.\-–—/ ]+)$")
+
+
+def _is_document_header_line(line: str) -> bool:
+    normalized_line = normalize_text(line)
+    if not normalized_line:
+        return True
+    if normalized_line.startswith("আয়কর পররপত্র"):
+        return True
+    if normalized_line in {
+        "ক্রমিক নং",
+        "মির োনোি",
+        "এইচ এস ককোড",
+        "বণডনা",
+        "(1)",
+        "(2)",
+        "(3)",
+        "(4)",
+    }:
+        return True
+    return False
+
+
+def _is_low_value_chunk_text(text: str) -> bool:
+    normalized_text = normalize_text(text)
+    if not normalized_text:
+        return True
+    lines = [line.strip() for line in normalized_text.splitlines() if line.strip()]
+    if not lines:
+        return True
+    if all(_is_document_header_line(line) or PURE_STRUCTURAL_LINE_PATTERN.fullmatch(line) for line in lines):
+        return True
+    if len(normalized_text) < 20 and all(not character.isalpha() for character in normalized_text):
+        return True
+    return False
+
+
+def _clean_chunk_text(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    while lines and _is_document_header_line(lines[0]):
+        lines.pop(0)
+    while lines and _is_document_header_line(lines[-1]):
+        lines.pop()
+    while lines and PURE_STRUCTURAL_LINE_PATTERN.fullmatch(normalize_text(lines[0])):
+        lines.pop(0)
+    while lines and PURE_STRUCTURAL_LINE_PATTERN.fullmatch(normalize_text(lines[-1])):
+        lines.pop()
+    return "\n".join(lines).strip()
+
+
+def _looks_like_structured_table_page(lines: list[str]) -> bool:
+    serial_count = sum(1 for line in lines if TABLE_SERIAL_PATTERN.fullmatch(normalize_text(line)))
+    code_count = sum(1 for line in lines if TABLE_CODE_PATTERN.fullmatch(normalize_text(line)))
+    return serial_count >= 2 and code_count >= 2
+
+
+def _build_structured_table_blocks(page: ParsedPage, lines: list[str]) -> list[tuple[str, list[str], str]]:
+    cleaned_lines = [line for line in lines if not _is_document_header_line(line)]
+    blocks: list[tuple[str, list[str], str]] = []
+    current_lines: list[str] = []
+    current_heading_path: list[str] = []
+    last_major_code: str | None = None
+    for line in cleaned_lines:
+        normalized_line = normalize_text(line)
+        if TABLE_SERIAL_PATTERN.fullmatch(normalized_line):
+            if current_lines:
+                blocks.append(("\n".join(current_lines), list(current_heading_path), "appendix" if page.is_appendix else "table"))
+                current_lines = []
+            current_heading_path = [normalized_line]
+            if last_major_code:
+                current_heading_path.append(last_major_code)
+            current_lines.append(line)
+            continue
+        if TABLE_CODE_PATTERN.fullmatch(normalized_line):
+            if re.fullmatch(r"\d{2}\.\d{2}", normalized_line):
+                last_major_code = normalized_line
+            if not current_heading_path:
+                current_heading_path = [normalized_line]
+            elif normalized_line not in current_heading_path:
+                current_heading_path.append(normalized_line)
+            current_lines.append(line)
+            continue
+        if current_lines:
+            current_lines.append(line)
+    if current_lines:
+        blocks.append(("\n".join(current_lines), list(current_heading_path), "appendix" if page.is_appendix else "table"))
+    return blocks
 
 
 @dataclass
@@ -49,14 +140,11 @@ def _build_chunk_record(
     heading_path: list[str],
     chunk_type: str,
 ) -> ChunkRecord:
-    section_markers = extract_section_ids(chunk_text)
-    section_id = next(
-        (marker for marker in section_markers if marker and marker[0].isdigit()),
-        page.section_markers[0] if page.section_markers else None,
-    )
-    subsection_id = next(
-        (marker for marker in section_markers if "." in marker),
-        None,
+    cleaned_chunk_text = _clean_chunk_text(chunk_text)
+    section_id, subsection_id = select_primary_section_markers(
+        cleaned_chunk_text,
+        heading_path=heading_path,
+        page_section_markers=page.section_markers,
     )
     appendix_id = next(
         (marker for marker in page.section_markers if marker.lower().startswith("পরিশিষ্ট")),
@@ -65,7 +153,7 @@ def _build_chunk_record(
     tax_year = page.tax_years[0] if page.tax_years else None
     effective_start, effective_end = _derive_effective_dates(tax_year)
     sro_id = page.sro_ids[0] if page.sro_ids else None
-    normalized_chunk_text = normalize_text(chunk_text)
+    normalized_chunk_text = normalize_text(cleaned_chunk_text)
     return ChunkRecord(
         chunk_id=f"{metadata.doc_id}-p{page.page_no:03d}-c{chunk_index:03d}",
         doc_id=metadata.doc_id,
@@ -82,9 +170,9 @@ def _build_chunk_record(
         sro_id=sro_id,
         chunk_type=chunk_type,
         heading_path=heading_path,
-        original_text=chunk_text.strip(),
+        original_text=cleaned_chunk_text,
         normalized_text=normalized_chunk_text,
-        cross_refs=extract_cross_references(chunk_text),
+        cross_refs=extract_cross_references(cleaned_chunk_text),
     )
 
 
@@ -92,29 +180,84 @@ def _iter_page_blocks(page: ParsedPage) -> Iterable[tuple[str, list[str], str]]:
     lines = [line.strip() for line in page.raw_text.splitlines() if line.strip()]
     if not lines:
         return
+    if _looks_like_structured_table_page(lines):
+        yield from _build_structured_table_blocks(page, lines)
+        return
     active_heading_path = list(page.headings[:1])
     current_lines: list[str] = []
-    current_type = "text"
+    current_type = (
+        "example"
+        if page.is_example
+        else "table"
+        if page.is_table_like
+        else "appendix"
+        if page.is_appendix
+        else "text"
+    )
     for line in lines:
         if line in page.headings:
             if current_lines:
                 yield "\n".join(current_lines), list(active_heading_path), current_type
                 current_lines = []
             active_heading_path = active_heading_path + [line] if line not in active_heading_path else list(active_heading_path)
-            current_type = "section"
+            current_type = (
+                "example"
+                if page.is_example
+                else "table"
+                if page.is_table_like
+                else "appendix"
+                if page.is_appendix
+                else "section"
+            )
             continue
-        if "উদাহরণ" in line or "example" in line.lower() or page.is_example:
+        if ("উদাহরণ" in line or "example" in line.lower()) and not page.is_example:
             if current_lines:
                 yield "\n".join(current_lines), list(active_heading_path), current_type
                 current_lines = []
             current_type = "example"
-        elif page.is_table_like:
-            current_type = "table"
-        elif page.is_appendix:
-            current_type = "appendix"
         current_lines.append(line)
     if current_lines:
         yield "\n".join(current_lines), list(active_heading_path), current_type
+
+
+def _merge_small_blocks(
+    page_blocks: list[tuple[str, list[str], str]],
+    *,
+    min_block_length: int = MIN_BLOCK_LENGTH,
+) -> list[tuple[str, list[str], str]]:
+    merged_blocks: list[tuple[str, list[str], str]] = []
+    pending_text = ""
+    pending_heading_path: list[str] = []
+    pending_type = "text"
+
+    def flush_pending() -> None:
+        nonlocal pending_text, pending_heading_path, pending_type
+        if pending_text.strip():
+            merged_blocks.append((pending_text.strip(), list(pending_heading_path), pending_type))
+        pending_text = ""
+        pending_heading_path = []
+        pending_type = "text"
+
+    for block_text, heading_path, chunk_type in page_blocks:
+        stripped_block = block_text.strip()
+        if not stripped_block:
+            continue
+        if not pending_text:
+            pending_text = stripped_block
+            pending_heading_path = list(heading_path)
+            pending_type = chunk_type
+            continue
+        same_shape = pending_type == chunk_type and pending_heading_path == list(heading_path)
+        if len(pending_text) < min_block_length or len(stripped_block) < min_block_length:
+            if same_shape:
+                pending_text = f"{pending_text}\n{stripped_block}".strip()
+                continue
+        flush_pending()
+        pending_text = stripped_block
+        pending_heading_path = list(heading_path)
+        pending_type = chunk_type
+    flush_pending()
+    return merged_blocks
 
 
 def naive_fixed_chunking(
@@ -150,8 +293,11 @@ def section_aware_chunking(
     chunks: list[ChunkRecord] = []
     chunk_counter = 1
     for page in pages:
-        for block_text, heading_path, chunk_type in _iter_page_blocks(page):
+        page_blocks = list(_iter_page_blocks(page))
+        for block_text, heading_path, chunk_type in _merge_small_blocks(page_blocks):
             for piece in _split_text_with_overlap(block_text, chunk_size):
+                if _is_low_value_chunk_text(piece):
+                    continue
                 chunks.append(
                     _build_chunk_record(
                         page=page,
@@ -220,4 +366,5 @@ def chunk_pages(
         "table_aware": table_aware_chunking,
     }
     chunker = strategies.get(chunking_mode, section_aware_chunking)
-    return chunker(pages, metadata, chunk_size=chunk_size)
+    raw_chunks = chunker(pages, metadata, chunk_size=chunk_size)
+    return [chunk for chunk in raw_chunks if not _is_low_value_chunk_text(chunk.normalized_text)]

@@ -114,5 +114,32 @@ def test_default_mock_generation_is_extractive_and_supported() -> None:
 
     assert result.abstained is False
     assert result.verification_passed is True
-    assert "করহার 10 শতাংশ" in result.answer_text
+    assert "10 শতাংশ" in result.answer_text
+    assert "[C1]" in result.answer_text
+
+
+def test_llm_output_missing_citations_falls_back_to_extractive_answer() -> None:
+    hits = [_hit(chunk_id="c1", text="ধারা 3.1 অনুযায়ী 2025-2026 করহার 10 শতাংশ।")]
+    options = GenerationOptions(
+        provider="openai_compatible",
+        model_name="deepseek-r1:7b",
+        base_url="http://127.0.0.1:11434/v1",
+        api_key=None,
+        max_generation_tokens=256,
+        temperature=0.0,
+        abstention_score_threshold=0.75,
+        verification_enabled=True,
+        fallback_to_mock=True,
+    )
+
+    result = generate_answer(
+        "২০২৫-২০২৬ করবর্ষে ধারা ৩.১ অনুযায়ী করহার কী?",
+        hits,
+        _query(),
+        options,
+        mocked_response='{"answer_sentences":[{"sentence":"২০২৫-২০২৬ করবর্ষে করহার ১০ শতাংশ।","citations":[]}]}',
+    )
+
+    assert result.abstained is False
+    assert result.verification_passed is True
     assert "[C1]" in result.answer_text

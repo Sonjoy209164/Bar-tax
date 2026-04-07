@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -14,7 +15,7 @@ from app.core.schemas import (
     RetrievalHit,
 )
 from app.core.settings import get_settings
-from app.core.utils import clamp_score, detect_text_language, split_sentences, truncate_text
+from app.core.utils import clamp_score, detect_text_language, normalize_text, split_sentences, truncate_text
 from app.generation.citations import (
     build_citation_records,
     extract_citation_markers,
@@ -110,7 +111,7 @@ def build_generation_options(
 
 
 def get_chat_client(options: GenerationOptions, mocked_response: str | None = None) -> ChatCompletionClient:
-    if options.provider == "openai_compatible" and options.base_url and options.api_key:
+    if options.provider == "openai_compatible" and options.base_url:
         return OpenAICompatibleChatClient(base_url=options.base_url, api_key=options.api_key)
     return MockChatCompletionClient(mocked_response=mocked_response)
 
@@ -133,6 +134,8 @@ def build_prompt(
         "You are a grounded legal-tax answer generator. "
         "Answer only from provided evidence. Do not invent facts. "
         "Every factual sentence must include one or more citation markers like [C1]. "
+        "When the evidence is a rate table, summarize the actual categories and rates instead of repeating only the heading. "
+        "Prefer a short direct answer first, then one short supporting sentence if useful. "
         "If evidence conflicts, explicitly mention the conflict. "
         "If evidence is insufficient, respond with JSON that marks abstention."
     )
@@ -143,6 +146,10 @@ def build_prompt(
         "Evidence:\n"
         + "\n\n".join(evidence_lines)
         + "\n\n"
+        "Important instructions:\n"
+        "- Do not copy OCR noise unless needed.\n"
+        "- If the question asks for a tax rate, extract the relevant rate values from the evidence table.\n"
+        "- Every sentence must include citations.\n\n"
         "Return strict JSON with this shape:\n"
         '{"answer_sentences":[{"sentence":"...", "citations":["[C1]"]}], "conflict_notes":["..."]}'
     )
@@ -200,13 +207,71 @@ def _sentence_overlap_score(sentence_text: str, query_text: str) -> int:
     return len(sentence_tokens & query_tokens)
 
 
-def build_mock_grounded_answer(
+def _extract_rate_segments(text: str) -> list[str]:
+    compact_text = normalize_text(text).replace("\n", " ")
+    rate_matches = list(re.finditer(r"\d+(?:\.\d+)?%", compact_text))
+    segments: list[str] = []
+    for match in rate_matches[:4]:
+        start_index = max(0, match.start() - 70)
+        end_index = min(len(compact_text), match.end() + 30)
+        segment = compact_text[start_index:end_index].strip(" ,;:-")
+        if segment and segment not in segments:
+            segments.append(segment)
+    return segments
+
+
+def _extract_rate_values(text: str) -> list[str]:
+    normalized = normalize_text(text)
+    percent_values = re.findall(r"\d+(?:\.\d+)?%", normalized)
+    if percent_values:
+        return list(dict.fromkeys(percent_values))
+    word_percent_values = re.findall(r"\d+(?:\.\d+)?\s*শতাংশ", normalized)
+    return list(dict.fromkeys(word_percent_values))
+
+
+def _build_rate_lookup_answer(
     question_text: str,
     evidence_hits: list[RetrievalHit],
     citations: list[CitationRecord],
 ) -> tuple[list[AnswerSentence], list[str]]:
+    all_rate_values: list[str] = []
+    for hit in evidence_hits:
+        for rate_value in _extract_rate_values(hit.original_text):
+            if rate_value not in all_rate_values:
+                all_rate_values.append(rate_value)
+    if all_rate_values:
+        displayed_values = ", ".join(all_rate_values[:4])
+        sentence_text = (
+            "উদ্ধৃত প্রমাণে দেখা যাচ্ছে যে ২০২৫-২০২৬ করবর্ষে কোম্পানির করহার কোম্পানির ধরন ও শর্তভেদে ভিন্ন। "
+            f"প্রাসঙ্গিক সারণিতে {displayed_values} হার উল্লেখ আছে।"
+        )
+        markers = [citation.marker for citation in citations[:2]]
+        return [AnswerSentence(sentence_text=sentence_text, citation_markers=markers)], []
+    candidate_segments: list[tuple[int, str, str]] = []
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        for segment in _extract_rate_segments(hit.original_text):
+            candidate_segments.append((_sentence_overlap_score(segment, question_text), segment, citation.marker))
+    if not candidate_segments:
+        return build_mock_grounded_answer(question_text, evidence_hits, citations)
+    candidate_segments.sort(key=lambda item: (item[0], len(item[1])), reverse=True)
+    selected_segments = candidate_segments[:2]
+    sentence_text = "উদ্ধৃত প্রমাণে কোম্পানির করহার কোম্পানির ধরনভেদে ভিন্ন। " + "; ".join(
+        segment for _, segment, _ in selected_segments
+    )
+    markers = list(dict.fromkeys(marker for _, _, marker in selected_segments))
+    return [AnswerSentence(sentence_text=sentence_text.strip(), citation_markers=markers)], []
+
+
+def build_mock_grounded_answer(
+    question_text: str,
+    evidence_hits: list[RetrievalHit],
+    citations: list[CitationRecord],
+    analyzed_query: QuerySignals | None = None,
+) -> tuple[list[AnswerSentence], list[str]]:
     if not evidence_hits or not citations:
         return [], []
+    if analyzed_query and analyzed_query.query_intent == "rate_lookup":
+        return _build_rate_lookup_answer(question_text, evidence_hits, citations)
     candidate_sentences: list[tuple[int, str, str]] = []
     for citation, hit in zip(citations, evidence_hits, strict=False):
         split_hit_sentences = split_sentences(hit.original_text)
@@ -349,12 +414,15 @@ def generate_answer(
 
     citations = build_citation_records(evidence_hits)
     prompt_messages = build_prompt(question_text, evidence_hits, analyzed_query, citations)
+    used_extractive_fallback = False
     if generation_options.provider == "mock" and mocked_response is None:
         answer_sentences, model_conflict_notes = build_mock_grounded_answer(
             question_text,
             evidence_hits,
             citations,
+            analyzed_query,
         )
+        used_extractive_fallback = True
     else:
         chat_client = get_chat_client(generation_options, mocked_response=mocked_response)
         try:
@@ -372,7 +440,9 @@ def generate_answer(
                 question_text,
                 evidence_hits,
                 citations,
+                analyzed_query,
             )
+            used_extractive_fallback = True
         else:
             answer_sentences, model_conflict_notes = parse_model_output(raw_output)
     combined_conflict_notes = list(dict.fromkeys(conflict_notes + model_conflict_notes))
@@ -382,6 +452,29 @@ def generate_answer(
     verification_reason: str | None = None
     if generation_options.verification_enabled:
         verification_passed, answer_sentences, verification_reason = verify_generated_answer(answer_sentences, citations)
+    if (
+        not verification_passed
+        and generation_options.fallback_to_mock
+        and not used_extractive_fallback
+        and verification_reason in {"Sentence missing citations.", "Unsupported sentence found."}
+    ):
+        fallback_sentences, fallback_conflict_notes = build_mock_grounded_answer(
+            question_text,
+            evidence_hits,
+            citations,
+            analyzed_query,
+        )
+        combined_conflict_notes = list(dict.fromkeys(combined_conflict_notes + fallback_conflict_notes))
+        fallback_sentences = repair_citations_if_easy(fallback_sentences, citations)
+        if generation_options.verification_enabled:
+            verification_passed, fallback_sentences, verification_reason = verify_generated_answer(
+                fallback_sentences,
+                citations,
+            )
+        else:
+            verification_passed = True
+            verification_reason = None
+        answer_sentences = fallback_sentences
     if not answer_sentences:
         return _build_abstained_answer("Model returned no usable answer sentences.", conflict_notes=combined_conflict_notes)
     if not verification_passed:

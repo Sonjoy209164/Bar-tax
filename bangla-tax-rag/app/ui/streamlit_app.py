@@ -26,7 +26,7 @@ def initialize_session_state() -> None:
         "last_query_response": None,
         "last_ingest_response": None,
         "last_build_index_response": None,
-        "question_text": "২০২৫-২০২৬ করবর্ষে ধারা ৩.১ অনুযায়ী করহার কী?",
+        "question_text": "২০২৫-২০২৬ করবর্ষে কোম্পানির করহার কী?",
         "retrieval_mode": settings.retrieval_mode,
         "tax_year": "",
         "top_k": settings.top_k,

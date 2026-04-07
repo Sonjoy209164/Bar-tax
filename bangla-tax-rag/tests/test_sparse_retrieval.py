@@ -101,6 +101,15 @@ def test_query_normalization_and_signal_extraction() -> None:
     assert signals.query_type == "example"
 
 
+def test_query_without_section_does_not_treat_tax_year_as_section() -> None:
+    signals = preprocess_query("২০২৫-২০২৬ করবর্ষে কোম্পানির করহার কী?")
+
+    assert signals.tax_year == "2025-2026"
+    assert signals.section_reference is None
+    assert signals.section_id is None
+    assert signals.subsection_id is None
+
+
 def test_filtering_by_tax_year() -> None:
     filtered = filter_chunk_records(_dataset(), tax_year="2025-2026")
 

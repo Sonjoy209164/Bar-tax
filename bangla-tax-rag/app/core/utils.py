@@ -17,6 +17,26 @@ QUERY_TYPE_PATTERNS = {
 }
 
 
+def is_year_like_marker(marker: str) -> bool:
+    normalized_marker = normalize_bangla_digits(marker).strip()
+    if re.fullmatch(r"20\d{2}", normalized_marker):
+        return True
+    if re.fullmatch(r"20\d{2}\s*[-–]\s*20\d{2}", normalized_marker):
+        return True
+    return False
+
+
+def clean_section_marker(marker: str) -> str:
+    normalized_marker = normalize_text(marker)
+    cleaned_marker = re.sub(
+        r"^(?:ধারা|উপ-ধারা|উপধারা|পরিশিষ্ট|অনুচ্ছেদ|section|article)\s*",
+        "",
+        normalized_marker,
+        flags=re.IGNORECASE,
+    )
+    return cleaned_marker.strip(" .):;-")
+
+
 def ensure_directory(path_value: str) -> Path:
     path = Path(path_value)
     path.mkdir(parents=True, exist_ok=True)
@@ -58,11 +78,65 @@ def extract_section_ids(text: str) -> list[str]:
     return list(dict.fromkeys(cleaned_matches))
 
 
+def extract_query_section_references(text: str) -> list[str]:
+    normalized_text = normalize_text(text)
+    matches: list[str] = []
+    contextual_patterns = [
+        r"(?:ধারা|উপ-ধারা|উপধারা|অনুচ্ছেদ|section|article)\s*([0-9]+(?:\.[0-9]+)*)",
+    ]
+    for pattern in contextual_patterns:
+        matches.extend(re.findall(pattern, normalized_text, flags=re.IGNORECASE))
+    matches.extend(re.findall(r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)*)\b", normalized_text))
+    cleaned_matches = [clean_section_marker(match) for match in matches if clean_section_marker(match)]
+    return [match for match in dict.fromkeys(cleaned_matches) if not is_year_like_marker(match)]
+
+
+def select_primary_section_markers(
+    text: str,
+    *,
+    heading_path: list[str] | None = None,
+    page_section_markers: list[str] | None = None,
+) -> tuple[str | None, str | None]:
+    text_markers: list[str] = []
+    fallback_markers: list[str] = []
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in lines[:8]:
+        text_markers.extend(extract_query_section_references(line))
+        heading_marker = detect_heading_marker(line)
+        if heading_marker:
+            text_markers.append(clean_section_marker(heading_marker))
+    for heading in reversed(heading_path or []):
+        fallback_markers.extend(extract_query_section_references(heading))
+        heading_marker = detect_heading_marker(heading)
+        if heading_marker:
+            fallback_markers.append(clean_section_marker(heading_marker))
+    for marker in page_section_markers or []:
+        cleaned_marker = clean_section_marker(marker)
+        if cleaned_marker:
+            fallback_markers.append(cleaned_marker)
+    candidate_markers = text_markers if text_markers else fallback_markers
+    filtered_markers: list[str] = []
+    for marker in candidate_markers:
+        if not marker or is_year_like_marker(marker):
+            continue
+        if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", marker):
+            continue
+        if marker not in filtered_markers:
+            filtered_markers.append(marker)
+    dotted_markers = [marker for marker in filtered_markers if "." in marker]
+    dotted_markers.sort(key=lambda marker: (marker.count("."), len(marker)), reverse=True)
+    subsection_id = dotted_markers[0] if dotted_markers else None
+    if subsection_id:
+        return subsection_id.split(".", maxsplit=1)[0], subsection_id
+    section_id = next((marker for marker in filtered_markers if marker.isdigit()), None)
+    return section_id, None
+
+
 def extract_sro_ids(text: str) -> list[str]:
     normalized_text = normalize_text(text)
     patterns = [
-        r"(?:এস\.?\s*আর\.?\s*ও\.?|S\.?\s*R\.?\s*O\.?)\s*(?:নং|No\.?|NO\.?)?\s*[-:()]?\s*[A-Za-z0-9/-]+",
-        r"(?:এস\.?\s*আর\.?\s*ও\.?|S\.?\s*R\.?\s*O\.?)\s*[-:()]?\s*[A-Za-z0-9/-]+",
+        r"(?<![A-Za-z])(?:এস\.?\s*আর\.?\s*ও\.?|S\.?\s*R\.?\s*O\.?)(?![A-Za-z])\s*(?:নং|No\.?|NO\.?)?\s*[-:()]?\s*[A-Za-z0-9/-]+",
+        r"(?<![A-Za-z])(?:এস\.?\s*আর\.?\s*ও\.?|S\.?\s*R\.?\s*O\.?)(?![A-Za-z])\s*[-:()]?\s*[A-Za-z0-9/-]+",
     ]
     matches: list[str] = []
     for pattern in patterns:
@@ -131,7 +205,7 @@ def detect_query_type(text: str) -> str:
 def preprocess_query(query: str) -> QuerySignals:
     normalized_query = normalize_text(query)
     tax_years = extract_tax_years(query)
-    section_ids = extract_section_ids(query)
+    section_ids = extract_query_section_references(query)
     appendix_ids = extract_appendix_ids(query)
     sro_ids = extract_sro_ids(query)
     section_id: str | None = None

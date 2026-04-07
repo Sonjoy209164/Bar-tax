@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 
 from app.core.schemas import HybridRetrievalResponse, QuerySignals, RetrievalHit
@@ -8,6 +9,9 @@ from app.retrieval.filters import authority_value, deduplicate_retrieval_hits, f
 from app.retrieval.sparse import DEFAULT_INDEX_DIR, load_sparse_index, sparse_search
 
 logger = logging.getLogger(__name__)
+
+
+COMPANY_QUERY_PATTERN = re.compile(r"(কোম্প|কম্প|মকাম্প|ককাম্প|company)", re.IGNORECASE)
 
 
 def reciprocal_rank_fusion(
@@ -36,6 +40,10 @@ def reciprocal_rank_fusion(
 def apply_hybrid_post_ranking(hit: RetrievalHit, analyzed_query: QuerySignals) -> RetrievalHit:
     adjusted_hit = hit.model_copy(deep=True)
     adjusted_score = adjusted_hit.score
+    sparse_source_score = float(adjusted_hit.intermediate_scores.get("sparse_score", 0.0) or 0.0)
+    dense_source_score = float(adjusted_hit.intermediate_scores.get("dense_score", 0.0) or 0.0)
+    adjusted_score += min(sparse_source_score, 20.0) * 0.12
+    adjusted_score += min(dense_source_score, 10.0) * 0.04
     if analyzed_query.tax_year and adjusted_hit.tax_year == analyzed_query.tax_year:
         adjusted_score += 1.4
     if analyzed_query.section_id and adjusted_hit.section_id == analyzed_query.section_id:
@@ -68,6 +76,12 @@ def apply_hybrid_post_ranking(hit: RetrievalHit, analyzed_query: QuerySignals) -
         normalized_text = adjusted_hit.normalized_text
         if "করহার" not in normalized_text and "কর হার" not in normalized_text:
             adjusted_score -= 1.0
+    searchable_text = f"{' '.join(adjusted_hit.heading_path)} {adjusted_hit.normalized_text}"
+    if COMPANY_QUERY_PATTERN.search(analyzed_query.normalized_query):
+        if COMPANY_QUERY_PATTERN.search(searchable_text):
+            adjusted_score += 1.1
+        else:
+            adjusted_score -= 0.6
     adjusted_hit.score = round(adjusted_score, 6)
     adjusted_hit.intermediate_scores["postrank_score"] = adjusted_hit.score
     return adjusted_hit

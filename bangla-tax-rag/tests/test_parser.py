@@ -22,6 +22,7 @@ def test_normalization_helpers() -> None:
     assert extract_tax_years(sample_text) == ["2025-2026"]
     assert "ধারা 3.1" in extract_section_ids(sample_text)
     assert extract_sro_ids(sample_text) == ["এস.আর.ও. নং 123"]
+    assert extract_sro_ids("Seeds and roots for sowing") == []
 
 
 def test_parse_document_smoke(tmp_path: Path) -> None:

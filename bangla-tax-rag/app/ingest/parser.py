@@ -16,12 +16,21 @@ from app.core.utils import (
 
 APPENDIX_PATTERN = re.compile(r"(পরিশিষ্ট|appendix|annex|schedule)", re.IGNORECASE)
 EXAMPLE_PATTERN = re.compile(r"(উদাহরণ|example|illustration)", re.IGNORECASE)
+TABLE_CODE_PATTERN = re.compile(r"^\d{2,4}(?:\.\d{2,4}){1,3}$")
+TABLE_SERIAL_PATTERN = re.compile(r"^\d+\.$")
+
+try:
+    import pymupdf4llm
+except Exception:  # pragma: no cover - optional dependency
+    pymupdf4llm = None
 
 
 def _looks_like_table(text: str) -> bool:
     lines = [line.rstrip() for line in text.splitlines() if line.strip()]
     if len(lines) < 3:
         return False
+    serial_count = sum(1 for line in lines if TABLE_SERIAL_PATTERN.fullmatch(normalize_text(line)))
+    code_count = sum(1 for line in lines if TABLE_CODE_PATTERN.fullmatch(normalize_text(line)))
     repeated_spacing_lines = sum(1 for line in lines if re.search(r"\S\s{3,}\S", line))
     dense_numeric_lines = sum(
         1
@@ -33,6 +42,8 @@ def _looks_like_table(text: str) -> bool:
         re.search(r"\d", line) for line in lines[2:]
     )
     return (
+        (serial_count >= 2 and code_count >= 2)
+        or
         repeated_spacing_lines >= max(2, len(lines) // 3)
         or dense_numeric_lines >= max(2, len(lines) // 2)
         or (tabular_word_lines >= 2 and has_header_and_data)
@@ -40,6 +51,13 @@ def _looks_like_table(text: str) -> bool:
 
 
 def _extract_page_text(plumber_page: pdfplumber.page.Page, fitz_page: fitz.Page) -> str:
+    if pymupdf4llm is not None:
+        try:
+            markdown_text = pymupdf4llm.to_markdown(fitz_page.parent, pages=[fitz_page.number]) or ""
+            if len(markdown_text.strip()) >= 40:
+                return normalize_whitespace(markdown_text)
+        except Exception:
+            pass
     plumber_text = plumber_page.extract_text(x_tolerance=2, y_tolerance=3) or ""
     fitz_text = fitz_page.get_text("text") or ""
     candidate_text = plumber_text if len(plumber_text.strip()) >= len(fitz_text.strip()) else fitz_text

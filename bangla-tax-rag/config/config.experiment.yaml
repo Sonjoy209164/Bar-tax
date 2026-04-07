@@ -1,0 +1,8 @@
+experiment:
+  name: baseline-retrieval
+  notes: Minimal starter experiment configuration.
+retrieval:
+  mode: hybrid
+  top_k: 10
+evaluation:
+  enabled: true

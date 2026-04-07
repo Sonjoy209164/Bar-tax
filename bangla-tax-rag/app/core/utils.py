@@ -15,6 +15,20 @@ QUERY_TYPE_PATTERNS = {
     "calculation": re.compile(r"(calculate|calculation|গণনা|compute)", re.IGNORECASE),
     "comparison": re.compile(r"(compare|comparison|তুলনা|versus|পার্থক্য)", re.IGNORECASE),
 }
+DOCUMENT_HEADER_PATTERN = re.compile(r"আয়কর\s+পররপত্র\s+20\d{2}\s*-\s*20\d{2}\s*\|\s*\d+", re.IGNORECASE)
+TABLE_HEADER_LINES = {
+    "ক্রমিক নং",
+    "মির োনোি",
+    "মিরোনাম",
+    "এইচ এস ককোড",
+    "এইচ এস কোড",
+    "বণডনা",
+    "বর্ণনা",
+    "(1)",
+    "(2)",
+    "(3)",
+    "(4)",
+}
 
 
 def is_year_like_marker(marker: str) -> bool:
@@ -258,6 +272,64 @@ def detect_text_language(text: str) -> str:
 
 def clamp_score(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
     return max(minimum, min(maximum, value))
+
+
+def _looks_like_code_or_serial_line(text: str) -> bool:
+    normalized_line = normalize_text(text)
+    if not normalized_line:
+        return False
+    return bool(
+        re.fullmatch(r"\d+\.", normalized_line)
+        or re.fullmatch(r"\d+(?:\.\d+){1,3}", normalized_line)
+        or re.fullmatch(r"\(\d+\)", normalized_line)
+    )
+
+
+def _clean_generation_lines(text: str) -> list[str]:
+    cleaned_lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = normalize_whitespace(normalize_bangla_digits(raw_line))
+        if not line:
+            continue
+        if DOCUMENT_HEADER_PATTERN.search(line):
+            continue
+        if line in TABLE_HEADER_LINES:
+            continue
+        cleaned_lines.append(line)
+    return cleaned_lines
+
+
+def clean_bangla_ocr_text(text: str) -> str:
+    cleaned_lines = _clean_generation_lines(text)
+    if not cleaned_lines:
+        return ""
+
+    merged_lines: list[str] = []
+    for line in cleaned_lines:
+        if not merged_lines:
+            merged_lines.append(line)
+            continue
+        previous_line = merged_lines[-1]
+        if _looks_like_code_or_serial_line(line):
+            merged_lines.append(line)
+            continue
+        if _looks_like_code_or_serial_line(previous_line):
+            merged_lines.append(line)
+            continue
+        if previous_line.endswith(("।", ".", "?", "!", ":", ";", "%")):
+            merged_lines.append(line)
+            continue
+        if re.match(r"^[A-Za-z0-9]", line):
+            merged_lines.append(line)
+            continue
+        merged_lines[-1] = f"{previous_line} {line}".strip()
+
+    cleaned_text = "\n".join(merged_lines)
+    cleaned_text = re.sub(r"\s+([,.;:!?।])", r"\1", cleaned_text)
+    cleaned_text = re.sub(r"([A-Za-z])\s*\n\s*([A-Za-z])", r"\1 \2", cleaned_text)
+    cleaned_text = re.sub(r"(?<=\d)\s+(?=%)", "", cleaned_text)
+    cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text)
+    return cleaned_text.strip()
 
 
 def ensure_file_exists(path_value: str) -> Path:

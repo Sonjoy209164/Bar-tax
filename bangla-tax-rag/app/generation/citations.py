@@ -1,7 +1,7 @@
 import re
 
 from app.core.schemas import AnswerSentence, CitationRecord, RetrievalHit
-from app.core.utils import truncate_text
+from app.core.utils import clean_bangla_ocr_text, truncate_text
 
 MARKER_PATTERN = re.compile(r"\[(C\d+)\]")
 
@@ -9,6 +9,7 @@ MARKER_PATTERN = re.compile(r"\[(C\d+)\]")
 def build_citation_records(evidence_hits: list[RetrievalHit]) -> list[CitationRecord]:
     citation_records: list[CitationRecord] = []
     for index, hit in enumerate(evidence_hits, start=1):
+        cleaned_snippet = clean_bangla_ocr_text(hit.original_text) or hit.original_text
         citation_records.append(
             CitationRecord(
                 marker=f"[C{index}]",
@@ -17,7 +18,7 @@ def build_citation_records(evidence_hits: list[RetrievalHit]) -> list[CitationRe
                 page_no=hit.page_no,
                 section_id=hit.section_id,
                 subsection_id=hit.subsection_id,
-                evidence_snippet=truncate_text(hit.original_text, max_length=320),
+                evidence_snippet=truncate_text(cleaned_snippet, max_length=320),
             )
         )
     return citation_records

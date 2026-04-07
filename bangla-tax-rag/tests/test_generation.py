@@ -143,3 +143,20 @@ def test_llm_output_missing_citations_falls_back_to_extractive_answer() -> None:
     assert result.abstained is False
     assert result.verification_passed is True
     assert "[C1]" in result.answer_text
+
+
+def test_mock_generation_cleans_bangla_ocr_noise_before_answering() -> None:
+    noisy_text = (
+        "আয়কর পররপত্র ২০২৫- ২০২৬ | 17\n"
+        "ক্রমিক নং\n"
+        "ধারা 3.1 অনুযায়ী\n"
+        "করহার 10 শতাংশ।"
+    )
+    hits = [_hit(chunk_id="c1", text=noisy_text)]
+
+    result = generate_answer("২০২৫-২০২৬ করবর্ষে ধারা ৩.১ অনুযায়ী করহার কী?", hits, _query(), _options())
+
+    assert result.abstained is False
+    assert "আয়কর পররপত্র" not in result.answer_text
+    assert "ক্রমিক নং" not in result.answer_text
+    assert "10 শতাংশ" in result.answer_text

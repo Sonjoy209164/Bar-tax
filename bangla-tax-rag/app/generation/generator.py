@@ -15,7 +15,14 @@ from app.core.schemas import (
     RetrievalHit,
 )
 from app.core.settings import get_settings
-from app.core.utils import clamp_score, detect_text_language, normalize_text, split_sentences, truncate_text
+from app.core.utils import (
+    clamp_score,
+    clean_bangla_ocr_text,
+    detect_text_language,
+    normalize_text,
+    split_sentences,
+    truncate_text,
+)
 from app.generation.citations import (
     build_citation_records,
     extract_citation_markers,
@@ -25,6 +32,11 @@ from app.generation.citations import (
 from app.retrieval.filters import authority_value
 
 logger = logging.getLogger(__name__)
+
+
+def _clean_evidence_text(text: str) -> str:
+    cleaned_text = clean_bangla_ocr_text(text)
+    return cleaned_text or normalize_text(text)
 
 
 @dataclass
@@ -124,10 +136,11 @@ def build_prompt(
 ) -> list[ChatMessage]:
     evidence_lines = []
     for citation, hit in zip(citations, evidence_hits, strict=False):
+        cleaned_text = _clean_evidence_text(hit.original_text)
         evidence_lines.append(
             f"{citation.marker} chunk_id={hit.chunk_id} doc={hit.doc_title} page={hit.page_no} "
             f"section={hit.section_id or '-'} subsection={hit.subsection_id or '-'}\n"
-            f"Evidence: {truncate_text(hit.original_text, max_length=500)}"
+            f"Evidence: {truncate_text(cleaned_text, max_length=500)}"
         )
     answer_language = "Bangla" if detect_text_language(question_text) == "bangla" else "the same language as the question"
     system_prompt = (
@@ -208,7 +221,7 @@ def _sentence_overlap_score(sentence_text: str, query_text: str) -> int:
 
 
 def _extract_rate_segments(text: str) -> list[str]:
-    compact_text = normalize_text(text).replace("\n", " ")
+    compact_text = _clean_evidence_text(text).replace("\n", " ")
     rate_matches = list(re.finditer(r"\d+(?:\.\d+)?%", compact_text))
     segments: list[str] = []
     for match in rate_matches[:4]:
@@ -221,7 +234,7 @@ def _extract_rate_segments(text: str) -> list[str]:
 
 
 def _extract_rate_values(text: str) -> list[str]:
-    normalized = normalize_text(text)
+    normalized = _clean_evidence_text(text)
     percent_values = re.findall(r"\d+(?:\.\d+)?%", normalized)
     if percent_values:
         return list(dict.fromkeys(percent_values))
@@ -274,13 +287,13 @@ def build_mock_grounded_answer(
         return _build_rate_lookup_answer(question_text, evidence_hits, citations)
     candidate_sentences: list[tuple[int, str, str]] = []
     for citation, hit in zip(citations, evidence_hits, strict=False):
-        split_hit_sentences = split_sentences(hit.original_text)
+        split_hit_sentences = split_sentences(_clean_evidence_text(hit.original_text))
         if not split_hit_sentences:
             continue
         for sentence in split_hit_sentences:
             candidate_sentences.append((_sentence_overlap_score(sentence, question_text), sentence.strip(), citation.marker))
     if not candidate_sentences:
-        fallback_sentence = truncate_text(evidence_hits[0].original_text, max_length=220)
+        fallback_sentence = truncate_text(_clean_evidence_text(evidence_hits[0].original_text), max_length=220)
         return ([AnswerSentence(sentence_text=fallback_sentence, citation_markers=[citations[0].marker])], [])
     candidate_sentences.sort(key=lambda item: (item[0], len(item[1])), reverse=True)
     best_score, best_sentence, best_marker = candidate_sentences[0]

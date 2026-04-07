@@ -47,3 +47,25 @@ def test_citation_mapping_and_marker_extraction() -> None:
     assert citations[0].marker == "[C1]"
     assert citation_map["[C2]"].chunk_id == "chunk-b"
     assert markers == ["[C1]", "[C2]"]
+
+
+def test_citation_records_clean_bangla_ocr_noise() -> None:
+    noisy_hit = _hit(
+        "chunk-clean",
+        page_no=17,
+    ).model_copy(
+        update={
+            "original_text": (
+                "আয়কর পররপত্র ২০২৫- ২০২৬ | 17\n"
+                "ক্রমিক নং\n"
+                "ধারা 3.1 অনুযায়ী\n"
+                "করহার 10 শতাংশ"
+            )
+        }
+    )
+
+    citations = build_citation_records([noisy_hit])
+
+    assert "আয়কর পররপত্র" not in citations[0].evidence_snippet
+    assert "ক্রমিক নং" not in citations[0].evidence_snippet
+    assert "করহার 10 শতাংশ" in citations[0].evidence_snippet

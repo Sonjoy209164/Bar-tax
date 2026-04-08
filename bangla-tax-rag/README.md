@@ -498,9 +498,9 @@ cd "/home/sonjoy/Bar tax/bangla-tax-rag" && .venv/bin/python scripts/merge_annot
 
 Related files:
 
-- [docs/dataset.md](/home/sonjoy/Bar%20tax/bangla-tax-rag/docs/dataset.md)
-- [data/templates/annotation_template.jsonl](/home/sonjoy/Bar%20tax/bangla-tax-rag/data/templates/annotation_template.jsonl)
-- [config/ablation.yaml](/home/sonjoy/Bar%20tax/bangla-tax-rag/config/ablation.yaml)
+- [docs/dataset.md](docs/dataset.md)
+- [data/templates/annotation_template.jsonl](data/templates/annotation_template.jsonl)
+- [config/ablation.yaml](config/ablation.yaml)
 
 ## Evaluation And Ablation Workflow
 
@@ -573,10 +573,10 @@ Most bad answers in this repo come from weak chunking or wrong evidence selectio
 
 ## Additional Documentation
 
-- [docs/architecture.md](/home/sonjoy/Bar%20tax/bangla-tax-rag/docs/architecture.md)
-- [docs/methodology.md](/home/sonjoy/Bar%20tax/bangla-tax-rag/docs/methodology.md)
-- [docs/experiments.md](/home/sonjoy/Bar%20tax/bangla-tax-rag/docs/experiments.md)
-- [docs/dataset.md](/home/sonjoy/Bar%20tax/bangla-tax-rag/docs/dataset.md)
+- [Architecture](docs/architecture.md)
+- [Methodology](docs/methodology.md)
+- [Experiments](docs/experiments.md)
+- [Dataset](docs/dataset.md)
 
 ## Research-Grade Checklist
 

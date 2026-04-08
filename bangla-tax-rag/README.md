@@ -67,6 +67,51 @@ The practical workflow is:
 
 For this repo, retrieval quality should be treated as the first research variable. If chunking is weak, generation will not rescue the system.
 
+## Flow Diagrams
+
+### System Workflow
+
+```mermaid
+flowchart LR
+    A[Source PDF] --> B{Need OCR?}
+    B -- Yes --> C[OCRmyPDF + Tesseract]
+    B -- No --> D[Direct Parsing]
+    C --> D
+    D --> E[Parsed Pages]
+    E --> F[Normalization]
+    F --> G[Chunking]
+    G --> H[Chunk JSONL]
+    H --> I[Sparse Index]
+    H --> J[Dense Placeholder Index]
+    I --> K[Retrieval]
+    J --> K
+    K --> L[Evidence Pack]
+    L --> M[Grounded Generation]
+    L --> N[Retrieval-only Analysis]
+    M --> O[Citations + Verification]
+    O --> P[Answer or Abstain]
+    P --> Q[FastAPI / Streamlit / Evaluation]
+    N --> Q
+```
+
+### Research Loop
+
+```mermaid
+flowchart TD
+    A[Select Document Set] --> B[Ingest and Chunk]
+    B --> C[Inspect Chunks]
+    C --> D[Build Indexes]
+    D --> E[Run Retrieval Baselines]
+    E --> F[Inspect Failures]
+    F --> G{Chunking Good Enough?}
+    G -- No --> B
+    G -- Yes --> H[Enable Grounded Generation]
+    H --> I[Build Annotation Candidates]
+    I --> J[Create Gold Dataset]
+    J --> K[Run Evaluation]
+    K --> L[Ablations and Error Analysis]
+```
+
 ## System Pipeline
 
 ### 1. Ingestion

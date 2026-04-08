@@ -2,6 +2,27 @@
 
 `bangla-tax-rag` is organized as a local research stack for tax and legal document QA.
 
+## High-Level Flow
+
+```mermaid
+flowchart LR
+    A[PDF Corpus] --> B[Parser Layer]
+    B --> C[Normalized Pages]
+    C --> D[Chunker]
+    D --> E[Chunk Records JSONL]
+    E --> F[Sparse Index]
+    E --> G[Dense Baseline Index]
+    F --> H[Retriever]
+    G --> H
+    H --> I[Evidence Pack Builder]
+    I --> J[Grounded Generator]
+    I --> K[Retrieval Inspection]
+    J --> L[Verification + Citations]
+    L --> M[Answer / Abstention]
+    K --> N[API / UI / Eval]
+    M --> N
+```
+
 ## Pipeline
 
 1. Ingestion
@@ -18,6 +39,35 @@
    Grounded generation uses retrieved evidence only, returns sentence-level citations, verifies support, and abstains when evidence is weak or conflicting.
 7. API and UI
    FastAPI exposes the local workflow, and Streamlit provides a practical research interface.
+
+## Query Execution Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant UI as Streamlit or CLI
+    participant API as FastAPI
+    participant QA as Query Analysis
+    participant R as Sparse / Dense / Hybrid Retrieval
+    participant E as Evidence Builder
+    participant G as Generator
+    participant V as Verifier
+
+    U->>UI: Submit question
+    UI->>API: POST /query
+    API->>QA: preprocess_query()
+    QA-->>API: query signals
+    API->>R: retrieve candidates
+    R-->>API: ranked hits
+    API->>E: build evidence pack
+    E-->>API: final hits + conflict notes
+    API->>G: generate_answer()
+    G->>V: verify citations and support
+    V-->>G: pass or fail
+    G-->>API: answer or abstention
+    API-->>UI: structured response
+    UI-->>U: answer, citations, hits
+```
 
 ## Main Modules
 

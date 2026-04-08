@@ -1,5 +1,8 @@
 import re
+import logging
+import subprocess
 from pathlib import Path
+from functools import lru_cache
 
 import fitz
 import pdfplumber
@@ -18,6 +21,11 @@ APPENDIX_PATTERN = re.compile(r"(পরিশিষ্ট|appendix|annex|schedul
 EXAMPLE_PATTERN = re.compile(r"(উদাহরণ|example|illustration)", re.IGNORECASE)
 TABLE_CODE_PATTERN = re.compile(r"^\d{2,4}(?:\.\d{2,4}){1,3}$")
 TABLE_SERIAL_PATTERN = re.compile(r"^\d+\.$")
+MARKDOWN_TABLE_SEPARATOR = re.compile(r"^\|?(?:\s*:?-{3,}:?\s*\|)+\s*$")
+BAD_GLYPH_PATTERN = re.compile(r"[·�]")
+TABLE_ROW_PATTERN = re.compile(r"^\|.+\|$")
+
+logger = logging.getLogger(__name__)
 
 try:
     import pymupdf4llm
@@ -50,18 +58,138 @@ def _looks_like_table(text: str) -> bool:
     )
 
 
-def _extract_page_text(plumber_page: pdfplumber.page.Page, fitz_page: fitz.Page) -> str:
-    if pymupdf4llm is not None:
-        try:
-            markdown_text = pymupdf4llm.to_markdown(fitz_page.parent, pages=[fitz_page.number]) or ""
-            if len(markdown_text.strip()) >= 40:
-                return normalize_whitespace(markdown_text)
-        except Exception:
-            pass
-    plumber_text = plumber_page.extract_text(x_tolerance=2, y_tolerance=3) or ""
-    fitz_text = fitz_page.get_text("text") or ""
-    candidate_text = plumber_text if len(plumber_text.strip()) >= len(fitz_text.strip()) else fitz_text
-    return normalize_whitespace(candidate_text)
+def _clean_markdown_text(markdown_text: str) -> str:
+    cleaned_lines: list[str] = []
+    normalized_text = markdown_text.replace("<br>", "\n")
+    for raw_line in normalized_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if MARKDOWN_TABLE_SEPARATOR.fullmatch(line):
+            continue
+        line = re.sub(r"^#{1,6}\s*", "", line)
+        line = line.replace("**", "").replace("__", "")
+        line = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"\1", line)
+        if TABLE_ROW_PATTERN.fullmatch(line):
+            cells = [cell.strip() for cell in line.strip("|").split("|")]
+            cells = [cell for cell in cells if cell and cell != " "]
+            if cells:
+                line = " | ".join(cells)
+        line = re.sub(r"\s+\|\s+", " | ", line)
+        line = re.sub(r"\s{2,}", " ", line)
+        if line:
+            cleaned_lines.append(line)
+    return normalize_whitespace("\n".join(cleaned_lines))
+
+
+@lru_cache(maxsize=4)
+def _extract_pymupdf4llm_document(pdf_path_str: str) -> dict[int, str]:
+    if pymupdf4llm is None:
+        return {}
+    try:
+        page_chunks = pymupdf4llm.to_markdown(
+            pdf_path_str,
+            ignore_images=True,
+            page_chunks=True,
+            show_progress=False,
+            page_separators=False,
+            header=False,
+            footer=False,
+        ) or []
+    except Exception as exc:
+        logger.debug("pymupdf4llm document extraction failed for %s: %s", pdf_path_str, exc)
+        return {}
+    extracted_pages: dict[int, str] = {}
+    for page_index, page_chunk in enumerate(page_chunks):
+        if not isinstance(page_chunk, dict):
+            continue
+        extracted_pages[page_index] = _clean_markdown_text(str(page_chunk.get("text") or ""))
+    return extracted_pages
+
+
+def _extract_with_pymupdf4llm(pdf_path: Path, page_number: int) -> str:
+    if pymupdf4llm is None:
+        return ""
+    return _extract_pymupdf4llm_document(str(pdf_path)).get(page_number, "")
+
+
+@lru_cache(maxsize=4)
+def _extract_pdftotext_document(pdf_path_str: str) -> dict[int, str]:
+    try:
+        completed_process = subprocess.run(
+            ["pdftotext", "-layout", pdf_path_str, "-"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        logger.debug("pdftotext unavailable for %s: %s", pdf_path_str, exc)
+        return {}
+    if completed_process.returncode != 0:
+        logger.debug("pdftotext extraction failed for %s: %s", pdf_path_str, completed_process.stderr.strip())
+        return {}
+    page_texts = completed_process.stdout.split("\f")
+    return {
+        page_index: normalize_whitespace(page_text)
+        for page_index, page_text in enumerate(page_texts)
+        if normalize_whitespace(page_text)
+    }
+
+
+def _extract_with_pdftotext(pdf_path: Path, page_number: int) -> str:
+    return _extract_pdftotext_document(str(pdf_path)).get(page_number, "")
+
+
+def _score_extracted_text(text: str) -> float:
+    normalized = normalize_whitespace(text)
+    if not normalized:
+        return float("-inf")
+    bangla_char_count = len(re.findall(r"[\u0980-\u09FF]", normalized))
+    ascii_word_count = len(re.findall(r"[A-Za-z]{2,}", normalized))
+    heading_count = len(re.findall(r"(^|\n)(?:\d+(?:\.\d+)*|ধারা\s*\d+(?:\.\d+)*)", normalized))
+    table_signal_count = len(re.findall(r"\b\d{2,4}(?:\.\d{2,4}){1,3}\b", normalized))
+    bad_glyph_count = len(BAD_GLYPH_PATTERN.findall(normalized))
+    single_char_line_count = sum(1 for line in normalized.splitlines() if len(line.strip()) == 1)
+    markdown_pipe_penalty = normalized.count("|") * 0.05
+    markdown_heading_bonus = normalized.count("## ") * 1.2
+    return (
+        len(normalized) * 0.01
+        + bangla_char_count * 0.03
+        + ascii_word_count * 0.01
+        + heading_count * 0.75
+        + table_signal_count * 0.15
+        + markdown_heading_bonus
+        - bad_glyph_count * 1.5
+        - single_char_line_count * 0.35
+        - markdown_pipe_penalty
+    )
+
+
+def _extract_page_text(pdf_path: Path, plumber_page: pdfplumber.page.Page, fitz_page: fitz.Page) -> str:
+    candidate_texts: dict[str, str] = {
+        "pdfplumber": normalize_whitespace(plumber_page.extract_text(x_tolerance=2, y_tolerance=3) or ""),
+        "pymupdf": normalize_whitespace(fitz_page.get_text("text") or ""),
+        "pdftotext": _extract_with_pdftotext(pdf_path, fitz_page.number),
+    }
+    is_ocr_pdf = pdf_path.name.lower().endswith(".ocr.pdf")
+    if pymupdf4llm is not None and not is_ocr_pdf:
+        candidate_texts["pymupdf4llm"] = _extract_with_pymupdf4llm(pdf_path, fitz_page.number)
+
+    scored_candidates = {
+        backend_name: _score_extracted_text(candidate_text)
+        for backend_name, candidate_text in candidate_texts.items()
+        if candidate_text.strip()
+    }
+    if not scored_candidates:
+        return ""
+    best_backend = max(scored_candidates, key=scored_candidates.get)
+    logger.debug(
+        "Selected parser backend %s for page %s (scores=%s)",
+        best_backend,
+        fitz_page.number + 1,
+        {name: round(score, 2) for name, score in scored_candidates.items()},
+    )
+    return candidate_texts[best_backend]
 
 
 def _detect_headings(raw_text: str) -> list[str]:
@@ -77,13 +205,67 @@ def _detect_headings(raw_text: str) -> list[str]:
     return list(dict.fromkeys(headings))
 
 
+def build_ocrmypdf_command(
+    *,
+    input_path: Path,
+    output_path: Path,
+    language: str,
+    force_ocr: bool,
+) -> list[str]:
+    command = [
+        "ocrmypdf",
+        "-l",
+        language,
+        "--optimize",
+        "0",
+        "--deskew",
+        "--output-type",
+        "pdf",
+    ]
+    command.append("--force-ocr" if force_ocr else "--skip-text")
+    command.extend([str(input_path), str(output_path)])
+    return command
+
+
+def prepare_pdf_for_ingestion(
+    source_path: str,
+    *,
+    ocr_enabled: bool = False,
+    ocr_language: str = "ben+eng",
+    ocr_force: bool = True,
+    ocr_output_pdf_path: str | None = None,
+) -> tuple[Path, Path | None]:
+    input_path = Path(source_path)
+    if not ocr_enabled:
+        return input_path, None
+    output_path = Path(ocr_output_pdf_path) if ocr_output_pdf_path else input_path.with_name(f"{input_path.stem}.ocr.pdf")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    command = build_ocrmypdf_command(
+        input_path=input_path,
+        output_path=output_path,
+        language=ocr_language,
+        force_ocr=ocr_force,
+    )
+    logger.info("Running OCRmyPDF for Bangla ingestion: %s", " ".join(command))
+    completed_process = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed_process.returncode != 0:
+        error_message = completed_process.stderr.strip() or completed_process.stdout.strip() or "OCRmyPDF failed."
+        raise RuntimeError(f"OCR preparation failed: {error_message}")
+    return output_path, output_path
+
+
 def parse_document(source_path: str) -> list[ParsedPage]:
     pdf_path = Path(source_path)
     parsed_pages: list[ParsedPage] = []
     with pdfplumber.open(pdf_path) as plumber_pdf, fitz.open(pdf_path) as fitz_pdf:
         total_pages = min(len(plumber_pdf.pages), fitz_pdf.page_count)
         for page_index in range(total_pages):
-            raw_text = _extract_page_text(plumber_pdf.pages[page_index], fitz_pdf.load_page(page_index))
+            raw_text = _extract_page_text(pdf_path, plumber_pdf.pages[page_index], fitz_pdf.load_page(page_index))
             normalized_page_text = normalize_text(raw_text)
             parsed_pages.append(
                 ParsedPage(

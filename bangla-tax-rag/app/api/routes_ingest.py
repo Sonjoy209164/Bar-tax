@@ -6,7 +6,7 @@ from app.core.schemas import BuildIndexRequest, BuildIndexResponse, ChunkRecord,
 from app.core.settings import get_settings
 from app.core.utils import ensure_directory, ensure_file_exists, write_jsonl
 from app.ingest.chunker import chunk_pages
-from app.ingest.parser import parse_document
+from app.ingest.parser import parse_document, prepare_pdf_for_ingestion
 from app.retrieval.dense import build_dense_index_artifacts
 from app.retrieval.sparse import build_sparse_index, load_chunk_records_from_jsonl, save_sparse_index
 
@@ -16,10 +16,17 @@ router = APIRouter(tags=["ingest"])
 def _run_ingestion(request: IngestRequest) -> IngestResponse:
     settings = get_settings()
     input_path = ensure_file_exists(request.input_pdf_path)
+    parse_input_path, ocr_output_path = prepare_pdf_for_ingestion(
+        str(input_path),
+        ocr_enabled=request.ocr_enabled,
+        ocr_language=request.ocr_language,
+        ocr_force=request.ocr_force,
+        ocr_output_pdf_path=request.ocr_output_pdf_path,
+    )
     output_path = request.output_jsonl_path or str(
         Path(settings.processed_data_dir) / f"{request.doc_id}.jsonl"
     )
-    parsed_pages = parse_document(str(input_path))
+    parsed_pages = parse_document(str(parse_input_path))
     chunks = chunk_pages(
         parsed_pages,
         doc_id=request.doc_id,
@@ -38,6 +45,8 @@ def _run_ingestion(request: IngestRequest) -> IngestResponse:
         output_path=output_path,
         output_jsonl_path=output_path,
         chunking_mode=request.chunking_mode,
+        ocr_applied=request.ocr_enabled,
+        ocr_output_pdf_path=str(ocr_output_path) if ocr_output_path else None,
         message="PDF parsed and chunked successfully.",
     )
 

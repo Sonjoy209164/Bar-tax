@@ -1,6 +1,8 @@
 from pathlib import Path
+from subprocess import CompletedProcess
 
 import fitz
+import pytest
 
 from app.core.utils import (
     extract_section_ids,
@@ -10,7 +12,7 @@ from app.core.utils import (
     normalize_text,
     normalize_whitespace,
 )
-from app.ingest.parser import parse_document
+from app.ingest.parser import build_ocrmypdf_command, parse_document, prepare_pdf_for_ingestion
 
 
 def test_normalization_helpers() -> None:
@@ -50,3 +52,47 @@ def test_parse_document_smoke(tmp_path: Path) -> None:
     assert parsed_pages[0].sro_ids == ["S.R.O. No 123"]
     assert parsed_pages[1].is_appendix is True
     assert parsed_pages[1].is_table_like is True
+
+
+def test_build_ocrmypdf_command_uses_bengali_force_ocr(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.pdf"
+    output_path = tmp_path / "output.ocr.pdf"
+
+    command = build_ocrmypdf_command(
+        input_path=input_path,
+        output_path=output_path,
+        language="ben+eng",
+        force_ocr=True,
+    )
+
+    assert command[:3] == ["ocrmypdf", "-l", "ben+eng"]
+    assert "--force-ocr" in command
+    assert str(input_path) in command
+    assert str(output_path) in command
+
+
+def test_prepare_pdf_for_ingestion_runs_ocr_when_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    input_path = tmp_path / "input.pdf"
+    input_path.write_bytes(b"%PDF-1.4\n")
+    output_path = tmp_path / "output.ocr.pdf"
+
+    def fake_run(command, check, capture_output, text):  # type: ignore[no-untyped-def]
+        output_path.write_bytes(b"%PDF-1.4 OCR\n")
+        return CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("app.ingest.parser.subprocess.run", fake_run)
+
+    parse_input_path, ocr_output_path = prepare_pdf_for_ingestion(
+        str(input_path),
+        ocr_enabled=True,
+        ocr_language="ben+eng",
+        ocr_force=True,
+        ocr_output_pdf_path=str(output_path),
+    )
+
+    assert parse_input_path == output_path
+    assert ocr_output_path == output_path
+    assert output_path.exists()

@@ -23,6 +23,10 @@ class IngestRequest(BaseModel):
     chunking_mode: str = Field(default="section_aware")
     output_jsonl_path: str | None = None
     chunk_size: int = Field(default=1000, ge=200, le=5000)
+    ocr_enabled: bool = False
+    ocr_language: str = Field(default="ben+eng")
+    ocr_force: bool = True
+    ocr_output_pdf_path: str | None = None
 
 
 class ParsedPage(BaseModel):
@@ -47,6 +51,8 @@ class IngestResponse(BaseModel):
     output_path: str | None = None
     output_jsonl_path: str | None = None
     chunking_mode: str
+    ocr_applied: bool = False
+    ocr_output_pdf_path: str | None = None
     message: str | None = None
 
 

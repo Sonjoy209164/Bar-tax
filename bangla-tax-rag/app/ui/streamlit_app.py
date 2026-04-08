@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from typing import Any
 from pathlib import Path
@@ -36,6 +37,31 @@ def initialize_session_state() -> None:
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
+
+
+def load_chunk_records(chunk_jsonl_path: str, *, max_chunks: int = 100) -> tuple[list[dict[str, Any]], str | None]:
+    path = Path(chunk_jsonl_path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    if not path.exists():
+        return [], f"Chunk file not found: {path}"
+
+    chunk_records: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as chunk_file:
+            for line_number, line in enumerate(chunk_file, start=1):
+                stripped_line = line.strip()
+                if not stripped_line:
+                    continue
+                try:
+                    chunk_records.append(json.loads(stripped_line))
+                except json.JSONDecodeError as exc:
+                    return [], f"Invalid JSONL at line {line_number}: {exc}"
+                if len(chunk_records) >= max_chunks:
+                    break
+    except OSError as exc:
+        return [], str(exc)
+    return chunk_records, None
 
 
 def api_get(base_url: str, endpoint: str) -> tuple[bool, dict[str, Any] | None, str | None]:
@@ -110,6 +136,16 @@ def render_ingestion_panel(base_url: str) -> None:
         with column_right:
             chunking_mode = st.selectbox("Chunking Mode", options=["section_aware", "naive", "example_aware", "table_aware"], index=0)
             output_jsonl_path = st.text_input("Output JSONL Path", value="data/processed/income-tax-paripatra-2025-2026.jsonl")
+        ocr_column_left, ocr_column_right = st.columns(2)
+        with ocr_column_left:
+            ocr_enabled = st.checkbox("Enable OCR For Bangla PDF", value=True)
+            ocr_force = st.checkbox("Force OCR Even If Text Exists", value=True)
+        with ocr_column_right:
+            ocr_language = st.text_input("OCR Language", value="ben+eng")
+            ocr_output_pdf_path = st.text_input(
+                "OCR Output PDF Path",
+                value="data/processed/income-tax-paripatra-2025-2026.ocr.pdf",
+            )
         submitted = st.form_submit_button("Ingest PDF", use_container_width=True)
 
     if submitted:
@@ -121,6 +157,10 @@ def render_ingestion_panel(base_url: str) -> None:
             "authority_level": authority_level,
             "chunking_mode": chunking_mode,
             "output_jsonl_path": output_jsonl_path or None,
+            "ocr_enabled": ocr_enabled,
+            "ocr_language": ocr_language,
+            "ocr_force": ocr_force,
+            "ocr_output_pdf_path": ocr_output_pdf_path or None,
         }
         success, response_payload, error_message = api_post(
             base_url,
@@ -144,6 +184,8 @@ def render_ingestion_panel(base_url: str) -> None:
                 "number_of_chunks": ingest_response.get("number_of_chunks"),
                 "output_jsonl_path": ingest_response.get("output_jsonl_path"),
                 "chunking_mode": ingest_response.get("chunking_mode"),
+                "ocr_applied": ingest_response.get("ocr_applied"),
+                "ocr_output_pdf_path": ingest_response.get("ocr_output_pdf_path"),
             }
         )
 
@@ -262,6 +304,79 @@ def render_hit_card(hit: dict[str, Any], heading: str | None = None) -> None:
         st.write(snippet)
 
 
+def render_chunk_card(chunk: dict[str, Any]) -> None:
+    title = (
+        f"{chunk.get('chunk_id', 'unknown-chunk')} | "
+        f"page {chunk.get('page_no', '-')} | "
+        f"{chunk.get('chunk_type', '-')}"
+    )
+    with st.expander(title, expanded=False):
+        metadata_columns = st.columns(4)
+        metadata_columns[0].metric("Section", str(chunk.get("section_id") or "-"))
+        metadata_columns[1].metric("Subsection", str(chunk.get("subsection_id") or "-"))
+        metadata_columns[2].metric("Authority", str(chunk.get("authority_level") or "-"))
+        metadata_columns[3].metric("Tax Year", str(chunk.get("tax_year") or "-"))
+        heading_path = chunk.get("heading_path") or []
+        if heading_path:
+            st.markdown(f"**Heading Path:** {' > '.join(heading_path)}")
+        st.markdown("**Original Text**")
+        st.code(chunk.get("original_text") or "", language="text")
+        normalized_text = chunk.get("normalized_text") or ""
+        if normalized_text and normalized_text != chunk.get("original_text"):
+            st.markdown("**Normalized Text**")
+            st.code(normalized_text, language="text")
+
+
+def render_chunk_browser() -> None:
+    st.subheader("Chunk Browser")
+    default_chunk_path = (
+        st.session_state.get("last_ingest_response", {}).get("output_jsonl_path")
+        or "data/processed/income-tax-paripatra-2025-2026.jsonl"
+    )
+    browser_left, browser_right = st.columns([3, 1])
+    with browser_left:
+        chunk_jsonl_path = st.text_input(
+            "Chunk JSONL Path For Preview",
+            value=default_chunk_path,
+            help="Browse locally generated chunk records without calling the API.",
+        )
+    with browser_right:
+        max_chunks = st.number_input("Preview Count", min_value=10, max_value=500, value=50, step=10)
+
+    chunk_records, error_message = load_chunk_records(chunk_jsonl_path, max_chunks=int(max_chunks))
+    if error_message:
+        st.warning(error_message)
+        return
+    if not chunk_records:
+        st.info("No chunks found in the selected file.")
+        return
+
+    available_chunk_types = sorted({str(chunk.get("chunk_type") or "unknown") for chunk in chunk_records})
+    filter_left, filter_right = st.columns(2)
+    with filter_left:
+        chunk_type_filter = st.multiselect(
+            "Filter Chunk Types",
+            options=available_chunk_types,
+            default=[],
+        )
+    with filter_right:
+        page_filter = st.text_input(
+            "Filter Page Number",
+            value="",
+            placeholder="Example: 17",
+        ).strip()
+
+    filtered_chunks = chunk_records
+    if chunk_type_filter:
+        filtered_chunks = [chunk for chunk in filtered_chunks if chunk.get("chunk_type") in chunk_type_filter]
+    if page_filter.isdigit():
+        filtered_chunks = [chunk for chunk in filtered_chunks if int(chunk.get("page_no", -1)) == int(page_filter)]
+
+    st.caption(f"Showing {len(filtered_chunks)} of {len(chunk_records)} loaded chunks")
+    for chunk in filtered_chunks:
+        render_chunk_card(chunk)
+
+
 def render_results_panel() -> None:
     st.subheader("Results")
     response_payload = st.session_state.get("last_query_response")
@@ -349,6 +464,7 @@ def main() -> None:
     with build_column:
         render_index_building_panel(st.session_state["backend_base_url"])
 
+    render_chunk_browser()
     render_query_panel(st.session_state["backend_base_url"])
     render_results_panel()
 

@@ -242,6 +242,43 @@ def _extract_rate_values(text: str) -> list[str]:
     return list(dict.fromkeys(word_percent_values))
 
 
+def _find_section_excerpt(text: str, analyzed_query: QuerySignals | None) -> str:
+    cleaned_text = _clean_evidence_text(text)
+    if not cleaned_text or not analyzed_query:
+        return cleaned_text
+    section_markers: list[str] = []
+    if analyzed_query.subsection_id:
+        section_markers.append(re.escape(analyzed_query.subsection_id))
+    if analyzed_query.section_id:
+        section_markers.append(re.escape(analyzed_query.section_id))
+    for marker in section_markers:
+        match = re.search(rf"(^|[\s\n]){marker}(?:[\).:।-]|\s)", cleaned_text)
+        if match:
+            excerpt = cleaned_text[match.start():].strip()
+            return excerpt
+    return cleaned_text
+
+
+def _build_section_summary_answer(
+    question_text: str,
+    evidence_hits: list[RetrievalHit],
+    citations: list[CitationRecord],
+    analyzed_query: QuerySignals | None,
+) -> tuple[list[AnswerSentence], list[str]]:
+    candidate_sentences: list[tuple[int, int, str, str]] = []
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        excerpt = _find_section_excerpt(hit.original_text, analyzed_query)
+        for sentence in split_sentences(excerpt):
+            overlap_score = _sentence_overlap_score(sentence, question_text)
+            heading_bonus = 2 if (analyzed_query and analyzed_query.section_id and analyzed_query.section_id in sentence) else 0
+            candidate_sentences.append((overlap_score + heading_bonus, len(sentence), sentence.strip(), citation.marker))
+    if not candidate_sentences:
+        return build_mock_grounded_answer(question_text, evidence_hits, citations)
+    candidate_sentences.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    _, _, best_sentence, best_marker = candidate_sentences[0]
+    return [AnswerSentence(sentence_text=truncate_text(best_sentence, max_length=260), citation_markers=[best_marker])], []
+
+
 def _build_rate_lookup_answer(
     question_text: str,
     evidence_hits: list[RetrievalHit],
@@ -285,6 +322,8 @@ def build_mock_grounded_answer(
         return [], []
     if analyzed_query and analyzed_query.query_intent == "rate_lookup":
         return _build_rate_lookup_answer(question_text, evidence_hits, citations)
+    if analyzed_query and (analyzed_query.subsection_id or analyzed_query.section_id):
+        return _build_section_summary_answer(question_text, evidence_hits, citations, analyzed_query)
     candidate_sentences: list[tuple[int, str, str]] = []
     for citation, hit in zip(citations, evidence_hits, strict=False):
         split_hit_sentences = split_sentences(_clean_evidence_text(hit.original_text))
@@ -501,8 +540,10 @@ def generate_answer(
             conflict_notes=combined_conflict_notes,
         )
 
+    used_markers = {marker for sentence in answer_sentences for marker in sentence.citation_markers}
+    used_citations = [citation for citation in citations if citation.marker in used_markers]
     answer_text = render_inline_cited_answer(answer_sentences)
-    used_chunk_ids = [citation.chunk_id for citation in citations if citation.marker in {marker for sentence in answer_sentences for marker in sentence.citation_markers}]
+    used_chunk_ids = [citation.chunk_id for citation in used_citations]
     confidence_score = compute_confidence_score(
         evidence_hits=evidence_hits,
         conflict_notes=combined_conflict_notes,
@@ -511,7 +552,7 @@ def generate_answer(
     return GeneratedAnswer(
         answer_text=answer_text,
         answer_sentences=answer_sentences,
-        citations=citations,
+        citations=used_citations,
         used_chunk_ids=list(dict.fromkeys(used_chunk_ids)),
         confidence_score=confidence_score,
         abstained=False,

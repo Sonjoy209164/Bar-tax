@@ -105,6 +105,7 @@ def test_generation_flow_using_mocked_model_response() -> None:
     assert result.citations[0].marker == "[C1]"
     assert "[C1]" in result.answer_text
     assert result.used_chunk_ids == ["c1", "c2"]
+    assert [citation.marker for citation in result.citations] == ["[C1]", "[C2]"]
 
 
 def test_default_mock_generation_is_extractive_and_supported() -> None:
@@ -160,3 +161,26 @@ def test_mock_generation_cleans_bangla_ocr_noise_before_answering() -> None:
     assert "আয়কর পররপত্র" not in result.answer_text
     assert "ক্রমিক নং" not in result.answer_text
     assert "10 শতাংশ" in result.answer_text
+
+
+def test_section_query_returns_used_citations_only() -> None:
+    hits = [
+        _hit(chunk_id="c1", text="3.1 ধারা অনুযায়ী কর অবকাশের সংজ্ঞা পরিবর্তন করা হয়েছে।"),
+        _hit(chunk_id="c2", text="অন্য একটি অপ্রাসঙ্গিক সহায়ক অনুচ্ছেদ।", subsection_id="3.2"),
+    ]
+    query = QuerySignals(
+        original_query="ধারা ৩.১ এ কী বলা হয়েছে?",
+        normalized_query="ধারা 3.1 এ কী বলা হয়েছে?",
+        section_reference="3.1",
+        section_id="3",
+        subsection_id="3.1",
+        query_type="definition",
+        query_intent="definition",
+    )
+
+    result = generate_answer("ধারা ৩.১ এ কী বলা হয়েছে?", hits, query, _options())
+
+    assert result.abstained is False
+    assert result.citations == [result.citations[0]]
+    assert result.citations[0].marker == "[C1]"
+    assert result.used_chunk_ids == ["c1"]

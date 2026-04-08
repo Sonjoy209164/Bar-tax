@@ -10,7 +10,7 @@ QUERY_TYPE_PATTERNS = {
     "rate_lookup": re.compile(r"(হার|rate|slab|threshold|করহার)", re.IGNORECASE),
     "amendment": re.compile(r"(amend|সংশোধন|পরিবর্তন|change)", re.IGNORECASE),
     "example": re.compile(r"(উদাহরণ|example|illustration)", re.IGNORECASE),
-    "definition": re.compile(r"(definition|সংজ্ঞা|মানে কী|what is)", re.IGNORECASE),
+    "definition": re.compile(r"(definition|সংজ্ঞা|মানে কী|কি বলা হয়েছে|কী বলা হয়েছে|what is|what does)", re.IGNORECASE),
     "procedure": re.compile(r"(প্রক্রিয়া|পদ্ধতি|how to|process|steps)", re.IGNORECASE),
     "calculation": re.compile(r"(calculate|calculation|গণনা|compute)", re.IGNORECASE),
     "comparison": re.compile(r"(compare|comparison|তুলনা|versus|পার্থক্য)", re.IGNORECASE),

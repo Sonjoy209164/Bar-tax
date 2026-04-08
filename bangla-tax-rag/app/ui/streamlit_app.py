@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.core.settings import get_settings
 
 REQUEST_TIMEOUT_SECONDS = 30
-INGEST_TIMEOUT_SECONDS = 180
+INGEST_TIMEOUT_SECONDS = 300
 INDEX_BUILD_TIMEOUT_SECONDS = 120
 QUERY_TIMEOUT_SECONDS = 90
 
@@ -126,25 +126,25 @@ def render_api_connection_panel(base_url: str) -> tuple[dict[str, Any] | None, b
 def render_ingestion_panel(base_url: str) -> None:
     st.subheader("PDF Ingestion")
     with st.form("ingest_form", clear_on_submit=False):
-        input_pdf_path = st.text_input("Input PDF Path", value="/home/sonjoy/Bar tax/Income-tax_Paripatra_2025-2026-1.pdf")
-        doc_id = st.text_input("Document ID", value="income-tax-paripatra-2025-2026")
-        doc_title = st.text_input("Document Title", value="Income Tax Paripatra 2025-2026")
+        input_pdf_path = st.text_input("Input PDF Path", value="/home/sonjoy/Bar tax/Income_tax_act_2023.pdf")
+        doc_id = st.text_input("Document ID", value="income-tax-act-2023")
+        doc_title = st.text_input("Document Title", value="Income Tax Act 2023")
         column_left, column_right = st.columns(2)
         with column_left:
-            doc_type = st.text_input("Document Type", value="circular")
+            doc_type = st.text_input("Document Type", value="statute")
             authority_level = st.selectbox("Authority Level", options=["unknown", "local", "regional", "national", "statute", "constitutional"], index=3)
         with column_right:
             chunking_mode = st.selectbox("Chunking Mode", options=["section_aware", "naive", "example_aware", "table_aware"], index=0)
-            output_jsonl_path = st.text_input("Output JSONL Path", value="data/processed/income-tax-paripatra-2025-2026.jsonl")
+            output_jsonl_path = st.text_input("Output JSONL Path", value="data/processed/income-tax-act-2023.jsonl")
         ocr_column_left, ocr_column_right = st.columns(2)
         with ocr_column_left:
-            ocr_enabled = st.checkbox("Enable OCR For Bangla PDF", value=True)
+            ocr_enabled = st.checkbox("Enable OCR For Bangla PDF", value=False)
             ocr_force = st.checkbox("Force OCR Even If Text Exists", value=True)
         with ocr_column_right:
             ocr_language = st.text_input("OCR Language", value="ben+eng")
             ocr_output_pdf_path = st.text_input(
                 "OCR Output PDF Path",
-                value="data/processed/income-tax-paripatra-2025-2026.ocr.pdf",
+                value="data/processed/income-tax-act-2023.ocr.pdf",
             )
         submitted = st.form_submit_button("Ingest PDF", use_container_width=True)
 
@@ -193,7 +193,7 @@ def render_ingestion_panel(base_url: str) -> None:
 def render_index_building_panel(base_url: str) -> None:
     st.subheader("Index Building")
     with st.form("build_index_form", clear_on_submit=False):
-        chunk_jsonl_path = st.text_input("Chunk JSONL Path", value="data/processed/income-tax-paripatra-2025-2026.jsonl")
+        chunk_jsonl_path = st.text_input("Chunk JSONL Path", value="data/processed/income-tax-act-2023.jsonl")
         build_sparse = st.checkbox("Build Sparse Index", value=True)
         build_dense = st.checkbox("Build Dense Index", value=False)
         submitted = st.form_submit_button("Build Index", use_container_width=True)
@@ -329,9 +329,12 @@ def render_chunk_card(chunk: dict[str, Any]) -> None:
 
 def render_chunk_browser() -> None:
     st.subheader("Chunk Browser")
+    last_ingest_response = st.session_state.get("last_ingest_response")
+    if not isinstance(last_ingest_response, dict):
+        last_ingest_response = {}
     default_chunk_path = (
-        st.session_state.get("last_ingest_response", {}).get("output_jsonl_path")
-        or "data/processed/income-tax-paripatra-2025-2026.jsonl"
+        last_ingest_response.get("output_jsonl_path")
+        or "data/processed/income-tax-act-2023.jsonl"
     )
     browser_left, browser_right = st.columns([3, 1])
     with browser_left:
@@ -387,6 +390,10 @@ def render_results_panel() -> None:
     analyzed_query = response_payload.get("analyzed_query", {})
     st.markdown("**Analyzed Query**")
     st.json(analyzed_query)
+    rewritten_query = analyzed_query.get("rewritten_query")
+    if rewritten_query and rewritten_query != analyzed_query.get("normalized_query"):
+        st.markdown("**Rewritten Query**")
+        st.code(rewritten_query, language="text")
 
     answer_text = response_payload.get("answer")
     abstained = response_payload.get("abstained")

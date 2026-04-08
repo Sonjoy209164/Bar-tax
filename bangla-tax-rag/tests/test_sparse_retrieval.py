@@ -110,6 +110,16 @@ def test_query_without_section_does_not_treat_tax_year_as_section() -> None:
     assert signals.subsection_id is None
 
 
+def test_english_company_tax_question_is_rate_lookup() -> None:
+    signals = preprocess_query("what tax i have to pay as a software company ?")
+
+    assert signals.query_type == "rate_lookup"
+    assert signals.query_intent == "rate_lookup"
+    assert signals.rewritten_query is not None
+    assert "tax rate" in signals.rewritten_query
+    assert "software" in signals.rewritten_query
+
+
 def test_filtering_by_tax_year() -> None:
     filtered = filter_chunk_records(_dataset(), tax_year="2025-2026")
 
@@ -150,3 +160,85 @@ def test_graceful_empty_results_after_filtering() -> None:
     )
 
     assert response.hits == []
+
+
+def test_sparse_retrieval_drops_lexically_unrelated_hits_for_company_tax_query() -> None:
+    dataset = [
+        _chunk(
+            chunk_id="company-rate",
+            doc_id="doc-1",
+            doc_title="Company Tax Rates",
+            authority_level="national",
+            tax_year="2025-2026",
+            page_no=5,
+            section_id="2",
+            subsection_id="2.3",
+            chunk_type="table",
+            heading_path=["Company tax rate"],
+            normalized_text="Company tax rate for resident company is 20 percent.",
+        ),
+        _chunk(
+            chunk_id="irrelevant",
+            doc_id="doc-2",
+            doc_title="Appeal Procedure",
+            authority_level="national",
+            tax_year="2025-2026",
+            page_no=99,
+            section_id="15",
+            subsection_id=None,
+            chunk_type="text",
+            heading_path=["Appeal procedure"],
+            normalized_text="Executor administrator successor and other legal representative of the assessee.",
+        ),
+    ]
+
+    response = search_sparse_index(
+        query="what tax i have to pay as a software company ?",
+        index=build_sparse_index(dataset),
+        top_k=2,
+        tax_year="2025-2026",
+    )
+
+    assert response.hits
+    assert response.hits[0].chunk_id == "company-rate"
+    assert all(hit.chunk_id != "irrelevant" for hit in response.hits)
+
+
+def test_exact_section_heading_is_preferred_over_incidental_section_reference() -> None:
+    dataset = [
+        _chunk(
+            chunk_id="exact-section",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=24,
+            section_id="4",
+            subsection_id=None,
+            chunk_type="section",
+            heading_path=["4. Income tax authorities.—For the purposes of this Act"],
+            normalized_text="4. Income tax authorities.—For the purposes of this Act, there shall be the following classes of income tax authorities.",
+        ),
+        _chunk(
+            chunk_id="incidental-reference",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=207,
+            section_id="4",
+            subsection_id=None,
+            chunk_type="section",
+            heading_path=["295. Appeal to the Appellate Division.—(1)"],
+            normalized_text="Commissioner of Taxes from among the income tax authorities under section 4 to represent in the Alternative Dispute Resolution process.",
+        ),
+    ]
+
+    response = search_sparse_index(
+        query="What are the income tax authorities under section 4?",
+        index=build_sparse_index(dataset),
+        top_k=2,
+    )
+
+    assert response.hits
+    assert response.hits[0].chunk_id == "exact-section"

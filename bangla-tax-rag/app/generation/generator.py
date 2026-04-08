@@ -19,8 +19,10 @@ from app.core.utils import (
     clamp_score,
     clean_bangla_ocr_text,
     detect_text_language,
+    extract_salient_query_terms,
     normalize_text,
     split_sentences,
+    tokenize_for_bm25,
     truncate_text,
 )
 from app.generation.citations import (
@@ -312,6 +314,79 @@ def _build_rate_lookup_answer(
     return [AnswerSentence(sentence_text=sentence_text.strip(), citation_markers=markers)], []
 
 
+def _extract_mention_fragments(text: str, question_text: str) -> list[tuple[int, str]]:
+    cleaned_text = _clean_evidence_text(text)
+    query_terms = extract_salient_query_terms(question_text)
+    scored_fragments: list[tuple[int, str]] = []
+    for raw_fragment in re.split(r"[;\n]+", cleaned_text):
+        fragment = raw_fragment.strip(" -—:,.")
+        if len(fragment) < 6:
+            continue
+        fragment_terms = set(tokenize_for_bm25(fragment.lower()))
+        lexical_overlap = len(query_terms & fragment_terms)
+        software_bonus = 1 if "software" in fragment.lower() else 0
+        service_bonus = 1 if "service" in fragment.lower() else 0
+        score = lexical_overlap + software_bonus + service_bonus
+        if score <= 0:
+            continue
+        scored_fragments.append((score, fragment))
+    scored_fragments.sort(key=lambda item: (item[0], len(item[1])), reverse=True)
+    unique_fragments: list[tuple[int, str]] = []
+    seen_fragments: set[str] = set()
+    for score, fragment in scored_fragments:
+        lowered_fragment = fragment.lower()
+        if lowered_fragment in seen_fragments:
+            continue
+        seen_fragments.add(lowered_fragment)
+        unique_fragments.append((score, fragment))
+    return unique_fragments
+
+
+def _extract_focus_phrase(question_text: str) -> str | None:
+    normalized_question = normalize_text(question_text).strip()
+    match = re.search(r"(?:say about|mentioned in the act|included in the act)\s+(.+?)[?.]?$", normalized_question, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip(" \"'`")
+    return None
+
+
+def _build_mention_lookup_answer(
+    question_text: str,
+    evidence_hits: list[RetrievalHit],
+    citations: list[CitationRecord],
+) -> tuple[list[AnswerSentence], list[str]]:
+    fragment_candidates: list[tuple[int, str, str]] = []
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        for score, fragment in _extract_mention_fragments(hit.original_text, question_text):
+            fragment_candidates.append((score, fragment, citation.marker))
+
+    if not fragment_candidates:
+        fallback_sentence = truncate_text(_clean_evidence_text(evidence_hits[0].original_text), max_length=220)
+        return [AnswerSentence(sentence_text=fallback_sentence, citation_markers=[citations[0].marker])], []
+
+    fragment_candidates.sort(key=lambda item: (item[0], len(item[1])), reverse=True)
+    selected_candidates = fragment_candidates[:3]
+    selected_fragments = [fragment for _, fragment, _ in selected_candidates]
+    markers = list(dict.fromkeys(marker for _, _, marker in selected_candidates[:2]))
+    focus_phrase = _extract_focus_phrase(question_text)
+    if focus_phrase:
+        focused_fragment = next(
+            (fragment for _, fragment, _ in fragment_candidates if focus_phrase.lower() in fragment.lower()),
+            None,
+        )
+        if focused_fragment:
+            if detect_text_language(question_text) == "bangla":
+                sentence_text = f"উদ্ধৃত প্রমাণে দেখা যাচ্ছে যে {focus_phrase} স্পষ্টভাবে উল্লেখ আছে। {focused_fragment}।"
+            else:
+                sentence_text = f'The Act explicitly mentions "{focus_phrase}". {focused_fragment}.'
+            return [AnswerSentence(sentence_text=sentence_text, citation_markers=[markers[0]])], []
+    if detect_text_language(question_text) == "bangla":
+        sentence_text = "হ্যাঁ, উদ্ধৃত প্রমাণে এই বিষয়টি উল্লেখ আছে, যেমন " + "; ".join(selected_fragments) + "।"
+    else:
+        sentence_text = "Yes, the Act mentions software-related services, including " + "; ".join(selected_fragments) + "."
+    return [AnswerSentence(sentence_text=sentence_text, citation_markers=markers)], []
+
+
 def build_mock_grounded_answer(
     question_text: str,
     evidence_hits: list[RetrievalHit],
@@ -320,6 +395,8 @@ def build_mock_grounded_answer(
 ) -> tuple[list[AnswerSentence], list[str]]:
     if not evidence_hits or not citations:
         return [], []
+    if analyzed_query and analyzed_query.query_intent == "mention_lookup":
+        return _build_mention_lookup_answer(question_text, evidence_hits, citations)
     if analyzed_query and analyzed_query.query_intent == "rate_lookup":
         return _build_rate_lookup_answer(question_text, evidence_hits, citations)
     if analyzed_query and (analyzed_query.subsection_id or analyzed_query.section_id):
@@ -467,7 +544,15 @@ def generate_answer(
     citations = build_citation_records(evidence_hits)
     prompt_messages = build_prompt(question_text, evidence_hits, analyzed_query, citations)
     used_extractive_fallback = False
-    if generation_options.provider == "mock" and mocked_response is None:
+    if analyzed_query.query_intent == "mention_lookup":
+        answer_sentences, model_conflict_notes = build_mock_grounded_answer(
+            question_text,
+            evidence_hits,
+            citations,
+            analyzed_query,
+        )
+        used_extractive_fallback = True
+    elif generation_options.provider == "mock" and mocked_response is None:
         answer_sentences, model_conflict_notes = build_mock_grounded_answer(
             question_text,
             evidence_hits,

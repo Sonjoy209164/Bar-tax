@@ -189,3 +189,37 @@ def test_evidence_pack_abstains_when_subsection_query_has_no_direct_support() ->
     assert final_hits == []
     assert evidence_summary == "No evidence passed the final support checks."
     assert any("No final evidence directly supports" in note for note in conflict_notes)
+
+
+def test_hybrid_mention_query_prefers_software_service_chunk() -> None:
+    software_chunk = _hit(
+        chunk_id="software-services",
+        score=3.0,
+        page_no=270,
+        section_id="107",
+        chunk_type="section",
+        heading_path=["software test lab service", "website development and service"],
+        text="software test lab service; website development and service; IT assistance and software maintenance service;",
+    )
+    unrelated_service_chunk = _hit(
+        chunk_id="notice-service",
+        score=3.0,
+        page_no=224,
+        section_id="335",
+        chunk_type="section",
+        heading_path=["335. Service of notice"],
+        text="Service of notice may be sent to the specified electronic mail address of the person.",
+    )
+    software_chunk.intermediate_scores = {"sparse_score": 20.0, "dense_score": 0.5}
+    unrelated_service_chunk.intermediate_scores = {"sparse_score": 8.0, "dense_score": 2.0}
+
+    response = run_hybrid_retrieval(
+        query="Is software service mentioned in the Act?",
+        sparse_hits_override=[software_chunk],
+        dense_hits_override=[unrelated_service_chunk],
+        final_top_k=2,
+    )
+
+    assert response.analyzed_query.query_intent == "mention_lookup"
+    assert response.final_hits
+    assert response.final_hits[0].chunk_id == "software-services"

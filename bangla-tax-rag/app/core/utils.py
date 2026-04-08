@@ -7,14 +7,41 @@ from app.core.schemas import QuerySignals
 BANGLA_DIGIT_MAP = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 SECTION_KEYWORDS = ("ধারা", "উপ-ধারা", "উপধারা", "পরিশিষ্ট", "অনুচ্ছেদ")
 QUERY_TYPE_PATTERNS = {
-    "rate_lookup": re.compile(r"(হার|rate|slab|threshold|করহার)", re.IGNORECASE),
+    "rate_lookup": re.compile(
+        r"(হার|rate|slab|threshold|করহার|tax rate|rate of tax|what tax|how much tax|tax payable|pay tax)",
+        re.IGNORECASE,
+    ),
     "amendment": re.compile(r"(amend|সংশোধন|পরিবর্তন|change)", re.IGNORECASE),
     "example": re.compile(r"(উদাহরণ|example|illustration)", re.IGNORECASE),
-    "definition": re.compile(r"(definition|সংজ্ঞা|মানে কী|কি বলা হয়েছে|কী বলা হয়েছে|what is|what does)", re.IGNORECASE),
+    "mention_lookup": re.compile(
+        r"(mentioned|mention|appears?|included?|include|listed?|contains?|is .*mentioned|is .*included|say about|says about|what does .* say about|উল্লেখ|আছে কি|আছে কিনা)",
+        re.IGNORECASE,
+    ),
+    "definition": re.compile(r"(definition|সংজ্ঞা|মানে কী|কি বলা হয়েছে|কী বলা হয়েছে|what is)", re.IGNORECASE),
     "procedure": re.compile(r"(প্রক্রিয়া|পদ্ধতি|how to|process|steps)", re.IGNORECASE),
     "calculation": re.compile(r"(calculate|calculation|গণনা|compute)", re.IGNORECASE),
     "comparison": re.compile(r"(compare|comparison|তুলনা|versus|পার্থক্য)", re.IGNORECASE),
 }
+ENGLISH_STOPWORDS = {
+    "a",
+    "an",
+    "as",
+    "at",
+    "by",
+    "do",
+    "for",
+    "have",
+    "i",
+    "in",
+    "is",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "what",
+}
+BANGla_STOPWORDS = {"এ", "কি", "কী", "কি?", "কী?", "আমি", "আমার", "এর", "ও", "এবং"}
 DOCUMENT_HEADER_PATTERN = re.compile(r"আয়কর\s+পররপত্র\s+20\d{2}\s*-\s*20\d{2}\s*\|\s*\d+", re.IGNORECASE)
 TABLE_HEADER_LINES = {
     "ক্রমিক নং",
@@ -179,7 +206,7 @@ def detect_heading_marker(text: str) -> str | None:
     normalized_text = normalize_text(text)
     if not normalized_text:
         return None
-    numeric_match = re.match(r"^(\d+(?:\.\d+)*)[\).\s:-]+", normalized_text)
+    numeric_match = re.match(r"^(\d+(?:\.\d+)*)(?:[.)]|(?:\s*[—:-]))", normalized_text)
     if numeric_match:
         return numeric_match.group(1)
     for keyword in SECTION_KEYWORDS:
@@ -209,6 +236,17 @@ def tokenize_for_bm25(text: str) -> list[str]:
     return re.findall(r"[\w\u0980-\u09ff./-]+", normalized_text)
 
 
+def extract_salient_query_terms(text: str) -> set[str]:
+    salient_terms: set[str] = set()
+    for token in tokenize_for_bm25(text):
+        if token in ENGLISH_STOPWORDS or token in BANGla_STOPWORDS:
+            continue
+        if len(token) <= 1:
+            continue
+        salient_terms.add(token)
+    return salient_terms
+
+
 def detect_query_type(text: str) -> str:
     for query_type, pattern in QUERY_TYPE_PATTERNS.items():
         if pattern.search(text):
@@ -216,8 +254,41 @@ def detect_query_type(text: str) -> str:
     return "general"
 
 
+def rewrite_query(normalized_query: str, query_type: str) -> str:
+    rewritten_terms = list(dict.fromkeys(tokenize_for_bm25(normalized_query)))
+    lower_query = normalized_query.lower()
+    if query_type == "rate_lookup":
+        if "software" in lower_query:
+            rewritten_terms.extend(["software", "service"])
+        if "company" in lower_query or "কোম্পানি" in lower_query:
+            rewritten_terms.extend(["company", "company tax", "tax rate"])
+        if "what tax" in lower_query or "tax payable" in lower_query or "pay tax" in lower_query:
+            rewritten_terms.extend(["tax rate", "rate of tax", "tax payable"])
+        if "করহার" in lower_query:
+            rewritten_terms.extend(["করহার", "কর হার"])
+    if query_type == "mention_lookup":
+        rewritten_terms.extend(["mentioned", "included", "listed"])
+        if "software" in lower_query:
+            rewritten_terms.extend(
+                [
+                    "software",
+                    "service",
+                    "software service",
+                    "software test lab service",
+                    "website development service",
+                    "software maintenance service",
+                ]
+            )
+        if "act" in lower_query:
+            rewritten_terms.extend(["act", "income tax act"])
+    if query_type == "definition" and "commissioner" in lower_query:
+        rewritten_terms.extend(["definition", "commissioner"])
+    return " ".join(dict.fromkeys(rewritten_terms))
+
+
 def preprocess_query(query: str) -> QuerySignals:
     normalized_query = normalize_text(query)
+    query_type = detect_query_type(normalized_query)
     tax_years = extract_tax_years(query)
     section_ids = extract_query_section_references(query)
     appendix_ids = extract_appendix_ids(query)
@@ -238,6 +309,7 @@ def preprocess_query(query: str) -> QuerySignals:
     return QuerySignals(
         original_query=query,
         normalized_query=normalized_query,
+        rewritten_query=rewrite_query(normalized_query, query_type),
         tax_year=tax_years[0] if tax_years else None,
         section_reference=section_ids[0] if section_ids else None,
         section_id=section_id,
@@ -246,8 +318,8 @@ def preprocess_query(query: str) -> QuerySignals:
         appendix_id=appendix_ids[0] if appendix_ids else None,
         sro_reference=sro_ids[0] if sro_ids else None,
         sro_id=sro_ids[0] if sro_ids else None,
-        query_type=detect_query_type(normalized_query),
-        query_intent=detect_query_type(normalized_query),
+        query_type=query_type,
+        query_intent=query_type,
     )
 
 

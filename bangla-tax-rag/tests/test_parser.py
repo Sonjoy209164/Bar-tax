@@ -54,6 +54,31 @@ def test_parse_document_smoke(tmp_path: Path) -> None:
     assert parsed_pages[1].is_table_like is True
 
 
+def test_parse_document_keeps_statute_definition_pages_out_of_appendix_mode(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "statute.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        (
+            "PART I\n"
+            "PRELIMINARY\n"
+            "2. Definitions.— In this Act, unless there is anything repugnant in the subject or context,—\n"
+            "(1) “Commissioner” means Commissioner of Taxes referred to in section 4;\n"
+            "(2) “written down value” means the written down value as defined in Part 1 of the Third Schedule;"
+        ),
+    )
+    document.save(pdf_path)
+    document.close()
+
+    parsed_pages = parse_document(str(pdf_path))
+
+    assert len(parsed_pages) == 1
+    assert parsed_pages[0].is_appendix is False
+    assert parsed_pages[0].is_table_like is False
+    assert any("2. Definitions" in heading for heading in parsed_pages[0].headings)
+
+
 def test_build_ocrmypdf_command_uses_bengali_force_ocr(tmp_path: Path) -> None:
     input_path = tmp_path / "input.pdf"
     output_path = tmp_path / "output.ocr.pdf"

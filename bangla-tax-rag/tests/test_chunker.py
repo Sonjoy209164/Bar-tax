@@ -204,3 +204,76 @@ def test_header_only_blocks_are_dropped() -> None:
     chunks = section_aware_chunking(pages, _sample_metadata(), chunk_size=400)
 
     assert chunks == []
+
+
+def test_statute_sections_are_split_cleanly_and_carried_across_pages() -> None:
+    pages = [
+        ParsedPage(
+            page_no=13,
+            raw_text=(
+                "evsjv‡`k †M‡RU, AwZwi³, A‡±vei 16, 2025\n"
+                "10478\n"
+                "PART 2\n"
+                "TAX ADMINISTRATION\n"
+                "4. Income tax authorities.—For the purposes of this Act, there shall be the following classes of income tax authorities, namely:—\n"
+                "(a) The National Board of Revenue;\n"
+                "(b) Chief Commissioner of Taxes;\n"
+                "(c) Director General (Inspection);"
+            ),
+            normalized_text=(
+                "evsjv‡`k †M‡RU, AwZwi³, A‡±vei 16, 2025\n"
+                "10478\n"
+                "PART 2\n"
+                "TAX ADMINISTRATION\n"
+                "4. Income tax authorities.—For the purposes of this Act, there shall be the following classes of income tax authorities, namely:—\n"
+                "(a) The National Board of Revenue;\n"
+                "(b) Chief Commissioner of Taxes;\n"
+                "(c) Director General (Inspection);"
+            ),
+            headings=["PART 2", "4. Income tax authorities.—For the purposes of this Act, there shall be the following classes of income tax authorities, namely:—"],
+            section_markers=["4"],
+            tax_years=[],
+            sro_ids=[],
+            is_appendix=False,
+            is_example=False,
+            is_table_like=False,
+            line_count=8,
+        ),
+        ParsedPage(
+            page_no=14,
+            raw_text=(
+                "evsjv‡`k †M‡RU, AwZwi³, A‡±vei 16, 2025\n"
+                "10479\n"
+                "(d) Commissioner of Taxes (Appeals);\n"
+                "(e) Commissioner of Taxes (Large Assessee Unit);\n"
+                "5. Appointment of income-tax authorities.—(1) Subject to applicable laws, rules and regulations, the income-tax authority shall be appointed.\n"
+                "(2) The Board may appoint and post any person as an income-tax authority."
+            ),
+            normalized_text=(
+                "evsjv‡`k †M‡RU, AwZwi³, A‡±vei 16, 2025\n"
+                "10479\n"
+                "(d) Commissioner of Taxes (Appeals);\n"
+                "(e) Commissioner of Taxes (Large Assessee Unit);\n"
+                "5. Appointment of income-tax authorities.—(1) Subject to applicable laws, rules and regulations, the income-tax authority shall be appointed.\n"
+                "(2) The Board may appoint and post any person as an income-tax authority."
+            ),
+            headings=["PART 2", "5. Appointment of income-tax authorities.—(1) Subject to applicable laws, rules and regulations, the income-tax authority shall be appointed."],
+            section_markers=["5"],
+            tax_years=[],
+            sro_ids=[],
+            is_appendix=False,
+            is_example=False,
+            is_table_like=False,
+            line_count=6,
+        ),
+    ]
+
+    chunks = section_aware_chunking(pages, _sample_metadata(), chunk_size=500)
+
+    assert len(chunks) == 3
+    assert all("evsjv‡" not in chunk.original_text for chunk in chunks)
+    assert chunks[0].section_id == "4"
+    assert chunks[1].page_no == 14
+    assert chunks[1].section_id == "4"
+    assert chunks[2].section_id == "5"
+    assert chunks[2].chunk_type == "section"

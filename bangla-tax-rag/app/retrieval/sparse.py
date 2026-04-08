@@ -1,16 +1,18 @@
 import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from rank_bm25 import BM25Okapi
 
 from app.core.schemas import ChunkRecord, QuerySignals, RetrievalHit, RetrievalResponse
-from app.core.utils import preprocess_query, tokenize_for_bm25
+from app.core.utils import extract_salient_query_terms, preprocess_query, tokenize_for_bm25
 from app.retrieval.filters import authority_value, chunk_quality_score, filter_chunk_records
 
 logger = logging.getLogger(__name__)
 DEFAULT_INDEX_DIR = Path("indexes/sparse")
+COMPANY_QUERY_TOKENS = {"company", "কোম্পানি", "কম্পানি", "software", "software company"}
 
 
 @dataclass
@@ -34,6 +36,13 @@ def build_weighted_search_text(chunk: ChunkRecord) -> str:
         ]
         if part
     )
+
+
+def _has_exact_section_heading_match(chunk: ChunkRecord, section_reference: str) -> bool:
+    heading_pattern = re.compile(rf"^{re.escape(section_reference)}(?:[.)]|(?:\s*[—:-]))")
+    if heading_pattern.match(chunk.normalized_text):
+        return True
+    return any(heading_pattern.match(heading) for heading in chunk.heading_path)
 
 
 def build_sparse_index(chunk_records: list[ChunkRecord]) -> SparseIndex:
@@ -83,11 +92,21 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
     boosted_score = base_score
     quality_score = chunk_quality_score(chunk.normalized_text)
     boosted_score += quality_score * 1.2
+    searchable_text = f"{chunk.doc_title} {' '.join(chunk.heading_path)} {chunk.normalized_text}".lower()
     if query_signals.section_reference:
+        exact_heading_match = _has_exact_section_heading_match(chunk, query_signals.section_reference)
         if chunk.subsection_id == query_signals.section_reference:
             boosted_score += 4.0
+            if exact_heading_match:
+                boosted_score += 2.5
+            else:
+                boosted_score -= 1.0
         elif chunk.section_id == query_signals.section_reference:
             boosted_score += 2.5
+            if exact_heading_match:
+                boosted_score += 2.0
+            else:
+                boosted_score -= 1.2
         elif query_signals.subsection_id:
             boosted_score -= 2.5
         elif query_signals.section_id and chunk.section_id and chunk.section_id != query_signals.section_id:
@@ -102,17 +121,34 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
     heading_terms = set(tokenize_for_bm25(" ".join(chunk.heading_path)))
     heading_overlap = len(query_terms & heading_terms)
     boosted_score += min(heading_overlap * 0.3, 1.2)
+    salient_heading_overlap = len(extract_salient_query_terms(query_signals.normalized_query) & heading_terms)
+    if query_signals.section_reference:
+        boosted_score += min(salient_heading_overlap * 1.5, 4.5)
+        if salient_heading_overlap <= 1:
+            boosted_score -= 2.5
     boosted_score += authority_value(chunk.authority_level) * 0.15
     if query_signals.query_type == "example" and chunk.chunk_type == "example":
         boosted_score += 1.25
     if query_signals.query_type == "rate_lookup" and chunk.chunk_type == "table":
         boosted_score += 1.75
-        if "করহার" in chunk.normalized_text or "কর হার" in chunk.normalized_text:
+        if (
+            "করহার" in searchable_text
+            or "কর হার" in searchable_text
+            or "tax rate" in searchable_text
+            or "rate of tax" in searchable_text
+        ):
             boosted_score += 1.25
         if query_signals.subsection_id and chunk.subsection_id != query_signals.subsection_id:
             boosted_score -= 2.0
-    if query_signals.query_intent == "rate_lookup" and "করহার" not in chunk.normalized_text and "কর হার" not in chunk.normalized_text:
+    if query_signals.query_intent == "rate_lookup" and all(
+        phrase not in searchable_text for phrase in ("করহার", "কর হার", "tax rate", "rate of tax", "tax payable")
+    ):
         boosted_score -= 1.0
+    if any(token in query_signals.normalized_query.lower() for token in COMPANY_QUERY_TOKENS):
+        if any(token in searchable_text for token in COMPANY_QUERY_TOKENS):
+            boosted_score += 1.0
+        else:
+            boosted_score -= 0.8
     return boosted_score
 
 
@@ -152,7 +188,9 @@ def search_sparse_index(
 ) -> RetrievalResponse:
     query_signals = preprocess_query(query)
     effective_tax_year = tax_year or query_signals.tax_year
-    query_tokens = tokenize_for_bm25(query_signals.normalized_query)
+    search_query = query_signals.rewritten_query or query_signals.normalized_query
+    query_tokens = tokenize_for_bm25(search_query)
+    salient_terms = extract_salient_query_terms(search_query)
     if not query_tokens:
         return RetrievalResponse(status="success", query=query, signals=query_signals, hits=[])
     candidate_records = filter_chunk_records(
@@ -173,6 +211,10 @@ def search_sparse_index(
             continue
         final_score = apply_score_boosts(chunk, query_signals, float(base_score))
         if final_score <= 0:
+            continue
+        searchable_text = f"{chunk.doc_title} {' '.join(chunk.heading_path)} {chunk.normalized_text}".lower()
+        salient_overlap = len(salient_terms & set(tokenize_for_bm25(searchable_text)))
+        if salient_terms and query_signals.query_intent in {"rate_lookup", "definition", "mention_lookup"} and salient_overlap == 0:
             continue
         scored_hits.append(_to_retrieval_hit(chunk, final_score))
     ranked_hits = sorted(scored_hits, key=lambda hit: hit.score, reverse=True)[:top_k]

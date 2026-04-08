@@ -1,4 +1,5 @@
 from app.core.schemas import GenerationOptions, QuerySignals, RetrievalHit
+from app.core.utils import preprocess_query
 from app.generation.generator import generate_answer
 
 
@@ -184,3 +185,87 @@ def test_section_query_returns_used_citations_only() -> None:
     assert result.citations == [result.citations[0]]
     assert result.citations[0].marker == "[C1]"
     assert result.used_chunk_ids == ["c1"]
+
+
+def test_preprocess_query_detects_mention_lookup() -> None:
+    signals = preprocess_query("Is software service mentioned in the Act?")
+
+    assert signals.query_type == "mention_lookup"
+    assert signals.query_intent == "mention_lookup"
+    assert "software service" in (signals.rewritten_query or "")
+
+
+def test_preprocess_query_treats_say_about_as_mention_lookup() -> None:
+    signals = preprocess_query("What does the Act say about software test lab service?")
+
+    assert signals.query_type == "mention_lookup"
+    assert signals.query_intent == "mention_lookup"
+
+
+def test_mention_lookup_uses_deterministic_grounded_answer() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.4,
+            tax_year=None,
+            section_id="107",
+            subsection_id=None,
+            chunk_type="section",
+            text=(
+                "software test lab service;\n"
+                "website development and service;\n"
+                "IT assistance and software maintenance service;"
+            ),
+        ),
+        _hit(
+            chunk_id="c2",
+            score=3.1,
+            tax_year=None,
+            section_id="5",
+            subsection_id=None,
+            chunk_type="section",
+            text="Amortization of computer software and applications shall be allowed as follows.",
+        ),
+    ]
+    query = preprocess_query("Is software service mentioned in the Act?")
+    options = GenerationOptions(
+        provider="openai_compatible",
+        model_name="deepseek-r1:7b",
+        base_url="http://127.0.0.1:11434/v1",
+        api_key=None,
+        max_generation_tokens=256,
+        temperature=0.0,
+        abstention_score_threshold=0.75,
+        verification_enabled=True,
+        fallback_to_mock=True,
+    )
+
+    result = generate_answer("Is software service mentioned in the Act?", hits, query, options)
+
+    assert result.abstained is False
+    assert result.verification_passed is True
+    assert result.answer_text.startswith("Yes, the Act mentions")
+    assert "[C1]" in result.answer_text
+    assert result.used_chunk_ids == ["c1"]
+
+
+def test_say_about_query_returns_focused_mention_answer() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.8,
+            tax_year=None,
+            section_id="107",
+            subsection_id=None,
+            chunk_type="section",
+            text="software test lab service; website development and service; IT assistance and software maintenance service;",
+        ),
+    ]
+    query = preprocess_query("What does the Act say about software test lab service?")
+
+    result = generate_answer("What does the Act say about software test lab service?", hits, query, _options())
+
+    assert result.abstained is False
+    assert result.verification_passed is True
+    assert 'software test lab service' in result.answer_text.lower()
+    assert "[C1]" in result.answer_text

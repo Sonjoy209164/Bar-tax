@@ -24,6 +24,16 @@ TABLE_SERIAL_PATTERN = re.compile(r"^\d+\.$")
 MARKDOWN_TABLE_SEPARATOR = re.compile(r"^\|?(?:\s*:?-{3,}:?\s*\|)+\s*$")
 BAD_GLYPH_PATTERN = re.compile(r"[·�]")
 TABLE_ROW_PATTERN = re.compile(r"^\|.+\|$")
+APPENDIX_HEADING_PATTERN = re.compile(
+    r"^(?:পরিশিষ্ট|appendix|annex|schedule\b|(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+schedule\b)",
+    re.IGNORECASE,
+)
+PART_HEADING_PATTERN = re.compile(r"^PART\s+[IVXLC0-9]+\s*$", re.IGNORECASE)
+CHAPTER_HEADING_PATTERN = re.compile(r"^CHAPTER\s+[IVXLC0-9]+\s*$", re.IGNORECASE)
+STATUTE_SECTION_HEADING_PATTERN = re.compile(r"^\d+[A-Za-z]?(?:\.\d+)?\.\s+[A-Z].+", re.IGNORECASE)
+CLAUSE_START_PATTERN = re.compile(r"^\(\d+[A-Za-z]?\)\s+")
+GAZETTE_HEADER_PATTERN = re.compile(r"(?:evsjv|†M‡RU|AwZwi³|A‡±vei)")
+PAGE_NUMBER_PATTERN = re.compile(r"^\d{4,6}$")
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +49,16 @@ def _looks_like_table(text: str) -> bool:
         return False
     serial_count = sum(1 for line in lines if TABLE_SERIAL_PATTERN.fullmatch(normalize_text(line)))
     code_count = sum(1 for line in lines if TABLE_CODE_PATTERN.fullmatch(normalize_text(line)))
+    statute_heading_count = sum(
+        1 for line in lines if STATUTE_SECTION_HEADING_PATTERN.match(normalize_text(line))
+    )
+    clause_count = sum(1 for line in lines if CLAUSE_START_PATTERN.match(normalize_text(line)))
+    definition_line_count = sum(1 for line in lines if "means" in normalize_text(line).lower())
+    quoted_clause_count = sum(1 for line in lines if "“" in line or '"' in line)
+    if statute_heading_count and (clause_count >= 3 or definition_line_count >= 2):
+        return False
+    if clause_count >= 3 and quoted_clause_count >= 2 and serial_count == 0 and code_count == 0:
+        return False
     repeated_spacing_lines = sum(1 for line in lines if re.search(r"\S\s{3,}\S", line))
     dense_numeric_lines = sum(
         1
@@ -192,15 +212,46 @@ def _extract_page_text(pdf_path: Path, plumber_page: pdfplumber.page.Page, fitz_
     return candidate_texts[best_backend]
 
 
+def _is_heading_line(line: str) -> bool:
+    normalized_line = normalize_text(line)
+    if not normalized_line or PAGE_NUMBER_PATTERN.fullmatch(normalized_line):
+        return False
+    if GAZETTE_HEADER_PATTERN.search(normalized_line):
+        return False
+    if PART_HEADING_PATTERN.match(normalized_line) or CHAPTER_HEADING_PATTERN.match(normalized_line):
+        return True
+    if _is_statute_section_heading_line(normalized_line):
+        return True
+    return bool(detect_heading_marker(normalized_line))
+
+
+def _is_statute_section_heading_line(line: str) -> bool:
+    return bool(STATUTE_SECTION_HEADING_PATTERN.match(normalize_text(line)))
+
+
+def _is_appendix_page(raw_text: str, headings: list[str]) -> bool:
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    candidate_lines = [*headings, *lines[:15]]
+    return any(APPENDIX_HEADING_PATTERN.match(normalize_text(line)) for line in candidate_lines)
+
+
 def _detect_headings(raw_text: str) -> list[str]:
     headings: list[str] = []
     lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    for line in lines[:12]:
-        heading_marker = detect_heading_marker(line)
-        if heading_marker:
+    found_structural_section_heading = False
+    for line in lines[:40]:
+        if _is_heading_line(line):
             headings.append(line)
+            if _is_statute_section_heading_line(line):
+                found_structural_section_heading = True
             continue
-        if APPENDIX_PATTERN.search(line) or EXAMPLE_PATTERN.search(line):
+        if (
+            not found_structural_section_heading
+            and (
+                APPENDIX_HEADING_PATTERN.match(normalize_text(line))
+                or re.match(r"^(উদাহরণ|example)\b", normalize_text(line), re.IGNORECASE)
+            )
+        ):
             headings.append(line)
     return list(dict.fromkeys(headings))
 
@@ -267,16 +318,17 @@ def parse_document(source_path: str) -> list[ParsedPage]:
         for page_index in range(total_pages):
             raw_text = _extract_page_text(pdf_path, plumber_pdf.pages[page_index], fitz_pdf.load_page(page_index))
             normalized_page_text = normalize_text(raw_text)
+            headings = _detect_headings(raw_text)
             parsed_pages.append(
                 ParsedPage(
                     page_no=page_index + 1,
                     raw_text=raw_text,
                     normalized_text=normalized_page_text,
-                    headings=_detect_headings(raw_text),
+                    headings=headings,
                     section_markers=extract_section_ids(raw_text),
                     tax_years=extract_tax_years(raw_text),
                     sro_ids=extract_sro_ids(raw_text),
-                    is_appendix=bool(APPENDIX_PATTERN.search(raw_text)),
+                    is_appendix=_is_appendix_page(raw_text, headings),
                     is_example=bool(EXAMPLE_PATTERN.search(raw_text)),
                     is_table_like=_looks_like_table(raw_text),
                     line_count=len([line for line in raw_text.splitlines() if line.strip()]),

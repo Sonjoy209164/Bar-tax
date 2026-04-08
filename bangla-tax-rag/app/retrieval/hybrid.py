@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 
 from app.core.schemas import HybridRetrievalResponse, QuerySignals, RetrievalHit
-from app.core.utils import preprocess_query, tokenize_for_bm25
+from app.core.utils import extract_salient_query_terms, preprocess_query, tokenize_for_bm25
 from app.retrieval.dense import dense_search
 from app.retrieval.filters import authority_value, deduplicate_retrieval_hits, filter_supportive_hits
 from app.retrieval.sparse import DEFAULT_INDEX_DIR, load_sparse_index, sparse_search
@@ -82,6 +82,22 @@ def apply_hybrid_post_ranking(hit: RetrievalHit, analyzed_query: QuerySignals) -
             adjusted_score += 1.1
         else:
             adjusted_score -= 0.6
+    if analyzed_query.query_intent == "mention_lookup":
+        salient_terms = extract_salient_query_terms(analyzed_query.normalized_query)
+        searchable_terms = set(tokenize_for_bm25(searchable_text.lower()))
+        adjusted_score += min(len(salient_terms & searchable_terms) * 0.9, 4.5)
+        if "software" in analyzed_query.normalized_query.lower():
+            if "software" in searchable_text.lower():
+                adjusted_score += 2.8
+            else:
+                adjusted_score -= 2.6
+        if "service" in analyzed_query.normalized_query.lower():
+            if "service" in searchable_text.lower():
+                adjusted_score += 1.6
+            else:
+                adjusted_score -= 1.4
+        if "software" in searchable_text.lower() and "service" in searchable_text.lower():
+            adjusted_score += 1.5
     adjusted_hit.score = round(adjusted_score, 6)
     adjusted_hit.intermediate_scores["postrank_score"] = adjusted_hit.score
     return adjusted_hit

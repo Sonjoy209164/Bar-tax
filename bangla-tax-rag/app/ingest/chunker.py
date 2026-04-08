@@ -12,11 +12,23 @@ MIN_BLOCK_LENGTH = 120
 TABLE_CODE_PATTERN = re.compile(r"^\d{2,4}(?:\.\d{2,4}){1,3}$")
 TABLE_SERIAL_PATTERN = re.compile(r"^\d+\.$")
 PURE_STRUCTURAL_LINE_PATTERN = re.compile(r"^(?:\(?[0-9]+\)?|[|:.\-–—/ ]+)$")
+ENGLISH_GAZETTE_HEADER_PATTERN = re.compile(r"(?:evsjv|†M‡RU|AwZwi³|A‡±vei)")
+PAGE_NUMBER_LINE_PATTERN = re.compile(r"^\d{4,6}$")
+PART_HEADING_PATTERN = re.compile(r"^PART\s+[IVXLC0-9]+\s*$", re.IGNORECASE)
+CHAPTER_HEADING_PATTERN = re.compile(r"^CHAPTER\s+[IVXLC0-9]+\s*$", re.IGNORECASE)
+STATUTE_SECTION_HEADING_PATTERN = re.compile(r"^\d+[A-Za-z]?(?:\.\d+)?\.\s+[A-Z].+", re.IGNORECASE)
+CLAUSE_START_PATTERN = re.compile(r"^\(\d+[A-Za-z]?\)\s+")
+ALL_CAPS_CONTEXT_PATTERN = re.compile(r"^[A-Z][A-Z\s,&/-]{2,}$")
+ALPHA_CLAUSE_PATTERN = re.compile(r"^\([a-z]\)\s+", re.IGNORECASE)
 
 
 def _is_document_header_line(line: str) -> bool:
     normalized_line = normalize_text(line)
     if not normalized_line:
+        return True
+    if ENGLISH_GAZETTE_HEADER_PATTERN.search(normalized_line):
+        return True
+    if PAGE_NUMBER_LINE_PATTERN.fullmatch(normalized_line):
         return True
     if normalized_line.startswith("আয়কর পররপত্র"):
         return True
@@ -30,6 +42,37 @@ def _is_document_header_line(line: str) -> bool:
         "(3)",
         "(4)",
     }:
+        return True
+    return False
+
+
+def _is_context_heading_line(line: str) -> bool:
+    normalized_line = normalize_text(line)
+    return bool(
+        PART_HEADING_PATTERN.match(normalized_line)
+        or CHAPTER_HEADING_PATTERN.match(normalized_line)
+        or ALL_CAPS_CONTEXT_PATTERN.fullmatch(normalized_line)
+    )
+
+
+def _is_statute_section_heading_line(line: str) -> bool:
+    normalized_line = normalize_text(line)
+    return bool(STATUTE_SECTION_HEADING_PATTERN.match(normalized_line))
+
+
+def _page_prefers_section_chunks(page: ParsedPage, lines: list[str]) -> bool:
+    clause_count = sum(1 for line in lines if CLAUSE_START_PATTERN.match(normalize_text(line)))
+    alpha_clause_count = sum(1 for line in lines if ALPHA_CLAUSE_PATTERN.match(normalize_text(line)))
+    quoted_clause_count = sum(1 for line in lines if "“" in line or '"' in line)
+    if any(_is_statute_section_heading_line(line) for line in lines):
+        return True
+    if any(_is_context_heading_line(line) for line in lines[:15]):
+        return True
+    if page.headings and any(_is_statute_section_heading_line(heading) for heading in page.headings):
+        return True
+    if clause_count >= 3 and quoted_clause_count >= 2:
+        return True
+    if alpha_clause_count >= 3:
         return True
     return False
 
@@ -53,6 +96,10 @@ def _clean_chunk_text(text: str) -> str:
     while lines and _is_document_header_line(lines[0]):
         lines.pop(0)
     while lines and _is_document_header_line(lines[-1]):
+        lines.pop()
+    while lines and _is_context_heading_line(lines[0]):
+        lines.pop(0)
+    while lines and _is_context_heading_line(lines[-1]):
         lines.pop()
     while lines and PURE_STRUCTURAL_LINE_PATTERN.fullmatch(normalize_text(lines[0])):
         lines.pop(0)
@@ -183,7 +230,9 @@ def _iter_page_blocks(page: ParsedPage) -> Iterable[tuple[str, list[str], str]]:
     if _looks_like_structured_table_page(lines):
         yield from _build_structured_table_blocks(page, lines)
         return
-    active_heading_path = list(page.headings[:1])
+    page_prefers_section = _page_prefers_section_chunks(page, lines)
+    section_context: list[str] = []
+    active_heading_path: list[str] = []
     current_lines: list[str] = []
     current_type = (
         "example"
@@ -192,15 +241,27 @@ def _iter_page_blocks(page: ParsedPage) -> Iterable[tuple[str, list[str], str]]:
         if page.is_table_like
         else "appendix"
         if page.is_appendix
+        else "section"
+        if page_prefers_section
         else "text"
     )
     for line in lines:
-        if line in page.headings:
+        if _is_document_header_line(line):
+            continue
+        if _is_context_heading_line(line):
             if current_lines:
                 yield "\n".join(current_lines), list(active_heading_path), current_type
                 current_lines = []
-            active_heading_path = active_heading_path + [line] if line not in active_heading_path else list(active_heading_path)
-            current_type = (
+            section_context = [line]
+            if not active_heading_path:
+                active_heading_path = list(section_context)
+            continue
+        if line in page.headings or _is_statute_section_heading_line(line):
+            if current_lines:
+                yield "\n".join(current_lines), list(active_heading_path), current_type
+                current_lines = []
+            active_heading_path = [*section_context, line] if section_context else [line]
+            current_type = "section" if page_prefers_section else (
                 "example"
                 if page.is_example
                 else "table"
@@ -209,6 +270,16 @@ def _iter_page_blocks(page: ParsedPage) -> Iterable[tuple[str, list[str], str]]:
                 if page.is_appendix
                 else "section"
             )
+            current_lines.append(line)
+            continue
+        if (
+            CLAUSE_START_PATTERN.match(normalize_text(line))
+            and current_lines
+            and "definitions" in " ".join(active_heading_path).lower()
+            and (len(current_lines) > 1 or len("\n".join(current_lines)) >= MIN_BLOCK_LENGTH)
+        ):
+            yield "\n".join(current_lines), list(active_heading_path), current_type
+            current_lines = [line]
             continue
         if ("উদাহরণ" in line or "example" in line.lower()) and not page.is_example:
             if current_lines:
@@ -292,9 +363,23 @@ def section_aware_chunking(
 ) -> list[ChunkRecord]:
     chunks: list[ChunkRecord] = []
     chunk_counter = 1
+    carry_heading_path: list[str] = []
+    carry_chunk_type = "section"
     for page in pages:
-        page_blocks = list(_iter_page_blocks(page))
-        for block_text, heading_path, chunk_type in _merge_small_blocks(page_blocks):
+        page_blocks = list(_merge_small_blocks(list(_iter_page_blocks(page))))
+        resolved_blocks: list[tuple[str, list[str], str]] = []
+        for block_index, (block_text, heading_path, chunk_type) in enumerate(page_blocks):
+            effective_heading_path = list(heading_path)
+            effective_chunk_type = chunk_type
+            if block_index == 0 and not effective_heading_path and carry_heading_path:
+                effective_heading_path = list(carry_heading_path)
+                if effective_chunk_type in {"text", "appendix", "table"} and carry_chunk_type == "section":
+                    effective_chunk_type = carry_chunk_type
+            if effective_heading_path:
+                carry_heading_path = list(effective_heading_path)
+                carry_chunk_type = effective_chunk_type
+            resolved_blocks.append((block_text, effective_heading_path, effective_chunk_type))
+        for block_text, heading_path, chunk_type in resolved_blocks:
             for piece in _split_text_with_overlap(block_text, chunk_size):
                 if _is_low_value_chunk_text(piece):
                     continue

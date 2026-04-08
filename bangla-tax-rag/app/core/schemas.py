@@ -93,6 +93,7 @@ class QueryRequest(BaseModel):
 class QuerySignals(BaseModel):
     original_query: str
     normalized_query: str
+    rewritten_query: str | None = None
     tax_year: str | None = None
     section_reference: str | None = None
     section_id: str | None = None

@@ -625,6 +625,7 @@ Most bad answers in this repo come from weak chunking or wrong evidence selectio
 - [Related Work](docs/related_work.md)
 - [A* Roadmap](READMEA*.md)
 - [Execution Guide](readme_exec.md)
+- [Future Work](readme_futurework.md)
 
 ## Research-Grade Checklist
 

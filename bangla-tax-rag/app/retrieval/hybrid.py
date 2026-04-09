@@ -5,7 +5,7 @@ from pathlib import Path
 from app.core.schemas import HybridRetrievalResponse, QuerySignals, RetrievalHit
 from app.core.utils import extract_salient_query_terms, preprocess_query, tokenize_for_bm25
 from app.retrieval.dense import dense_search
-from app.retrieval.filters import authority_value, deduplicate_retrieval_hits, filter_supportive_hits
+from app.retrieval.filters import authority_value, deduplicate_retrieval_hits, filter_supportive_hits, has_exact_section_heading_match
 from app.retrieval.sparse import DEFAULT_INDEX_DIR, load_sparse_index, sparse_search
 
 logger = logging.getLogger(__name__)
@@ -131,6 +131,25 @@ def build_evidence_pack(
     conflict_notes = detect_conflicts(reranked_hits[: max(final_top_k + 2, 4)])
     deduplicated_hits, dropped_duplicates = deduplicate_retrieval_hits(reranked_hits)
     supportive_hits = filter_supportive_hits(deduplicated_hits, analyzed_query)
+    if analyzed_query.section_reference and not analyzed_query.subsection_id:
+        exact_heading_hits = [
+            hit for hit in supportive_hits
+            if has_exact_section_heading_match(hit, analyzed_query.section_reference)
+        ]
+        if exact_heading_hits:
+            salient_terms = extract_salient_query_terms(analyzed_query.normalized_query)
+            generic_terms = {"section", "tax", "income", "act", "under", "what", "are", analyzed_query.section_reference or ""}
+            informative_terms = {term for term in salient_terms if term not in generic_terms}
+            semantically_aligned_hits = []
+            for hit in exact_heading_hits:
+                searchable_text = f"{' '.join(hit.heading_path)} {hit.normalized_text}".lower()
+                searchable_terms = set(tokenize_for_bm25(searchable_text))
+                if informative_terms:
+                    if any(term in searchable_text for term in informative_terms):
+                        semantically_aligned_hits.append(hit)
+                elif len(salient_terms & searchable_terms) >= 2:
+                    semantically_aligned_hits.append(hit)
+            supportive_hits = semantically_aligned_hits or exact_heading_hits
     requires_exact_support = bool(analyzed_query.subsection_id) or (
         analyzed_query.query_intent == "rate_lookup" and bool(analyzed_query.section_id)
     )

@@ -242,3 +242,56 @@ def test_exact_section_heading_is_preferred_over_incidental_section_reference() 
 
     assert response.hits
     assert response.hits[0].chunk_id == "exact-section"
+
+
+def test_definition_query_prefers_definition_clause_for_commissioner() -> None:
+    dataset = [
+        _chunk(
+            chunk_id="broader-definition-clause",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=3,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            heading_path=["2. Definitions.— In this Act"],
+            normalized_text="(2) “Additional Commissioner of Taxes (Appeals)” means the Additional Commissioner of Taxes (Appeals) and Joint Commissioner of Taxes (Appeals) as referred to in section 4.",
+        ),
+        _chunk(
+            chunk_id="definition-clause",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=6,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            heading_path=["2. Definitions.— In this Act"],
+            normalized_text="(19) “Commissioner” means Commissioner of Taxes or Commissioner of Taxes (Large Taxpayer Unit) as referred to in section 4.",
+        ),
+        _chunk(
+            chunk_id="incidental-commissioner",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=237,
+            section_id="3",
+            subsection_id=None,
+            chunk_type="section",
+            heading_path=["3. Withdrawal of approval.—(1)"],
+            normalized_text="If the Commissioner is satisfied that the conditions mentioned in paragraphs 2 and 3 have been violated.",
+        ),
+    ]
+
+    response = search_sparse_index(
+        query="What is the definition of Commissioner?",
+        index=build_sparse_index(dataset),
+        top_k=3,
+    )
+
+    assert response.hits
+    assert response.hits[0].chunk_id == "definition-clause"

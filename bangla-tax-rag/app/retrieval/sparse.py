@@ -7,7 +7,7 @@ from pathlib import Path
 from rank_bm25 import BM25Okapi
 
 from app.core.schemas import ChunkRecord, QuerySignals, RetrievalHit, RetrievalResponse
-from app.core.utils import extract_salient_query_terms, preprocess_query, tokenize_for_bm25
+from app.core.utils import extract_definition_target, extract_salient_query_terms, preprocess_query, tokenize_for_bm25
 from app.retrieval.filters import authority_value, chunk_quality_score, filter_chunk_records
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,7 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
     quality_score = chunk_quality_score(chunk.normalized_text)
     boosted_score += quality_score * 1.2
     searchable_text = f"{chunk.doc_title} {' '.join(chunk.heading_path)} {chunk.normalized_text}".lower()
+    exact_heading_match = False
     if query_signals.section_reference:
         exact_heading_match = _has_exact_section_heading_match(chunk, query_signals.section_reference)
         if chunk.subsection_id == query_signals.section_reference:
@@ -124,6 +125,8 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
     salient_heading_overlap = len(extract_salient_query_terms(query_signals.normalized_query) & heading_terms)
     if query_signals.section_reference:
         boosted_score += min(salient_heading_overlap * 1.5, 4.5)
+        if not exact_heading_match and salient_heading_overlap == 0:
+            boosted_score -= 3.0
         if salient_heading_overlap <= 1:
             boosted_score -= 2.5
     boosted_score += authority_value(chunk.authority_level) * 0.15
@@ -144,6 +147,40 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
         phrase not in searchable_text for phrase in ("করহার", "কর হার", "tax rate", "rate of tax", "tax payable")
     ):
         boosted_score -= 1.0
+    if query_signals.query_intent == "definition":
+        definition_target = extract_definition_target(query_signals.original_query or query_signals.normalized_query)
+        has_definition_heading = any(
+            keyword in heading.lower()
+            for heading in chunk.heading_path
+            for keyword in ("definition", "definitions", "সংজ্ঞা")
+        )
+        has_definition_language = any(
+            phrase in searchable_text
+            for phrase in (" means ", " means\n", "defined as", "definitions", "definition")
+        )
+        if has_definition_heading:
+            boosted_score += 3.0
+        elif chunk.heading_path:
+            boosted_score -= 0.8
+        if has_definition_language:
+            boosted_score += 2.0
+        else:
+            boosted_score -= 1.2
+        if definition_target:
+            focus_terms = [token.lower() for token in tokenize_for_bm25(definition_target)]
+            if focus_terms and all(term in searchable_text for term in focus_terms):
+                boosted_score += 2.4
+                if any(
+                    phrase in searchable_text
+                    for phrase in (
+                        f"“{definition_target.lower()}” means",
+                        f"\"{definition_target.lower()}\" means",
+                        f"{definition_target.lower()} means",
+                    )
+                ):
+                    boosted_score += 3.0
+            else:
+                boosted_score -= 1.4
     if any(token in query_signals.normalized_query.lower() for token in COMPANY_QUERY_TOKENS):
         if any(token in searchable_text for token in COMPANY_QUERY_TOKENS):
             boosted_score += 1.0

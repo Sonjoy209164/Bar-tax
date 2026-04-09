@@ -1,6 +1,7 @@
 import re
 
 from app.core.schemas import ChunkRecord, QuerySignals, RetrievalHit
+from app.core.utils import extract_definition_target, normalize_text
 
 
 AUTHORITY_RANK = {
@@ -127,6 +128,40 @@ def deduplicate_retrieval_hits(
     return deduplicated_hits, dropped_duplicates
 
 
+def has_exact_section_heading_match(hit: RetrievalHit, section_reference: str) -> bool:
+    heading_pattern = re.compile(rf"^{re.escape(section_reference)}(?:[.)]|(?:\s*[—:-]))")
+    if heading_pattern.match(normalize_text(hit.normalized_text)):
+        return True
+    return any(heading_pattern.match(normalize_text(heading)) for heading in hit.heading_path)
+
+
+def hit_matches_definition_target_exactly(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    focus_term = extract_definition_target(analyzed_query.original_query or analyzed_query.normalized_query)
+    if not focus_term:
+        return False
+    searchable_text = normalize_text(f"{' '.join(hit.heading_path)} {hit.normalized_text}").lower()
+    normalized_focus = normalize_text(focus_term).lower()
+    patterns = [
+        f"“{normalized_focus}” means",
+        f"\"{normalized_focus}\" means",
+        f"{normalized_focus} means",
+    ]
+    return any(pattern in searchable_text for pattern in patterns)
+
+
+def hit_supports_definition(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    searchable_text = f"{' '.join(hit.heading_path)} {hit.normalized_text}".lower()
+    has_definition_heading = "definition" in searchable_text or "definitions" in searchable_text or "সংজ্ঞা" in searchable_text
+    has_definition_language = " means " in searchable_text or " means\n" in searchable_text or "defined as" in searchable_text or "সংজ্ঞা" in searchable_text
+    focus_term = extract_definition_target(analyzed_query.original_query or analyzed_query.normalized_query)
+    if focus_term:
+        focus_tokens = [token.lower() for token in focus_term.split() if token.strip()]
+        focus_match = all(token in searchable_text for token in focus_tokens)
+    else:
+        focus_match = True
+    return focus_match and (has_definition_heading or has_definition_language)
+
+
 def hit_supports_query(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
     normalized_text = hit.normalized_text.lower()
     is_rate_lookup = analyzed_query.query_intent == "rate_lookup"
@@ -148,6 +183,13 @@ def hit_supports_query(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
 
 
 def filter_supportive_hits(hits: list[RetrievalHit], analyzed_query: QuerySignals) -> list[RetrievalHit]:
+    if analyzed_query.query_intent == "definition":
+        definition_hits = [hit for hit in hits if hit_supports_definition(hit, analyzed_query)]
+        exact_target_hits = [hit for hit in definition_hits if hit_matches_definition_target_exactly(hit, analyzed_query)]
+        if exact_target_hits:
+            return exact_target_hits
+        if definition_hits:
+            return definition_hits
     if not analyzed_query.section_id and not analyzed_query.subsection_id:
         return hits
     supportive_hits = [hit for hit in hits if hit_supports_query(hit, analyzed_query)]

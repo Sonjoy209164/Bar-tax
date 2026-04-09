@@ -1,6 +1,6 @@
 from app.core.schemas import GenerationOptions, QuerySignals, RetrievalHit
 from app.core.utils import preprocess_query
-from app.generation.generator import generate_answer
+from app.generation.generator import generate_answer, parse_model_output
 
 
 def _hit(
@@ -107,6 +107,30 @@ def test_generation_flow_using_mocked_model_response() -> None:
     assert "[C1]" in result.answer_text
     assert result.used_chunk_ids == ["c1", "c2"]
     assert [citation.marker for citation in result.citations] == ["[C1]", "[C2]"]
+
+
+def test_parse_model_output_accepts_fenced_json() -> None:
+    answer_sentences, conflict_notes = parse_model_output(
+        """```json
+        {"answer_sentences":[{"sentence":"The income tax authorities include the National Board of Revenue.","citations":["[C1]"]}],"conflict_notes":[]}
+        ```"""
+    )
+
+    assert conflict_notes == []
+    assert len(answer_sentences) == 1
+    assert answer_sentences[0].sentence_text == "The income tax authorities include the National Board of Revenue."
+    assert answer_sentences[0].citation_markers == ["[C1]"]
+
+
+def test_parse_model_output_accepts_wrapped_json() -> None:
+    answer_sentences, conflict_notes = parse_model_output(
+        'Here is the grounded answer JSON:\n{"answer_sentences":[{"sentence":"The income tax authorities include the National Board of Revenue.","citations":["[C1]"]}],"conflict_notes":["none"]}\nUse it carefully.'
+    )
+
+    assert conflict_notes == ["none"]
+    assert len(answer_sentences) == 1
+    assert answer_sentences[0].sentence_text == "The income tax authorities include the National Board of Revenue."
+    assert answer_sentences[0].citation_markers == ["[C1]"]
 
 
 def test_default_mock_generation_is_extractive_and_supported() -> None:
@@ -268,4 +292,59 @@ def test_say_about_query_returns_focused_mention_answer() -> None:
     assert result.abstained is False
     assert result.verification_passed is True
     assert 'software test lab service' in result.answer_text.lower()
+    assert "[C1]" in result.answer_text
+
+
+def test_definition_query_prefers_exact_definition_sentence() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.1,
+            tax_year=None,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            text="(2) “Additional Commissioner of Taxes (Appeals)” means the Additional Commissioner of Taxes (Appeals) as referred to in section 4;",
+        ),
+        _hit(
+            chunk_id="c2",
+            score=3.0,
+            tax_year=None,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            text="(19) “Commissioner” means Commissioner of Taxes or Commissioner of Taxes (Large Taxpayer Unit) as referred to in section 4;",
+        ),
+    ]
+    query = preprocess_query("What is the definition of Commissioner?")
+
+    result = generate_answer("What is the definition of Commissioner?", hits, query, _options())
+
+    assert result.abstained is False
+    assert result.verification_passed is True
+    assert "commissioner" in result.answer_text.lower()
+    assert "additional commissioner" not in result.answer_text.lower()
+    assert result.used_chunk_ids == ["c2"]
+
+
+def test_section_query_can_answer_from_heading_path_when_heading_is_best_signal() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.5,
+            tax_year=None,
+            section_id="4",
+            subsection_id=None,
+            chunk_type="section",
+            text="There shall be the following classes, namely: (a) The National Board of Revenue;",
+        )
+    ]
+    hits[0].heading_path = ["4. Income tax authorities.—For the purposes of this Act, there shall be the following classes of income tax authorities."]
+    query = preprocess_query("What are the income tax authorities under section 4?")
+
+    result = generate_answer("What are the income tax authorities under section 4?", hits, query, _options())
+
+    assert result.abstained is False
+    assert result.verification_passed is True
+    assert "income tax authorities" in result.answer_text.lower()
     assert "[C1]" in result.answer_text

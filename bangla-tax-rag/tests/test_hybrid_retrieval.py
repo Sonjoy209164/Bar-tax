@@ -223,3 +223,79 @@ def test_hybrid_mention_query_prefers_software_service_chunk() -> None:
     assert response.analyzed_query.query_intent == "mention_lookup"
     assert response.final_hits
     assert response.final_hits[0].chunk_id == "software-services"
+
+
+def test_evidence_pack_prefers_exact_section_heading_when_available() -> None:
+    analyzed_query = run_hybrid_retrieval(
+        query="What are the income tax authorities under section 4?",
+        sparse_hits_override=[],
+        dense_hits_override=[],
+    ).analyzed_query
+    fused_hits = [
+        _hit(
+            chunk_id="exact-section",
+            score=5.5,
+            page_no=24,
+            section_id="4",
+            chunk_type="section",
+            heading_path=["4. Income tax authorities.—For the purposes of this Act"],
+            text="4. Income tax authorities.—For the purposes of this Act, there shall be the following classes of income tax authorities.",
+        ),
+        _hit(
+            chunk_id="incidental-reference",
+            score=5.2,
+            page_no=207,
+            section_id="4",
+            chunk_type="section",
+            heading_path=["295. Appeal to the Appellate Division.—(1)"],
+            text="Commissioner of Taxes from among the income tax authorities under section 4 to represent in the Alternative Dispute Resolution process.",
+        ),
+    ]
+
+    final_hits, _, _, _ = build_evidence_pack(
+        fused_hits,
+        analyzed_query,
+        final_top_k=3,
+    )
+
+    assert final_hits
+    assert final_hits[0].chunk_id == "exact-section"
+    assert all(hit.chunk_id != "incidental-reference" for hit in final_hits)
+
+
+def test_evidence_pack_filters_out_wrong_topic_even_with_same_section_number() -> None:
+    analyzed_query = run_hybrid_retrieval(
+        query="What are the income tax authorities under section 4?",
+        sparse_hits_override=[],
+        dense_hits_override=[],
+    ).analyzed_query
+    fused_hits = [
+        _hit(
+            chunk_id="authorities-section",
+            score=5.5,
+            page_no=24,
+            section_id="4",
+            chunk_type="section",
+            heading_path=["4. Income tax authorities.—For the purposes of this Act"],
+            text="There shall be the following classes of income tax authorities.",
+        ),
+        _hit(
+            chunk_id="wrong-topic-section",
+            score=5.3,
+            page_no=265,
+            section_id="4",
+            chunk_type="appendix",
+            heading_path=["4. Tax exemption of profits from refining or concentrating mineral"],
+            text="The provisions of this paragraph shall apply to the assessment for the year next following the income year.",
+        ),
+    ]
+
+    final_hits, _, _, _ = build_evidence_pack(
+        fused_hits,
+        analyzed_query,
+        final_top_k=3,
+    )
+
+    assert final_hits
+    assert final_hits[0].chunk_id == "authorities-section"
+    assert all(hit.chunk_id != "wrong-topic-section" for hit in final_hits)

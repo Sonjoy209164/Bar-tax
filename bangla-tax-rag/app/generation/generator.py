@@ -19,6 +19,7 @@ from app.core.utils import (
     clamp_score,
     clean_bangla_ocr_text,
     detect_text_language,
+    extract_definition_target,
     extract_salient_query_terms,
     normalize_text,
     split_sentences,
@@ -199,9 +200,8 @@ def pre_generation_abstention(
 
 
 def parse_model_output(raw_output: str) -> tuple[list[AnswerSentence], list[str]]:
-    try:
-        parsed_output = json.loads(raw_output)
-    except json.JSONDecodeError:
+    parsed_output = _parse_structured_model_output(raw_output)
+    if parsed_output is None:
         sentence_texts = split_sentences(raw_output)
         return ([AnswerSentence(sentence_text=text) for text in sentence_texts], [])
     answer_sentences = [
@@ -214,6 +214,76 @@ def parse_model_output(raw_output: str) -> tuple[list[AnswerSentence], list[str]
     ]
     conflict_notes = [str(note) for note in parsed_output.get("conflict_notes", [])]
     return answer_sentences, conflict_notes
+
+
+def _strip_json_code_fence(text: str) -> str:
+    stripped = text.strip()
+    fence_match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", stripped, flags=re.DOTALL | re.IGNORECASE)
+    if fence_match:
+        return fence_match.group(1).strip()
+    return stripped
+
+
+def _extract_first_json_object(text: str) -> str | None:
+    start_index = text.find("{")
+    if start_index < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape_next = False
+    for index, char in enumerate(text[start_index:], start=start_index):
+        if in_string:
+            if escape_next:
+                escape_next = False
+            elif char == "\\":
+                escape_next = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start_index:index + 1]
+    return None
+
+
+def _coerce_to_generation_dict(candidate: object) -> dict | None:
+    current = candidate
+    for _ in range(2):
+        if isinstance(current, str):
+            normalized = current.strip()
+            if not normalized:
+                return None
+            try:
+                current = json.loads(normalized)
+            except json.JSONDecodeError:
+                return None
+            continue
+        break
+    if isinstance(current, dict):
+        return current
+    return None
+
+
+def _parse_structured_model_output(raw_output: str) -> dict | None:
+    stripped_output = raw_output.strip()
+    candidates = [stripped_output]
+    unfenced_output = _strip_json_code_fence(stripped_output)
+    if unfenced_output != stripped_output:
+        candidates.append(unfenced_output)
+    extracted_json = _extract_first_json_object(unfenced_output)
+    if extracted_json and extracted_json not in candidates:
+        candidates.append(extracted_json)
+
+    for candidate in candidates:
+        parsed_output = _coerce_to_generation_dict(candidate)
+        if parsed_output and isinstance(parsed_output.get("answer_sentences"), list):
+            return parsed_output
+    return None
 
 
 def _sentence_overlap_score(sentence_text: str, query_text: str) -> int:
@@ -269,6 +339,14 @@ def _build_section_summary_answer(
 ) -> tuple[list[AnswerSentence], list[str]]:
     candidate_sentences: list[tuple[int, int, str, str]] = []
     for citation, hit in zip(citations, evidence_hits, strict=False):
+        for heading in hit.heading_path:
+            normalized_heading = normalize_text(heading).lower()
+            if normalized_heading.endswith((" there shall be the", " of the", " to the", " for the", " under the")):
+                continue
+            overlap_score = _sentence_overlap_score(heading, question_text) + 3
+            if analyzed_query and analyzed_query.section_id and analyzed_query.section_id in heading:
+                overlap_score += 3
+            candidate_sentences.append((overlap_score, len(heading), heading.strip(), citation.marker))
         excerpt = _find_section_excerpt(hit.original_text, analyzed_query)
         for sentence in split_sentences(excerpt):
             overlap_score = _sentence_overlap_score(sentence, question_text)
@@ -387,6 +465,39 @@ def _build_mention_lookup_answer(
     return [AnswerSentence(sentence_text=sentence_text, citation_markers=markers)], []
 
 
+def _build_definition_answer(
+    question_text: str,
+    evidence_hits: list[RetrievalHit],
+    citations: list[CitationRecord],
+    analyzed_query: QuerySignals | None,
+) -> tuple[list[AnswerSentence], list[str]]:
+    focus_term = extract_definition_target(question_text)
+    candidate_sentences: list[tuple[int, int, str, str]] = []
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        for sentence in split_sentences(_clean_evidence_text(hit.original_text)):
+            lowered_sentence = sentence.lower()
+            score = _sentence_overlap_score(sentence, question_text)
+            if "means" in lowered_sentence or "defined as" in lowered_sentence:
+                score += 3
+            if focus_term and normalize_text(focus_term).lower() in normalize_text(sentence).lower():
+                score += 4
+                if any(
+                    phrase in normalize_text(sentence).lower()
+                    for phrase in (
+                        f"“{normalize_text(focus_term).lower()}” means",
+                        f"\"{normalize_text(focus_term).lower()}\" means",
+                        f"{normalize_text(focus_term).lower()} means",
+                    )
+                ):
+                    score += 4
+            candidate_sentences.append((score, len(sentence), sentence.strip(), citation.marker))
+    if not candidate_sentences:
+        return build_mock_grounded_answer(question_text, evidence_hits, citations)
+    candidate_sentences.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    _, _, best_sentence, best_marker = candidate_sentences[0]
+    return [AnswerSentence(sentence_text=truncate_text(best_sentence, max_length=260), citation_markers=[best_marker])], []
+
+
 def build_mock_grounded_answer(
     question_text: str,
     evidence_hits: list[RetrievalHit],
@@ -397,6 +508,8 @@ def build_mock_grounded_answer(
         return [], []
     if analyzed_query and analyzed_query.query_intent == "mention_lookup":
         return _build_mention_lookup_answer(question_text, evidence_hits, citations)
+    if analyzed_query and analyzed_query.query_intent == "definition":
+        return _build_definition_answer(question_text, evidence_hits, citations, analyzed_query)
     if analyzed_query and analyzed_query.query_intent == "rate_lookup":
         return _build_rate_lookup_answer(question_text, evidence_hits, citations)
     if analyzed_query and (analyzed_query.subsection_id or analyzed_query.section_id):

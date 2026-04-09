@@ -3,7 +3,7 @@ from pathlib import Path
 
 from app.core.schemas import RetrievalHit
 from app.core.utils import ensure_directory
-from app.core.utils import preprocess_query, tokenize_for_bm25
+from app.core.utils import extract_definition_target, preprocess_query, tokenize_for_bm25
 from app.retrieval.filters import authority_value, chunk_quality_score, filter_chunk_records
 from app.retrieval.sparse import DEFAULT_INDEX_DIR, load_chunk_records_from_jsonl
 
@@ -67,9 +67,11 @@ def dense_search(
     scored_hits: list[RetrievalHit] = []
     for chunk in filtered_records:
         weighted_text = " ".join([chunk.doc_title, " ".join(chunk.heading_path), chunk.normalized_text])
+        searchable_text = weighted_text.lower()
         chunk_tokens = set(tokenize_for_bm25(weighted_text))
         score = _dense_like_score(query_tokens, chunk_tokens, chunk.authority_level)
         score += chunk_quality_score(chunk.normalized_text) * 0.8
+        exact_heading_match = False
         if analyzed_query.subsection_id:
             if chunk.subsection_id == analyzed_query.subsection_id:
                 score += 1.8
@@ -80,6 +82,15 @@ def dense_search(
                 score += 1.0
             else:
                 score -= 0.8
+        if analyzed_query.section_reference:
+            exact_heading_match = any(
+                tokenize_for_bm25(heading.lower())[:1] == tokenize_for_bm25(analyzed_query.section_reference)
+                or heading.lower().startswith(f"{analyzed_query.section_reference}.")
+                or heading.lower().startswith(f"{analyzed_query.section_reference} ")
+                for heading in chunk.heading_path
+            )
+            if exact_heading_match:
+                score += 1.8
         if analyzed_query.query_intent == "rate_lookup":
             if chunk.chunk_type == "table":
                 score += 1.1
@@ -87,6 +98,38 @@ def dense_search(
                 score += 0.9
             else:
                 score -= 0.7
+        if analyzed_query.query_intent == "definition":
+            definition_target = extract_definition_target(analyzed_query.original_query or analyzed_query.normalized_query)
+            has_definition_heading = any(
+                keyword in heading.lower()
+                for heading in chunk.heading_path
+                for keyword in ("definition", "definitions", "সংজ্ঞা")
+            )
+            has_definition_language = any(
+                phrase in searchable_text
+                for phrase in (" means ", " means\n", "defined as", "definitions", "definition")
+            )
+            if has_definition_heading:
+                score += 2.0
+            if has_definition_language:
+                score += 1.5
+            else:
+                score -= 1.0
+            if definition_target:
+                focus_terms = [token.lower() for token in tokenize_for_bm25(definition_target)]
+                if focus_terms and all(term in searchable_text for term in focus_terms):
+                    score += 2.0
+                    if any(
+                        phrase in searchable_text
+                        for phrase in (
+                            f"“{definition_target.lower()}” means",
+                            f"\"{definition_target.lower()}\" means",
+                            f"{definition_target.lower()} means",
+                        )
+                    ):
+                        score += 2.5
+                else:
+                    score -= 1.2
         if score <= 0:
             continue
         scored_hits.append(

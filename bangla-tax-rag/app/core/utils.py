@@ -282,8 +282,30 @@ def rewrite_query(normalized_query: str, query_type: str) -> str:
         if "act" in lower_query:
             rewritten_terms.extend(["act", "income tax act"])
     if query_type == "definition" and "commissioner" in lower_query:
-        rewritten_terms.extend(["definition", "commissioner"])
+        rewritten_terms.extend(["definition", "definitions", "commissioner", "means"])
+    elif query_type == "definition":
+        rewritten_terms.extend(["definition", "definitions", "means"])
+        focus_term = extract_definition_target(normalized_query)
+        if focus_term:
+            rewritten_terms.extend(tokenize_for_bm25(focus_term))
     return " ".join(dict.fromkeys(rewritten_terms))
+
+
+def extract_definition_target(text: str) -> str | None:
+    normalized_text = normalize_text(text)
+    patterns = [
+        r"what is (?:the\s+)?definition of\s+(.+?)(?:\?|$)",
+        r"definition of\s+(.+?)(?:\?|$)",
+        r"(.+?)\s+মানে\s+কী(?:\?|$)",
+        r"(.+?)\s+এর\s+সংজ্ঞা\s+কী(?:\?|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, normalized_text, flags=re.IGNORECASE)
+        if match:
+            candidate = match.group(1).strip(" \"'`.,:;-")
+            if candidate:
+                return candidate
+    return None
 
 
 def preprocess_query(query: str) -> QuerySignals:

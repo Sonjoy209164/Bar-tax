@@ -4,6 +4,7 @@ import json
 import sys
 from typing import Any
 from pathlib import Path
+from collections import defaultdict
 
 import requests
 import streamlit as st
@@ -23,6 +24,14 @@ REQUEST_TIMEOUT_SECONDS = 30
 INGEST_TIMEOUT_SECONDS = 300
 INDEX_BUILD_TIMEOUT_SECONDS = 120
 QUERY_TIMEOUT_SECONDS = 90
+GENERATION_TEST_QUESTIONS = [
+    "What are the income tax authorities under section 4?",
+    "What is the definition of Commissioner?",
+    "What does section 32 say about income from employment?",
+    "Is software service mentioned in the Act?",
+    "What does the Act say about software test lab service?",
+    "What is the tax day for a company?",
+]
 
 
 def initialize_session_state() -> None:
@@ -32,6 +41,8 @@ def initialize_session_state() -> None:
         "last_query_response": None,
         "last_ingest_response": None,
         "last_build_index_response": None,
+        "last_retrieval_inspector_response": None,
+        "question_preset": GENERATION_TEST_QUESTIONS[0],
         "question_text": "২০২৫-২০২৬ করবর্ষে কোম্পানির করহার কী?",
         "retrieval_mode": settings.retrieval_mode,
         "tax_year": "",
@@ -133,6 +144,85 @@ def load_pdf_page_snapshot(pdf_path: str, page_no: int, zoom_factor: float = 1.2
             return pixmap.tobytes("png"), None
     except Exception as exc:  # pragma: no cover - defensive UI handling
         return None, str(exc)
+
+
+@st.cache_data(show_spinner=False)
+def run_local_retrieval_inspection(
+    *,
+    query_text: str,
+    retrieval_mode: str,
+    index_dir: str,
+    tax_year: str | None,
+    top_k: int,
+    final_evidence_k: int,
+) -> dict[str, Any]:
+    from app.core.utils import extract_salient_query_terms, preprocess_query, tokenize_for_bm25
+    from app.retrieval.dense import dense_search
+    from app.retrieval.hybrid import run_hybrid_retrieval
+    from app.retrieval.sparse import sparse_search
+
+    analyzed_query = preprocess_query(query_text)
+    search_query = analyzed_query.rewritten_query or analyzed_query.normalized_query
+    query_tokens = tokenize_for_bm25(search_query)
+    salient_terms = sorted(extract_salient_query_terms(search_query))
+    effective_tax_year = tax_year or analyzed_query.tax_year
+
+    payload: dict[str, Any] = {
+        "query_text": query_text,
+        "retrieval_mode": retrieval_mode,
+        "index_dir": index_dir,
+        "analyzed_query": analyzed_query.model_dump(),
+        "search_query": search_query,
+        "query_tokens": query_tokens,
+        "salient_terms": salient_terms,
+        "tax_year": effective_tax_year,
+        "top_k": top_k,
+        "final_evidence_k": final_evidence_k,
+        "sparse_hits": [],
+        "dense_hits": [],
+        "fused_hits": [],
+        "final_hits": [],
+        "conflict_notes": [],
+        "evidence_summary": "",
+    }
+
+    if retrieval_mode == "sparse":
+        sparse_hits = sparse_search(
+            query_text,
+            top_k=top_k,
+            tax_year=effective_tax_year,
+            index_dir=index_dir,
+        )
+        payload["sparse_hits"] = sparse_hits
+        payload["final_hits"] = sparse_hits
+        return payload
+
+    if retrieval_mode == "dense":
+        dense_hits = dense_search(
+            query_text,
+            top_k=top_k,
+            tax_year=effective_tax_year,
+            index_dir=index_dir,
+        )
+        payload["dense_hits"] = dense_hits
+        payload["final_hits"] = dense_hits
+        return payload
+
+    hybrid_response = run_hybrid_retrieval(
+        query=query_text,
+        sparse_top_k=max(top_k * 2, 10),
+        dense_top_k=max(top_k * 2, 10),
+        final_top_k=final_evidence_k,
+        tax_year=effective_tax_year,
+        index_dir=index_dir,
+    )
+    payload["sparse_hits"] = [hit.model_dump() for hit in hybrid_response.sparse_hits]
+    payload["dense_hits"] = [hit.model_dump() for hit in hybrid_response.dense_hits]
+    payload["fused_hits"] = [hit.model_dump() for hit in hybrid_response.fused_hits]
+    payload["final_hits"] = [hit.model_dump() for hit in hybrid_response.final_hits]
+    payload["conflict_notes"] = hybrid_response.conflict_notes
+    payload["evidence_summary"] = hybrid_response.evidence_summary
+    return payload
 
 
 def api_get(base_url: str, endpoint: str) -> tuple[bool, dict[str, Any] | None, str | None]:
@@ -301,6 +391,24 @@ def render_index_building_panel(base_url: str) -> None:
 
 def render_query_panel(base_url: str) -> None:
     st.subheader("Query")
+    with st.expander("Suggested Questions For Generation", expanded=False):
+        st.caption("Load one of these into the query box to test grounded answer generation quickly.")
+        preset_column, action_column = st.columns([3, 1])
+        with preset_column:
+            selected_question = st.selectbox(
+                "Question Preset",
+                options=GENERATION_TEST_QUESTIONS,
+                key="question_preset",
+            )
+        with action_column:
+            st.write("")
+            if st.button("Use Question", use_container_width=True):
+                st.session_state["question_text"] = selected_question
+                st.session_state["last_query_response"] = None
+        st.markdown("**Preset List**")
+        for question in GENERATION_TEST_QUESTIONS:
+            st.code(question, language="text")
+
     with st.form("query_form", clear_on_submit=False):
         question_text = st.text_area(
             "Question Text",
@@ -356,7 +464,12 @@ def render_citations(citations: list[dict[str, Any]]) -> None:
             st.write(citation.get("evidence_snippet", ""))
 
 
-def render_hit_card(hit: dict[str, Any], heading: str | None = None) -> None:
+def render_hit_card(
+    hit: dict[str, Any],
+    heading: str | None = None,
+    *,
+    show_intermediate_scores: bool = False,
+) -> None:
     title = heading or f"{hit.get('doc_title', 'Untitled Document')} | page {hit.get('page_no', '-')}"
     with st.expander(title, expanded=False):
         metadata_columns = st.columns(4)
@@ -371,6 +484,9 @@ def render_hit_card(hit: dict[str, Any], heading: str | None = None) -> None:
         heading_path = hit.get("heading_path") or []
         if heading_path:
             st.markdown(f"**Heading Path:** {' > '.join(heading_path)}")
+        if show_intermediate_scores and hit.get("intermediate_scores"):
+            st.markdown("**Intermediate Scores**")
+            st.json(hit.get("intermediate_scores"))
         snippet = hit.get("original_text") or hit.get("content") or hit.get("normalized_text") or ""
         st.write(snippet)
 
@@ -566,6 +682,68 @@ def render_indexed_chunk_card(chunk: dict[str, Any], *, weighted_search_text: st
         st.code(chunk.get("original_text") or "", language="text")
 
 
+def _build_index_tree(
+    chunk_records: list[dict[str, Any]],
+) -> dict[str, dict[int, dict[str, list[dict[str, Any]]]]]:
+    tree: dict[str, dict[int, dict[str, list[dict[str, Any]]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(list))
+    )
+    for chunk in chunk_records:
+        doc_label = f"{chunk.get('doc_title') or chunk.get('doc_id') or 'unknown document'} [{chunk.get('doc_id') or '-'}]"
+        page_no = int(chunk.get("page_no") or -1)
+        section_label = (
+            chunk.get("subsection_id")
+            or chunk.get("section_id")
+            or "unlabeled-section"
+        )
+        tree[doc_label][page_no][str(section_label)].append(chunk)
+    return {
+        doc_label: {
+            page_no: dict(section_map)
+            for page_no, section_map in sorted(page_map.items())
+        }
+        for doc_label, page_map in sorted(tree.items())
+    }
+
+
+def render_index_tree(chunk_records: list[dict[str, Any]]) -> None:
+    tree = _build_index_tree(chunk_records)
+    st.markdown("**Index Tree**")
+    for doc_label, page_map in tree.items():
+        doc_chunk_count = sum(
+            len(chunks)
+            for section_map in page_map.values()
+            for chunks in section_map.values()
+        )
+        with st.container(border=True):
+            st.markdown(f"### {doc_label}")
+            st.caption(f"{len(page_map)} pages | {doc_chunk_count} chunks")
+            for page_no, section_map in page_map.items():
+                page_chunk_count = sum(len(chunks) for chunks in section_map.values())
+                with st.container(border=True):
+                    st.markdown(f"**page {page_no}**")
+                    st.caption(f"{len(section_map)} sections | {page_chunk_count} chunks")
+                    for section_label, chunks in section_map.items():
+                        chunk_type_summary = sorted({str(chunk.get('chunk_type') or 'unknown') for chunk in chunks})
+                        st.markdown(
+                            f"- **section {section_label}** | {len(chunks)} chunks | {', '.join(chunk_type_summary)}"
+                        )
+                        for chunk in chunks:
+                            chunk_label = (
+                                f"{chunk.get('chunk_id', 'unknown-chunk')} | "
+                                f"{chunk.get('chunk_type', '-')} | "
+                                f"{(chunk.get('heading_path') or ['-'])[-1]}"
+                            )
+                            with st.container(border=True):
+                                st.caption(chunk_label)
+                                metadata_columns = st.columns(4)
+                                metadata_columns[0].metric("Section", str(chunk.get("section_id") or "-"))
+                                metadata_columns[1].metric("Subsection", str(chunk.get("subsection_id") or "-"))
+                                metadata_columns[2].metric("Authority", str(chunk.get("authority_level") or "-"))
+                                metadata_columns[3].metric("Tax Year", str(chunk.get("tax_year") or "-"))
+                                st.code(chunk.get("original_text") or "", language="text")
+
+
 def render_index_inspector() -> None:
     st.subheader("Index Inspector")
     st.caption("Inspect saved index artifacts after chunking and before retrieval. This reads local index files directly.")
@@ -622,6 +800,12 @@ def render_index_inspector() -> None:
             value="",
             placeholder="Example: 24",
         ).strip()
+    view_mode = st.radio(
+        "Index View Mode",
+        options=["tree", "flat", "both"],
+        horizontal=True,
+        index=0,
+    )
 
     filtered_chunks = chunk_records
     if chunk_type_filter:
@@ -631,19 +815,138 @@ def render_index_inspector() -> None:
 
     st.caption(f"Showing {len(filtered_chunks)} of {len(chunk_records)} loaded index chunks")
 
+    if view_mode in {"tree", "both"}:
+        render_index_tree(filtered_chunks)
+
     from app.core.utils import tokenize_for_bm25
     from app.core.schemas import ChunkRecord
     from app.retrieval.sparse import build_weighted_search_text
 
-    for chunk in filtered_chunks:
-        chunk_record = ChunkRecord.model_validate(chunk)
-        weighted_search_text = build_weighted_search_text(chunk_record)
-        tokenized_terms = tokenize_for_bm25(weighted_search_text)
-        render_indexed_chunk_card(
-            chunk,
-            weighted_search_text=weighted_search_text,
-            tokenized_terms=tokenized_terms,
+    if view_mode in {"flat", "both"}:
+        st.markdown("**Indexed Chunk Cards**")
+        for chunk in filtered_chunks:
+            chunk_record = ChunkRecord.model_validate(chunk)
+            weighted_search_text = build_weighted_search_text(chunk_record)
+            tokenized_terms = tokenize_for_bm25(weighted_search_text)
+            render_indexed_chunk_card(
+                chunk,
+                weighted_search_text=weighted_search_text,
+                tokenized_terms=tokenized_terms,
+            )
+
+
+def render_retrieval_inspector() -> None:
+    st.subheader("Retrieval Inspector")
+    st.caption("Inspect local retrieval before generation. This runs sparse, dense, or hybrid retrieval directly against the selected index directory.")
+
+    last_build_index_response = st.session_state.get("last_build_index_response")
+    if not isinstance(last_build_index_response, dict):
+        last_build_index_response = {}
+    default_index_dir = (
+        last_build_index_response.get("sparse_index_path")
+        or last_build_index_response.get("dense_index_path")
+        or "indexes/sparse-english"
+    )
+
+    with st.form("retrieval_inspector_form", clear_on_submit=False):
+        question_text = st.text_area(
+            "Inspector Query",
+            value="What are the income tax authorities under section 4?",
+            height=100,
         )
+        selection_left, selection_right = st.columns(2)
+        with selection_left:
+            retrieval_mode = st.selectbox("Retrieval Mode", options=["sparse", "dense", "hybrid"], index=0)
+            index_dir = st.text_input("Index Directory", value=default_index_dir)
+            tax_year = st.text_input("Tax Year (optional)", value="", placeholder="2025-2026")
+        with selection_right:
+            top_k = st.number_input("Top K", min_value=1, max_value=20, value=5, step=1)
+            final_evidence_k = st.number_input("Final Evidence K", min_value=1, max_value=20, value=5, step=1)
+        submitted = st.form_submit_button("Run Retrieval Inspection", use_container_width=True)
+
+    if submitted:
+        try:
+            response_payload = run_local_retrieval_inspection(
+                query_text=question_text,
+                retrieval_mode=retrieval_mode,
+                index_dir=index_dir,
+                tax_year=tax_year or None,
+                top_k=int(top_k),
+                final_evidence_k=int(final_evidence_k),
+            )
+        except Exception as exc:  # pragma: no cover - defensive UI handling
+            st.error(f"Retrieval inspection failed: {exc}")
+        else:
+            st.session_state["last_retrieval_inspector_response"] = response_payload
+            st.success("Retrieval inspection completed.")
+
+    response_payload = st.session_state.get("last_retrieval_inspector_response")
+    if not response_payload:
+        st.info("Run a local retrieval inspection to see analyzed query signals, tokens, and hits.")
+        return
+
+    st.markdown("**Analyzed Query**")
+    st.json(response_payload.get("analyzed_query") or {})
+    search_query = response_payload.get("search_query")
+    if search_query:
+        st.markdown("**Effective Search Query**")
+        st.code(search_query, language="text")
+
+    token_left, token_right = st.columns(2)
+    with token_left:
+        st.markdown("**Query Tokens**")
+        st.code(" ".join(response_payload.get("query_tokens") or []), language="text")
+    with token_right:
+        st.markdown("**Salient Terms**")
+        st.code(" ".join(response_payload.get("salient_terms") or []), language="text")
+
+    conflict_notes = response_payload.get("conflict_notes") or []
+    if conflict_notes:
+        st.warning("Conflicts detected during final evidence selection.")
+        for note in conflict_notes:
+            st.write(f"- {note}")
+
+    evidence_summary = response_payload.get("evidence_summary")
+    if evidence_summary:
+        st.markdown("**Evidence Summary**")
+        st.code(evidence_summary, language="text")
+
+    retrieval_mode = response_payload.get("retrieval_mode")
+    if retrieval_mode == "hybrid":
+        sparse_tab, dense_tab, fused_tab, final_tab = st.tabs(["Sparse", "Dense", "Fused", "Final Evidence"])
+        with sparse_tab:
+            sparse_hits = response_payload.get("sparse_hits") or []
+            if not sparse_hits:
+                st.caption("No sparse hits returned.")
+            for hit in sparse_hits:
+                render_hit_card(hit, show_intermediate_scores=True)
+        with dense_tab:
+            dense_hits = response_payload.get("dense_hits") or []
+            if not dense_hits:
+                st.caption("No dense hits returned.")
+            for hit in dense_hits:
+                render_hit_card(hit, show_intermediate_scores=True)
+        with fused_tab:
+            fused_hits = response_payload.get("fused_hits") or []
+            if not fused_hits:
+                st.caption("No fused hits returned.")
+            for hit in fused_hits:
+                render_hit_card(hit, show_intermediate_scores=True)
+        with final_tab:
+            final_hits = response_payload.get("final_hits") or []
+            if not final_hits:
+                st.caption("No final evidence hits returned.")
+            for hit in final_hits:
+                render_hit_card(hit, show_intermediate_scores=True)
+        return
+
+    st.markdown("**Retrieved Hits**")
+    hits = response_payload.get("sparse_hits") if retrieval_mode == "sparse" else response_payload.get("dense_hits")
+    if not hits:
+        st.info("No hits returned.")
+        return
+    for hit in hits:
+        render_hit_card(hit, show_intermediate_scores=True)
 
 
 def render_results_panel() -> None:
@@ -725,7 +1028,11 @@ def main() -> None:
     st.caption("Research UI for PDF ingestion, index building, grounded retrieval, and cited answer exploration.")
 
     st.sidebar.header("Navigation")
-    view_name = st.sidebar.radio("View", options=["Research Workspace", "Parser Inspector", "Index Inspector"], index=0)
+    view_name = st.sidebar.radio(
+        "View",
+        options=["Research Workspace", "Parser Inspector", "Index Inspector", "Retrieval Inspector"],
+        index=0,
+    )
 
     config_payload, api_reachable = render_api_connection_panel(st.session_state["backend_base_url"])
     if not api_reachable:
@@ -739,6 +1046,9 @@ def main() -> None:
         return
     if view_name == "Index Inspector":
         render_index_inspector()
+        return
+    if view_name == "Retrieval Inspector":
+        render_retrieval_inspector()
         return
 
     ingest_column, build_column = st.columns(2)

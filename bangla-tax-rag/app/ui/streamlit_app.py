@@ -14,6 +14,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.core.settings import get_settings
 
+try:
+    import fitz
+except Exception:  # pragma: no cover - optional UI dependency
+    fitz = None
+
 REQUEST_TIMEOUT_SECONDS = 30
 INGEST_TIMEOUT_SECONDS = 300
 INDEX_BUILD_TIMEOUT_SECONDS = 120
@@ -62,6 +67,72 @@ def load_chunk_records(chunk_jsonl_path: str, *, max_chunks: int = 100) -> tuple
     except OSError as exc:
         return [], str(exc)
     return chunk_records, None
+
+
+@st.cache_data(show_spinner=False)
+def load_index_artifacts(
+    index_dir: str,
+    *,
+    max_chunks: int = 100,
+) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
+    path = Path(index_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    if not path.exists():
+        return {}, [], f"Index directory not found: {path}"
+    metadata_path = path / "metadata.json"
+    chunks_path = path / "chunks.jsonl"
+    if not chunks_path.exists():
+        return {}, [], f"Index chunks file not found: {chunks_path}"
+
+    metadata: dict[str, Any] = {}
+    if metadata_path.exists():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return {}, [], f"Invalid metadata.json: {exc}"
+
+    chunk_records, error_message = load_chunk_records(str(chunks_path), max_chunks=max_chunks)
+    if error_message:
+        return {}, [], error_message
+    return metadata, chunk_records, None
+
+
+@st.cache_data(show_spinner=False)
+def load_parsed_pages(pdf_path: str) -> tuple[list[dict[str, Any]], str | None]:
+    path = Path(pdf_path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    if not path.exists():
+        return [], f"PDF file not found: {path}"
+    try:
+        from app.ingest.parser import parse_document
+
+        parsed_pages = parse_document(str(path))
+    except Exception as exc:  # pragma: no cover - defensive UI handling
+        return [], str(exc)
+    return [page.model_dump() for page in parsed_pages], None
+
+
+@st.cache_data(show_spinner=False)
+def load_pdf_page_snapshot(pdf_path: str, page_no: int, zoom_factor: float = 1.2) -> tuple[bytes | None, str | None]:
+    if fitz is None:
+        return None, "PyMuPDF is not available for PDF snapshots."
+    path = Path(pdf_path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    if not path.exists():
+        return None, f"PDF file not found: {path}"
+    try:
+        with fitz.open(path) as pdf_document:
+            if page_no < 1 or page_no > pdf_document.page_count:
+                return None, f"Page {page_no} is out of range."
+            page = pdf_document.load_page(page_no - 1)
+            matrix = fitz.Matrix(zoom_factor, zoom_factor)
+            pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+            return pixmap.tobytes("png"), None
+    except Exception as exc:  # pragma: no cover - defensive UI handling
+        return None, str(exc)
 
 
 def api_get(base_url: str, endpoint: str) -> tuple[bool, dict[str, Any] | None, str | None]:
@@ -327,6 +398,42 @@ def render_chunk_card(chunk: dict[str, Any]) -> None:
             st.code(normalized_text, language="text")
 
 
+def render_parsed_page_card(page: dict[str, Any], *, pdf_path: str, show_snapshot: bool) -> None:
+    title = f"page {page.get('page_no', '-')} | lines {page.get('line_count', '-')}"
+    with st.expander(title, expanded=False):
+        if show_snapshot:
+            snapshot_column, detail_column = st.columns([1, 1.4])
+        else:
+            snapshot_column, detail_column = None, st.container()
+
+        if show_snapshot and snapshot_column is not None:
+            with snapshot_column:
+                snapshot_bytes, snapshot_error = load_pdf_page_snapshot(pdf_path, int(page.get("page_no") or 0))
+                if snapshot_bytes is not None:
+                    st.image(snapshot_bytes, caption=f"PDF snapshot: page {page.get('page_no')}", use_container_width=True)
+                else:
+                    st.caption(f"Snapshot unavailable: {snapshot_error}")
+
+        with detail_column:
+            metadata_columns = st.columns(4)
+            metadata_columns[0].metric("Appendix", "Yes" if page.get("is_appendix") else "No")
+            metadata_columns[1].metric("Example", "Yes" if page.get("is_example") else "No")
+            metadata_columns[2].metric("Table Like", "Yes" if page.get("is_table_like") else "No")
+            metadata_columns[3].metric("Line Count", str(page.get("line_count") or 0))
+            if page.get("headings"):
+                st.markdown(f"**Headings:** {' | '.join(page.get('headings') or [])}")
+            st.markdown(f"**Section Markers:** {page.get('section_markers') or []}")
+            st.markdown(f"**Tax Years:** {page.get('tax_years') or []}")
+            st.markdown(f"**SRO IDs:** {page.get('sro_ids') or []}")
+            st.markdown("**Raw Text**")
+            st.code(page.get("raw_text") or "", language="text")
+            normalized_text = page.get("normalized_text") or ""
+            raw_text = page.get("raw_text") or ""
+            if normalized_text and normalized_text != raw_text:
+                st.markdown("**Normalized Text**")
+                st.code(normalized_text, language="text")
+
+
 def render_chunk_browser() -> None:
     st.subheader("Chunk Browser")
     last_ingest_response = st.session_state.get("last_ingest_response")
@@ -378,6 +485,165 @@ def render_chunk_browser() -> None:
     st.caption(f"Showing {len(filtered_chunks)} of {len(chunk_records)} loaded chunks")
     for chunk in filtered_chunks:
         render_chunk_card(chunk)
+
+
+def render_parser_inspector() -> None:
+    st.subheader("Parser Inspector")
+    st.caption("Inspect page-level parser output before chunking. This runs locally and does not call the API.")
+    parser_left, parser_right = st.columns([3, 1])
+    with parser_left:
+        parser_input_path = st.text_input(
+            "PDF Path For Parser Inspection",
+            value="/home/sonjoy/Bar tax/Income_tax_act_2023.pdf",
+            help="Use a local PDF path. The parser will extract page text, headings, section markers, and page flags.",
+        )
+    with parser_right:
+        preview_limit = st.number_input("Preview Pages", min_value=5, max_value=200, value=20, step=5)
+    show_snapshot = st.checkbox("Show PDF snapshots beside parsed output", value=True)
+
+    parsed_pages, error_message = load_parsed_pages(parser_input_path)
+    if error_message:
+        st.warning(f"Error loading pages: {error_message}")
+        return
+    if not parsed_pages:
+        st.info("No parsed pages available for the selected PDF.")
+        return
+
+    filter_left, filter_right = st.columns(2)
+    with filter_left:
+        page_filter = st.text_input("Filter Single Page Number", value="", placeholder="Example: 24").strip()
+    with filter_right:
+        parser_view = st.selectbox(
+            "Parser View",
+            options=["all", "headings only", "table-like only", "appendix only"],
+            index=0,
+        )
+
+    filtered_pages = parsed_pages
+    if page_filter.isdigit():
+        filtered_pages = [page for page in filtered_pages if int(page.get("page_no", -1)) == int(page_filter)]
+    if parser_view == "headings only":
+        filtered_pages = [page for page in filtered_pages if page.get("headings")]
+    elif parser_view == "table-like only":
+        filtered_pages = [page for page in filtered_pages if page.get("is_table_like")]
+    elif parser_view == "appendix only":
+        filtered_pages = [page for page in filtered_pages if page.get("is_appendix")]
+
+    limited_pages = filtered_pages[: int(preview_limit)]
+    st.json(
+        {
+            "total_pages_parsed": len(parsed_pages),
+            "pages_shown": len(limited_pages),
+            "pages_with_headings": sum(1 for page in parsed_pages if page.get("headings")),
+            "table_like_pages": sum(1 for page in parsed_pages if page.get("is_table_like")),
+            "appendix_pages": sum(1 for page in parsed_pages if page.get("is_appendix")),
+        }
+    )
+    for page in limited_pages:
+        render_parsed_page_card(page, pdf_path=parser_input_path, show_snapshot=show_snapshot)
+
+
+def render_indexed_chunk_card(chunk: dict[str, Any], *, weighted_search_text: str, tokenized_terms: list[str]) -> None:
+    title = (
+        f"{chunk.get('chunk_id', 'unknown-chunk')} | "
+        f"page {chunk.get('page_no', '-')} | "
+        f"{chunk.get('chunk_type', '-')}"
+    )
+    with st.expander(title, expanded=False):
+        metadata_columns = st.columns(4)
+        metadata_columns[0].metric("Section", str(chunk.get("section_id") or "-"))
+        metadata_columns[1].metric("Subsection", str(chunk.get("subsection_id") or "-"))
+        metadata_columns[2].metric("Authority", str(chunk.get("authority_level") or "-"))
+        metadata_columns[3].metric("Tax Year", str(chunk.get("tax_year") or "-"))
+        heading_path = chunk.get("heading_path") or []
+        if heading_path:
+            st.markdown(f"**Heading Path:** {' > '.join(heading_path)}")
+        st.markdown("**Indexed Search Text**")
+        st.code(weighted_search_text, language="text")
+        st.markdown("**BM25 Tokens**")
+        st.code(" ".join(tokenized_terms), language="text")
+        st.markdown("**Original Chunk Text**")
+        st.code(chunk.get("original_text") or "", language="text")
+
+
+def render_index_inspector() -> None:
+    st.subheader("Index Inspector")
+    st.caption("Inspect saved index artifacts after chunking and before retrieval. This reads local index files directly.")
+
+    last_build_index_response = st.session_state.get("last_build_index_response")
+    if not isinstance(last_build_index_response, dict):
+        last_build_index_response = {}
+    default_index_dir = (
+        last_build_index_response.get("sparse_index_path")
+        or last_build_index_response.get("dense_index_path")
+        or "indexes/sparse-english"
+    )
+
+    inspector_left, inspector_right = st.columns([3, 1])
+    with inspector_left:
+        index_dir = st.text_input(
+            "Index Directory",
+            value=default_index_dir,
+            help="Point this to an index directory containing metadata.json and chunks.jsonl.",
+        )
+    with inspector_right:
+        preview_limit = st.number_input("Preview Chunks", min_value=5, max_value=500, value=50, step=5)
+
+    metadata, chunk_records, error_message = load_index_artifacts(index_dir, max_chunks=int(preview_limit))
+    if error_message:
+        st.warning(f"Error loading index: {error_message}")
+        return
+    if not chunk_records:
+        st.info("No indexed chunks available in the selected index directory.")
+        return
+
+    inferred_index_type = "dense" if "dense" in index_dir.lower() else "sparse"
+    st.json(
+        {
+            "index_dir": index_dir,
+            "index_type": inferred_index_type,
+            "chunk_count_in_metadata": metadata.get("chunk_count"),
+            "chunks_loaded_for_preview": len(chunk_records),
+            "available_files": ["metadata.json", "chunks.jsonl"],
+        }
+    )
+
+    available_chunk_types = sorted({str(chunk.get("chunk_type") or "unknown") for chunk in chunk_records})
+    filter_left, filter_right = st.columns(2)
+    with filter_left:
+        chunk_type_filter = st.multiselect(
+            "Filter Indexed Chunk Types",
+            options=available_chunk_types,
+            default=[],
+        )
+    with filter_right:
+        page_filter = st.text_input(
+            "Filter Indexed Page Number",
+            value="",
+            placeholder="Example: 24",
+        ).strip()
+
+    filtered_chunks = chunk_records
+    if chunk_type_filter:
+        filtered_chunks = [chunk for chunk in filtered_chunks if chunk.get("chunk_type") in chunk_type_filter]
+    if page_filter.isdigit():
+        filtered_chunks = [chunk for chunk in filtered_chunks if int(chunk.get("page_no", -1)) == int(page_filter)]
+
+    st.caption(f"Showing {len(filtered_chunks)} of {len(chunk_records)} loaded index chunks")
+
+    from app.core.utils import tokenize_for_bm25
+    from app.core.schemas import ChunkRecord
+    from app.retrieval.sparse import build_weighted_search_text
+
+    for chunk in filtered_chunks:
+        chunk_record = ChunkRecord.model_validate(chunk)
+        weighted_search_text = build_weighted_search_text(chunk_record)
+        tokenized_terms = tokenize_for_bm25(weighted_search_text)
+        render_indexed_chunk_card(
+            chunk,
+            weighted_search_text=weighted_search_text,
+            tokenized_terms=tokenized_terms,
+        )
 
 
 def render_results_panel() -> None:
@@ -458,12 +724,22 @@ def main() -> None:
     st.title("Bangla Tax RAG")
     st.caption("Research UI for PDF ingestion, index building, grounded retrieval, and cited answer exploration.")
 
+    st.sidebar.header("Navigation")
+    view_name = st.sidebar.radio("View", options=["Research Workspace", "Parser Inspector", "Index Inspector"], index=0)
+
     config_payload, api_reachable = render_api_connection_panel(st.session_state["backend_base_url"])
     if not api_reachable:
         st.warning("Backend API is not confirmed reachable. You can still fill the forms, but actions may fail until the API is running.")
     if config_payload:
         with st.expander("Runtime Config Snapshot", expanded=False):
             st.json(config_payload)
+
+    if view_name == "Parser Inspector":
+        render_parser_inspector()
+        return
+    if view_name == "Index Inspector":
+        render_index_inspector()
+        return
 
     ingest_column, build_column = st.columns(2)
     with ingest_column:

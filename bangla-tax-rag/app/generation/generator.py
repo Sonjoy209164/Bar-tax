@@ -20,6 +20,7 @@ from app.core.utils import (
     clean_bangla_ocr_text,
     detect_text_language,
     extract_definition_target,
+    extract_informative_query_terms,
     extract_salient_query_terms,
     normalize_text,
     split_sentences,
@@ -314,6 +315,116 @@ def _extract_rate_values(text: str) -> list[str]:
     return list(dict.fromkeys(word_percent_values))
 
 
+def _extract_amount_phrases(text: str) -> list[str]:
+    cleaned_text = _clean_evidence_text(text)
+    cleaned_text = re.sub(r"(\bTaka\s+)\d+\[(\d+(?:\([^)]+\))?\s*(?:crore|lakh|thousand)?)\]", r"\1\2", cleaned_text, flags=re.IGNORECASE)
+    cleaned_text = re.sub(r"\b(\d+)\[(\d+(?:\([^)]+\))?)\]", r"\2", cleaned_text)
+    amount_patterns = [
+        r"(?:not more than|no more than|exceeds?|minimum|maximum)\s+Taka\s+\[?[0-9]+(?:\s*\([^)]+\))?\]?\s*(?:crore|lakh|thousand)?",
+        r"Taka\s+\[?[0-9]+(?:\s*\([^)]+\))?\]?\s*(?:crore|lakh|thousand)?",
+        r"[0-9]+(?:\.[0-9]+)?%\s*\([^)]+\)",
+        r"[0-9]+(?:\.[0-9]+)?%",
+    ]
+    phrases: list[str] = []
+    for pattern in amount_patterns:
+        for match in re.finditer(pattern, cleaned_text, flags=re.IGNORECASE):
+            phrase = match.group(0).strip(" ,;:.")
+            if phrase and phrase not in phrases:
+                phrases.append(phrase)
+    return phrases
+
+
+def _extract_duration_phrases(text: str) -> list[str]:
+    cleaned_text = _clean_evidence_text(text)
+    patterns = [
+        r"[0-9]+\s*\([^)]+\)\s*successive assessment years",
+        r"[0-9]+\s*\([^)]+\)\s*assessment years",
+        r"[0-9]+\s*\([^)]+\)\s*(?:successive\s+)?assessment years",
+        r"[0-9]+\s*\([^)]+\)\s*years",
+        r"[0-9]+\s*\([^)]+\)\s*months",
+        r"[0-9]+\s*\([^)]+\)\s*days",
+        r"[0-9]+\s+successive assessment years",
+    ]
+    phrases: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, cleaned_text, flags=re.IGNORECASE):
+            phrase = match.group(0).strip(" ,;:.")
+            if phrase and phrase not in phrases:
+                phrases.append(phrase)
+    return phrases
+
+
+def _extract_date_phrases(text: str) -> list[str]:
+    cleaned_text = _clean_evidence_text(text)
+    patterns = [
+        r"\b\d{1,2}(?:st|nd|rd|th)\s*\([^)]+\)\s*day of [A-Za-z]+",
+        r"\b\d{1,2}(?:st|nd|rd|th)\s+day of [A-Za-z]+",
+        r"\b[A-Za-z]+\s+\d{1,2},\s+\d{4}\b",
+        r"\b\d{1,2}\s+[A-Za-z]+\s+\d{4}\b",
+        r"\b(?:July|June|September|November)\s+\d{1,2},\s+\d{4}\b",
+    ]
+    phrases: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, cleaned_text, flags=re.IGNORECASE):
+            phrase = match.group(0).strip(" ,;:.")
+            if phrase and phrase not in phrases:
+                phrases.append(phrase)
+    return phrases
+
+
+def _count_enumerated_items(text: str) -> int:
+    cleaned_text = _clean_evidence_text(text)
+    markers = re.findall(r"\([a-z]\)", cleaned_text.lower())
+    if markers:
+        return len(dict.fromkeys(markers))
+    ordinal_markers = re.findall(r"\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b", cleaned_text.lower())
+    if ordinal_markers:
+        return len(dict.fromkeys(ordinal_markers))
+    return 0
+
+
+def _extract_enumerated_entries(text: str) -> list[tuple[str, str]]:
+    compact_text = re.sub(r"\s+", " ", _clean_evidence_text(text))
+    entries: list[tuple[str, str]] = []
+    for match in re.finditer(r"\(([a-z])\)\s*([^;]+)", compact_text, flags=re.IGNORECASE):
+        marker = match.group(1).lower()
+        value = match.group(2).strip(" ,.;:")
+        value = re.sub(r"\b\d+\[[^]]+\]", "", value).strip(" ,.;:")
+        if not value:
+            continue
+        if value.lower().startswith(("the words and brackets", "the words", "the figure", "provided that")):
+            continue
+        entries.append((marker, value))
+    deduplicated_entries: list[tuple[str, str]] = []
+    seen_markers: set[str] = set()
+    for marker, value in entries:
+        if marker in seen_markers:
+            continue
+        seen_markers.add(marker)
+        deduplicated_entries.append((marker, value))
+    return deduplicated_entries
+
+
+def _extract_tax_day_clause(text: str, question_text: str) -> str | None:
+    cleaned_text = _clean_evidence_text(text)
+    lower_question = question_text.lower()
+    clause_patterns = [
+        ("other than a company", r"in the case of an assessee? other than a company,\s*(.*?)(?:;\s*\([a-z]\)|$)"),
+        ("company", r"in the case of a company,\s*(.*?)(?:;\s*\([a-z]\)|$)"),
+        ("individual", r"in the case of an (?:individual|individual assessee)[^,]*,\s*(.*?)(?:;\s*\([a-z]\)|$)"),
+    ]
+    for label, pattern in clause_patterns:
+        if label not in lower_question:
+            continue
+        match = re.search(pattern, cleaned_text, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        clause = re.sub(r"\s+", " ", match.group(1)).strip(" ,.;:")
+        if clause:
+            return clause
+    return None
+
+
 def _find_section_excerpt(text: str, analyzed_query: QuerySignals | None) -> str:
     cleaned_text = _clean_evidence_text(text)
     if not cleaned_text or not analyzed_query:
@@ -390,6 +501,149 @@ def _build_rate_lookup_answer(
     )
     markers = list(dict.fromkeys(marker for _, _, marker in selected_segments))
     return [AnswerSentence(sentence_text=sentence_text.strip(), citation_markers=markers)], []
+
+
+def _best_sentences_for_intent(
+    question_text: str,
+    evidence_hits: list[RetrievalHit],
+    citations: list[CitationRecord],
+    *,
+    matcher,
+) -> list[tuple[int, int, str, str]]:
+    informative_terms = extract_informative_query_terms(question_text)
+    candidates: list[tuple[int, int, str, str]] = []
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        for sentence in split_sentences(_clean_evidence_text(hit.original_text)):
+            if not matcher(sentence):
+                continue
+            sentence_terms = set(tokenize_for_bm25(sentence.lower()))
+            informative_overlap = len(informative_terms & sentence_terms)
+            score = _sentence_overlap_score(sentence, question_text) + (informative_overlap * 3)
+            candidates.append((score, len(sentence), sentence.strip(), citation.marker))
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return candidates
+
+
+def _build_amount_lookup_answer(
+    question_text: str,
+    evidence_hits: list[RetrievalHit],
+    citations: list[CitationRecord],
+) -> tuple[list[AnswerSentence], list[str]]:
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        whole_hit_phrases = _extract_amount_phrases(_clean_evidence_text(hit.original_text))
+        if whole_hit_phrases:
+            best_phrase = next((phrase for phrase in whole_hit_phrases if phrase.lower().startswith("taka")), whole_hit_phrases[0])
+            best_phrase = normalize_text(best_phrase)
+            answer_text = f"The threshold amount is {best_phrase}."
+            return [AnswerSentence(sentence_text=answer_text, citation_markers=[citation.marker])], []
+        for sentence in split_sentences(_clean_evidence_text(hit.original_text)):
+            amount_phrases = _extract_amount_phrases(sentence)
+            if not amount_phrases:
+                continue
+            best_phrase = next((phrase for phrase in amount_phrases if phrase.lower().startswith("taka")), amount_phrases[0])
+            best_phrase = normalize_text(best_phrase)
+            answer_text = f"The threshold amount is {best_phrase}."
+            return [AnswerSentence(sentence_text=answer_text, citation_markers=[citation.marker])], []
+    return build_mock_grounded_answer(question_text, evidence_hits, citations)
+
+
+def _build_count_lookup_answer(
+    question_text: str,
+    evidence_hits: list[RetrievalHit],
+    citations: list[CitationRecord],
+) -> tuple[list[AnswerSentence], list[str]]:
+    enumerated_entries: dict[str, str] = {}
+    for hit in evidence_hits:
+        for marker, value in _extract_enumerated_entries(hit.original_text):
+            enumerated_entries.setdefault(marker, value)
+    if enumerated_entries:
+        item_count = len(enumerated_entries)
+        if "authorit" in question_text.lower():
+            answer_text = f"The Act lists {item_count} classes of income tax authorities in the relevant provision."
+        else:
+            answer_text = f"The Act lists {item_count} items in the relevant provision."
+        return [AnswerSentence(sentence_text=answer_text, citation_markers=[citations[0].marker])], []
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        for sentence in split_sentences(_clean_evidence_text(hit.original_text)):
+            duration_phrases = _extract_duration_phrases(sentence)
+            if duration_phrases:
+                answer_text = f"The relevant duration is {duration_phrases[0]}."
+                return [AnswerSentence(sentence_text=answer_text, citation_markers=[citation.marker])], []
+            if re.search(r"\b\d+\b", sentence):
+                return [AnswerSentence(sentence_text=truncate_text(sentence, max_length=260), citation_markers=[citation.marker])], []
+    return build_mock_grounded_answer(question_text, evidence_hits, citations)
+
+
+def _build_duration_lookup_answer(
+    question_text: str,
+    evidence_hits: list[RetrievalHit],
+    citations: list[CitationRecord],
+) -> tuple[list[AnswerSentence], list[str]]:
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        for sentence in split_sentences(_clean_evidence_text(hit.original_text)):
+            duration_phrases = _extract_duration_phrases(sentence)
+            if not duration_phrases:
+                continue
+            answer_text = f"The relevant duration is {duration_phrases[0]}."
+            return [AnswerSentence(sentence_text=answer_text, citation_markers=[citation.marker])], []
+    return build_mock_grounded_answer(question_text, evidence_hits, citations)
+
+
+def _build_date_lookup_answer(
+    question_text: str,
+    evidence_hits: list[RetrievalHit],
+    citations: list[CitationRecord],
+) -> tuple[list[AnswerSentence], list[str]]:
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        tax_day_clause = _extract_tax_day_clause(hit.original_text, question_text)
+        if tax_day_clause and "tax day" in question_text.lower():
+            return [
+                AnswerSentence(
+                    sentence_text=f"In the case asked about, Tax Day is {tax_day_clause}.",
+                    citation_markers=[citation.marker],
+                )
+            ], []
+        for sentence in split_sentences(_clean_evidence_text(hit.original_text)):
+            if not (_extract_date_phrases(sentence) or "tax day" in sentence.lower()):
+                continue
+            return [AnswerSentence(sentence_text=truncate_text(sentence, max_length=260), citation_markers=[citation.marker])], []
+    return build_mock_grounded_answer(question_text, evidence_hits, citations)
+
+
+def _build_list_lookup_answer(
+    question_text: str,
+    evidence_hits: list[RetrievalHit],
+    citations: list[CitationRecord],
+) -> tuple[list[AnswerSentence], list[str]]:
+    lower_question = question_text.lower()
+    aggregated_entries: dict[str, str] = {}
+    for hit in evidence_hits:
+        for marker, value in _extract_enumerated_entries(hit.original_text):
+            aggregated_entries.setdefault(marker, value)
+    if aggregated_entries:
+        rendered_items = "; ".join(value for _, value in sorted(aggregated_entries.items()))
+        if "authorit" in lower_question:
+            answer_text = f"The income tax authorities listed are: {rendered_items}."
+        else:
+            answer_text = f"The relevant provision lists: {rendered_items}."
+        return [AnswerSentence(sentence_text=truncate_text(answer_text, max_length=320), citation_markers=[citation.marker for citation in citations[: min(2, len(citations))]])], []
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        fragments = _extract_mention_fragments(hit.original_text, question_text)
+        if fragments:
+            listed_items = "; ".join(fragment for _, fragment in fragments[:4])
+            if "authorit" in lower_question:
+                answer_text = f"The income tax authorities listed are: {listed_items}."
+            else:
+                answer_text = f"The relevant provision lists: {listed_items}."
+            return [AnswerSentence(sentence_text=answer_text, citation_markers=[citation.marker])], []
+        enumerated_count = _count_enumerated_items(hit.original_text)
+        if enumerated_count > 0:
+            if "authorit" in lower_question:
+                answer_text = f"The relevant provision lists {enumerated_count} income tax authorities."
+            else:
+                answer_text = f"The relevant provision lists {enumerated_count} items."
+            return [AnswerSentence(sentence_text=answer_text, citation_markers=[citation.marker])], []
+    return build_mock_grounded_answer(question_text, evidence_hits, citations)
 
 
 def _extract_mention_fragments(text: str, question_text: str) -> list[tuple[int, str]]:
@@ -512,6 +766,16 @@ def build_mock_grounded_answer(
         return _build_definition_answer(question_text, evidence_hits, citations, analyzed_query)
     if analyzed_query and analyzed_query.query_intent == "rate_lookup":
         return _build_rate_lookup_answer(question_text, evidence_hits, citations)
+    if analyzed_query and analyzed_query.query_intent == "amount_lookup":
+        return _build_amount_lookup_answer(question_text, evidence_hits, citations)
+    if analyzed_query and analyzed_query.query_intent == "count_lookup":
+        return _build_count_lookup_answer(question_text, evidence_hits, citations)
+    if analyzed_query and analyzed_query.query_intent == "duration_lookup":
+        return _build_duration_lookup_answer(question_text, evidence_hits, citations)
+    if analyzed_query and analyzed_query.query_intent == "date_lookup":
+        return _build_date_lookup_answer(question_text, evidence_hits, citations)
+    if analyzed_query and analyzed_query.query_intent == "list_lookup":
+        return _build_list_lookup_answer(question_text, evidence_hits, citations)
     if analyzed_query and (analyzed_query.subsection_id or analyzed_query.section_id):
         return _build_section_summary_answer(question_text, evidence_hits, citations, analyzed_query)
     candidate_sentences: list[tuple[int, str, str]] = []

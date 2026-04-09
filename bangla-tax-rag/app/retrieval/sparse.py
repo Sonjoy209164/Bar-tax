@@ -7,8 +7,22 @@ from pathlib import Path
 from rank_bm25 import BM25Okapi
 
 from app.core.schemas import ChunkRecord, QuerySignals, RetrievalHit, RetrievalResponse
-from app.core.utils import extract_definition_target, extract_salient_query_terms, preprocess_query, tokenize_for_bm25
-from app.retrieval.filters import authority_value, chunk_quality_score, filter_chunk_records
+from app.core.utils import (
+    extract_definition_target,
+    extract_informative_query_terms,
+    extract_salient_query_terms,
+    preprocess_query,
+    tokenize_for_bm25,
+)
+from app.retrieval.filters import (
+    authority_value,
+    chunk_quality_score,
+    filter_chunk_records,
+    hit_has_amount_language,
+    hit_has_date_language,
+    hit_has_duration_language,
+    hit_looks_list_like,
+)
 
 logger = logging.getLogger(__name__)
 DEFAULT_INDEX_DIR = Path("indexes/sparse")
@@ -120,6 +134,8 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
         boosted_score += 2.0
     query_terms = set(tokenize_for_bm25(query_signals.normalized_query))
     heading_terms = set(tokenize_for_bm25(" ".join(chunk.heading_path)))
+    searchable_terms = set(tokenize_for_bm25(searchable_text))
+    informative_terms = extract_informative_query_terms(query_signals.normalized_query, query_signals.query_intent)
     heading_overlap = len(query_terms & heading_terms)
     boosted_score += min(heading_overlap * 0.3, 1.2)
     salient_heading_overlap = len(extract_salient_query_terms(query_signals.normalized_query) & heading_terms)
@@ -147,6 +163,55 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
         phrase not in searchable_text for phrase in ("করহার", "কর হার", "tax rate", "rate of tax", "tax payable")
     ):
         boosted_score -= 1.0
+    informative_overlap = len(informative_terms & searchable_terms)
+    if query_signals.query_intent == "amount_lookup":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        if hit_has_amount_language(pseudo_hit):
+            boosted_score += 1.9
+        else:
+            boosted_score -= 1.5
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.2, 4.0)
+            if informative_overlap == 0:
+                boosted_score -= 3.5
+    if query_signals.query_intent == "count_lookup":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        if hit_looks_list_like(pseudo_hit) or any(token.isdigit() for token in searchable_terms):
+            boosted_score += 1.6
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.1, 3.5)
+            if informative_overlap == 0:
+                boosted_score -= 3.2
+    if query_signals.query_intent == "duration_lookup":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        if hit_has_duration_language(pseudo_hit):
+            boosted_score += 1.8
+        else:
+            boosted_score -= 1.4
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.2, 4.0)
+            if informative_overlap == 0:
+                boosted_score -= 3.5
+    if query_signals.query_intent == "date_lookup":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        if hit_has_date_language(pseudo_hit):
+            boosted_score += 1.7
+        else:
+            boosted_score -= 1.3
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.1, 3.5)
+            if informative_overlap == 0:
+                boosted_score -= 3.0
+    if query_signals.query_intent == "list_lookup":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        if hit_looks_list_like(pseudo_hit):
+            boosted_score += 1.7
+        else:
+            boosted_score -= 1.0
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.0, 3.0)
+            if informative_overlap == 0:
+                boosted_score -= 2.8
     if query_signals.query_intent == "definition":
         definition_target = extract_definition_target(query_signals.original_query or query_signals.normalized_query)
         has_definition_heading = any(
@@ -250,8 +315,13 @@ def search_sparse_index(
         if final_score <= 0:
             continue
         searchable_text = f"{chunk.doc_title} {' '.join(chunk.heading_path)} {chunk.normalized_text}".lower()
-        salient_overlap = len(salient_terms & set(tokenize_for_bm25(searchable_text)))
+        searchable_tokens = set(tokenize_for_bm25(searchable_text))
+        salient_overlap = len(salient_terms & searchable_tokens)
         if salient_terms and query_signals.query_intent in {"rate_lookup", "definition", "mention_lookup"} and salient_overlap == 0:
+            continue
+        informative_terms = extract_informative_query_terms(query_signals.normalized_query, query_signals.query_intent)
+        informative_overlap = len(informative_terms & searchable_tokens)
+        if informative_terms and query_signals.query_intent in {"amount_lookup", "count_lookup", "duration_lookup", "date_lookup", "list_lookup"} and informative_overlap == 0:
             continue
         scored_hits.append(_to_retrieval_hit(chunk, final_score))
     ranked_hits = sorted(scored_hits, key=lambda hit: hit.score, reverse=True)[:top_k]

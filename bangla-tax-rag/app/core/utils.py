@@ -7,21 +7,59 @@ from app.core.schemas import QuerySignals
 BANGLA_DIGIT_MAP = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 SECTION_KEYWORDS = ("ধারা", "উপ-ধারা", "উপধারা", "পরিশিষ্ট", "অনুচ্ছেদ")
 QUERY_TYPE_PATTERNS = {
+    "amount_lookup": re.compile(
+        r"(threshold|amount|limit|maximum|minim(?:um)?|ceiling|floor|not more than|no more than|exceeds? taka|taka|lakh|crore)",
+        re.IGNORECASE,
+    ),
+    "count_lookup": re.compile(
+        r"(how many|number of|count of|how many classes|how many items|how many authorities)",
+        re.IGNORECASE,
+    ),
+    "duration_lookup": re.compile(
+        r"(for how many .*years|for how many .*months|for how many .*days|successive assessment years|carry(?:ied)? forward|period of \d+|how long|duration)",
+        re.IGNORECASE,
+    ),
+    "date_lookup": re.compile(
+        r"(tax day|due date|deadline|effective from|from what date|what date|which date|when\b|by june|by july|by september|by november)",
+        re.IGNORECASE,
+    ),
     "rate_lookup": re.compile(
-        r"(হার|rate|slab|threshold|করহার|tax rate|rate of tax|what tax|how much tax|tax payable|pay tax)",
+        r"(হার|rate|slab|করহার|tax rate|rate of tax|what tax|how much tax|tax payable|pay tax|percentage)",
         re.IGNORECASE,
     ),
     "amendment": re.compile(r"(amend|সংশোধন|পরিবর্তন|change)", re.IGNORECASE),
     "example": re.compile(r"(উদাহরণ|example|illustration)", re.IGNORECASE),
+    "list_lookup": re.compile(
+        r"(list\b|what are the .*authorit|what are the .*classes|which .*are listed|following classes|following incomes|listed under)",
+        re.IGNORECASE,
+    ),
     "mention_lookup": re.compile(
         r"(mentioned|mention|appears?|included?|include|listed?|contains?|is .*mentioned|is .*included|say about|says about|what does .* say about|উল্লেখ|আছে কি|আছে কিনা)",
         re.IGNORECASE,
     ),
-    "definition": re.compile(r"(definition|সংজ্ঞা|মানে কী|কি বলা হয়েছে|কী বলা হয়েছে|what is)", re.IGNORECASE),
+    "definition": re.compile(
+        r"(definition|defined as|what is the definition of|definition of|what does .* mean|meaning of|সংজ্ঞা|মানে কী|কি বলা হয়েছে|কী বলা হয়েছে)",
+        re.IGNORECASE,
+    ),
     "procedure": re.compile(r"(প্রক্রিয়া|পদ্ধতি|how to|process|steps)", re.IGNORECASE),
     "calculation": re.compile(r"(calculate|calculation|গণনা|compute)", re.IGNORECASE),
     "comparison": re.compile(r"(compare|comparison|তুলনা|versus|পার্থক্য)", re.IGNORECASE),
 }
+QUERY_TYPE_PRIORITY = [
+    "amount_lookup",
+    "duration_lookup",
+    "date_lookup",
+    "count_lookup",
+    "list_lookup",
+    "mention_lookup",
+    "definition",
+    "rate_lookup",
+    "amendment",
+    "example",
+    "procedure",
+    "calculation",
+    "comparison",
+]
 ENGLISH_STOPWORDS = {
     "a",
     "an",
@@ -42,6 +80,41 @@ ENGLISH_STOPWORDS = {
     "what",
 }
 BANGla_STOPWORDS = {"এ", "কি", "কী", "কি?", "কী?", "আমি", "আমার", "এর", "ও", "এবং"}
+GENERIC_QUERY_TERMS = {
+    "act",
+    "amount",
+    "assessment",
+    "clause",
+    "count",
+    "date",
+    "day",
+    "days",
+    "definition",
+    "due",
+    "effective",
+    "how",
+    "include",
+    "included",
+    "list",
+    "listed",
+    "many",
+    "mean",
+    "meaning",
+    "month",
+    "months",
+    "number",
+    "question",
+    "rate",
+    "section",
+    "tax",
+    "threshold",
+    "under",
+    "what",
+    "when",
+    "which",
+    "year",
+    "years",
+}
 DOCUMENT_HEADER_PATTERN = re.compile(r"আয়কর\s+পররপত্র\s+20\d{2}\s*-\s*20\d{2}\s*\|\s*\d+", re.IGNORECASE)
 TABLE_HEADER_LINES = {
     "ক্রমিক নং",
@@ -247,8 +320,22 @@ def extract_salient_query_terms(text: str) -> set[str]:
     return salient_terms
 
 
+def extract_informative_query_terms(text: str, query_type: str | None = None) -> set[str]:
+    informative_terms = set()
+    for token in extract_salient_query_terms(text):
+        if token in GENERIC_QUERY_TERMS:
+            continue
+        informative_terms.add(token)
+    if query_type == "definition":
+        focus_term = extract_definition_target(text)
+        if focus_term:
+            informative_terms.update(token for token in tokenize_for_bm25(focus_term) if token not in GENERIC_QUERY_TERMS)
+    return informative_terms
+
+
 def detect_query_type(text: str) -> str:
-    for query_type, pattern in QUERY_TYPE_PATTERNS.items():
+    for query_type in QUERY_TYPE_PRIORITY:
+        pattern = QUERY_TYPE_PATTERNS[query_type]
         if pattern.search(text):
             return query_type
     return "general"
@@ -257,6 +344,14 @@ def detect_query_type(text: str) -> str:
 def rewrite_query(normalized_query: str, query_type: str) -> str:
     rewritten_terms = list(dict.fromkeys(tokenize_for_bm25(normalized_query)))
     lower_query = normalized_query.lower()
+    if query_type == "amount_lookup":
+        rewritten_terms.extend(["threshold", "amount", "limit", "taka", "lakh", "crore", "not more than", "exceeds"])
+    if query_type == "count_lookup":
+        rewritten_terms.extend(["count", "number", "classes", "items", "listed", "namely"])
+    if query_type == "duration_lookup":
+        rewritten_terms.extend(["years", "months", "days", "period", "carry forward", "successive"])
+    if query_type == "date_lookup":
+        rewritten_terms.extend(["date", "deadline", "due date", "effective date", "day", "month", "year"])
     if query_type == "rate_lookup":
         if "software" in lower_query:
             rewritten_terms.extend(["software", "service"])
@@ -288,6 +383,8 @@ def rewrite_query(normalized_query: str, query_type: str) -> str:
         focus_term = extract_definition_target(normalized_query)
         if focus_term:
             rewritten_terms.extend(tokenize_for_bm25(focus_term))
+    if query_type == "list_lookup":
+        rewritten_terms.extend(["list", "listed", "namely", "following", "classes"])
     return " ".join(dict.fromkeys(rewritten_terms))
 
 

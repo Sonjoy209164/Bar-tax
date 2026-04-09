@@ -260,6 +260,43 @@ def test_evidence_pack_prefers_exact_section_heading_when_available() -> None:
 
     assert final_hits
     assert final_hits[0].chunk_id == "exact-section"
+
+
+def test_hybrid_evidence_pack_prefers_startup_duration_hit_for_duration_query() -> None:
+    analyzed_query = run_hybrid_retrieval(
+        query="For how many successive assessment years can startup losses be carried forward?",
+        sparse_hits_override=[],
+        dense_hits_override=[],
+    ).analyzed_query
+    fused_hits = [
+        _hit(
+            chunk_id="startup-loss",
+            score=4.8,
+            page_no=286,
+            section_id="2",
+            chunk_type="section",
+            heading_path=["STARTUP SANDBOX"],
+            text="the amount of loss shall be carried forward and set off to the next 9 (nine) successive assessment years.",
+        ),
+        _hit(
+            chunk_id="generic-assessment-year",
+            score=4.7,
+            page_no=234,
+            section_id="3",
+            chunk_type="table",
+            heading_path=["4. Wealth tax table"],
+            text="assets and liabilities or balance sheet furnished with the return filed for the assessment year 2024-25.",
+        ),
+    ]
+
+    final_hits, _, _, _ = build_evidence_pack(
+        fused_hits,
+        analyzed_query,
+        final_top_k=3,
+    )
+
+    assert final_hits
+    assert final_hits[0].chunk_id == "startup-loss"
     assert all(hit.chunk_id != "incidental-reference" for hit in final_hits)
 
 
@@ -299,3 +336,119 @@ def test_evidence_pack_filters_out_wrong_topic_even_with_same_section_number() -
     assert final_hits
     assert final_hits[0].chunk_id == "authorities-section"
     assert all(hit.chunk_id != "wrong-topic-section" for hit in final_hits)
+
+
+def test_evidence_pack_expands_same_heading_logical_unit_for_count_query() -> None:
+    analyzed_query = run_hybrid_retrieval(
+        query="How many classes of income tax authorities are listed under section 4?",
+        sparse_hits_override=[],
+        dense_hits_override=[],
+    ).analyzed_query
+    fused_hits = [
+        _hit(
+            chunk_id="p024-c056",
+            score=6.0,
+            doc_id="income-tax-act-2023",
+            doc_title="Income Tax Act 2023",
+            page_no=24,
+            section_id="4",
+            chunk_type="section",
+            heading_path=["TAX ADMINISTRATION", "4. Income tax authorities.—For the purposes of this Act, there shall be the"],
+            text="(a) The National Board of Revenue; (b) Chief Commissioner of Taxes; (c) Director General (Inspection);",
+        ),
+        _hit(
+            chunk_id="p024-c057",
+            score=5.4,
+            doc_id="income-tax-act-2023",
+            doc_title="Income Tax Act 2023",
+            page_no=24,
+            section_id="16",
+            chunk_type="section",
+            heading_path=["TAX ADMINISTRATION", "4. Income tax authorities.—For the purposes of this Act, there shall be the"],
+            text="(l) Tax Recovery Officers nominated by the Commissioner of Taxes among the Deputy Commissioners of Taxes within his jurisdiction;",
+        ),
+        _hit(
+            chunk_id="p025-c058",
+            score=5.0,
+            doc_id="income-tax-act-2023",
+            doc_title="Income Tax Act 2023",
+            page_no=25,
+            section_id="4",
+            chunk_type="section",
+            heading_path=["TAX ADMINISTRATION", "4. Income tax authorities.—For the purposes of this Act, there shall be the"],
+            text="(m) Assistant Commissioners of Taxes; (n) Extra Assistant Commissioners of Taxes; and (o) Inspectors of Taxes.",
+        ),
+        _hit(
+            chunk_id="irrelevant",
+            score=5.8,
+            doc_id="income-tax-act-2023",
+            doc_title="Income Tax Act 2023",
+            page_no=207,
+            section_id="4",
+            chunk_type="section",
+            heading_path=["295. Appeal to the Appellate Division.—(1)"],
+            text="Commissioner of Taxes from among the income tax authorities under section 4 may represent a party.",
+        ),
+    ]
+
+    final_hits, _, _, _ = build_evidence_pack(
+        fused_hits,
+        analyzed_query,
+        final_top_k=3,
+    )
+
+    assert [hit.chunk_id for hit in final_hits] == ["p024-c056", "p024-c057", "p025-c058"]
+
+
+def test_evidence_pack_can_expand_from_candidate_pool_for_same_heading() -> None:
+    analyzed_query = run_hybrid_retrieval(
+        query="What are the income tax authorities under section 4?",
+        sparse_hits_override=[],
+        dense_hits_override=[],
+    ).analyzed_query
+    fused_hits = [
+        _hit(
+            chunk_id="p024-c056",
+            score=6.0,
+            doc_id="income-tax-act-2023",
+            doc_title="Income Tax Act 2023",
+            page_no=24,
+            section_id="4",
+            chunk_type="section",
+            heading_path=["TAX ADMINISTRATION", "4. Income tax authorities.—For the purposes of this Act, there shall be the"],
+            text="(a) The National Board of Revenue; (b) Chief Commissioner of Taxes;",
+        ),
+    ]
+    candidate_pool = fused_hits + [
+        _hit(
+            chunk_id="p024-c057",
+            score=0.0,
+            doc_id="income-tax-act-2023",
+            doc_title="Income Tax Act 2023",
+            page_no=24,
+            section_id="16",
+            chunk_type="section",
+            heading_path=["TAX ADMINISTRATION", "4. Income tax authorities.—For the purposes of this Act, there shall be the"],
+            text="(l) Tax Recovery Officers nominated by the Commissioner of Taxes;",
+        ),
+        _hit(
+            chunk_id="p025-c058",
+            score=0.0,
+            doc_id="income-tax-act-2023",
+            doc_title="Income Tax Act 2023",
+            page_no=25,
+            section_id="4",
+            chunk_type="section",
+            heading_path=["TAX ADMINISTRATION", "4. Income tax authorities.—For the purposes of this Act, there shall be the"],
+            text="(m) Assistant Commissioners of Taxes; (n) Extra Assistant Commissioners of Taxes; and (o) Inspectors of Taxes.",
+        ),
+    ]
+
+    final_hits, _, _, _ = build_evidence_pack(
+        fused_hits,
+        analyzed_query,
+        final_top_k=3,
+        candidate_pool=candidate_pool,
+    )
+
+    assert [hit.chunk_id for hit in final_hits] == ["p024-c056", "p024-c057", "p025-c058"]

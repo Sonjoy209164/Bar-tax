@@ -226,6 +226,29 @@ def test_preprocess_query_treats_say_about_as_mention_lookup() -> None:
     assert signals.query_intent == "mention_lookup"
 
 
+def test_preprocess_query_detects_amount_lookup() -> None:
+    signals = preprocess_query(
+        "What is the threshold amount in the charitable purpose clause for services in exchange for consideration?"
+    )
+
+    assert signals.query_type == "amount_lookup"
+    assert signals.query_intent == "amount_lookup"
+
+
+def test_preprocess_query_detects_date_lookup() -> None:
+    signals = preprocess_query("What is the Tax Day for a company?")
+
+    assert signals.query_type == "date_lookup"
+    assert signals.query_intent == "date_lookup"
+
+
+def test_preprocess_query_detects_count_lookup() -> None:
+    signals = preprocess_query("How many classes of income tax authorities are listed under section 4?")
+
+    assert signals.query_type == "count_lookup"
+    assert signals.query_intent == "count_lookup"
+
+
 def test_mention_lookup_uses_deterministic_grounded_answer() -> None:
     hits = [
         _hit(
@@ -325,6 +348,210 @@ def test_definition_query_prefers_exact_definition_sentence() -> None:
     assert "commissioner" in result.answer_text.lower()
     assert "additional commissioner" not in result.answer_text.lower()
     assert result.used_chunk_ids == ["c2"]
+
+
+def test_amount_lookup_returns_threshold_phrase() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.5,
+            tax_year=None,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            text=(
+                "the aggregate value of such consideration in any income year exceeds "
+                "Taka 1(one) crore;"
+            ),
+        ),
+    ]
+    query = preprocess_query(
+        "What is the threshold amount in the charitable purpose clause for services in exchange for consideration?"
+    )
+
+    result = generate_answer(
+        "What is the threshold amount in the charitable purpose clause for services in exchange for consideration?",
+        hits,
+        query,
+        _options(),
+    )
+
+    assert result.abstained is False
+    assert "Taka 1(one) crore" in result.answer_text
+    assert result.used_chunk_ids == ["c1"]
+
+
+def test_amount_lookup_handles_footnote_wrapped_amount_phrase() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.5,
+            tax_year=None,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            text="the aggregate value of such consideration in any income year exceeds Taka 2[1(one) crore];",
+        ),
+    ]
+    query = preprocess_query(
+        "What is the threshold amount in the charitable purpose clause for services in exchange for consideration?"
+    )
+
+    result = generate_answer(
+        "What is the threshold amount in the charitable purpose clause for services in exchange for consideration?",
+        hits,
+        query,
+        _options(),
+    )
+
+    assert result.abstained is False
+    assert "Taka 1(one) crore" in result.answer_text
+
+
+def test_duration_lookup_returns_successive_years_phrase() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.6,
+            tax_year=None,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            text="the amount of loss shall be carried forward and set off to the next 9 (nine) successive assessment years.",
+        ),
+    ]
+    query = preprocess_query("For how many successive assessment years can startup losses be carried forward?")
+
+    result = generate_answer(
+        "For how many successive assessment years can startup losses be carried forward?",
+        hits,
+        query,
+        _options(),
+    )
+
+    assert result.abstained is False
+    assert "9 (nine) successive assessment years" in result.answer_text
+    assert result.used_chunk_ids == ["c1"]
+
+
+def test_count_lookup_counts_enumerated_items() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.7,
+            tax_year=None,
+            section_id="4",
+            subsection_id=None,
+            chunk_type="section",
+            text="(a) The National Board of Revenue; (b) Chief Commissioner of Taxes; (c) Director General (Inspection);",
+        ),
+    ]
+    query = preprocess_query("How many classes of income tax authorities are listed under section 4?")
+
+    result = generate_answer(
+        "How many classes of income tax authorities are listed under section 4?",
+        hits,
+        query,
+        _options(),
+    )
+
+    assert result.abstained is False
+    assert "3 classes of income tax authorities" in result.answer_text
+    assert result.used_chunk_ids == ["c1"]
+
+
+def test_count_lookup_counts_across_multiple_authority_chunks() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.7,
+            tax_year=None,
+            section_id="4",
+            subsection_id=None,
+            chunk_type="section",
+            text="(a) The National Board of Revenue; (b) Chief Commissioner of Taxes; (c) Director General (Inspection);",
+        ),
+        _hit(
+            chunk_id="c2",
+            score=3.6,
+            tax_year=None,
+            section_id="16",
+            subsection_id=None,
+            chunk_type="section",
+            text="(l) Tax Recovery Officers nominated by the Commissioner of Taxes within his jurisdiction;",
+        ),
+        _hit(
+            chunk_id="c3",
+            score=3.5,
+            tax_year=None,
+            section_id="4",
+            subsection_id=None,
+            chunk_type="section",
+            text="(m) Assistant Commissioners of Taxes; (n) Extra Assistant Commissioners of Taxes; and (o) Inspectors of Taxes.",
+        ),
+    ]
+    for hit in hits:
+        hit.heading_path = ["TAX ADMINISTRATION", "4. Income tax authorities.—For the purposes of this Act, there shall be the"]
+    query = preprocess_query("How many classes of income tax authorities are listed under section 4?")
+
+    result = generate_answer(
+        "How many classes of income tax authorities are listed under section 4?",
+        hits,
+        query,
+        _options(),
+    )
+
+    assert result.abstained is False
+    assert "7 classes of income tax authorities" in result.answer_text
+
+
+def test_date_lookup_returns_tax_day_sentence() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.3,
+            tax_year=None,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            text=(
+                "Tax Day means in the case of a company, the 15th (fifteenth) day of the seventh month "
+                "following the end of the income year."
+            ),
+        ),
+    ]
+    query = preprocess_query("What is the Tax Day for a company?")
+
+    result = generate_answer("What is the Tax Day for a company?", hits, query, _options())
+
+    assert result.abstained is False
+    assert "15th (fifteenth) day of the seventh month" in result.answer_text
+    assert result.used_chunk_ids == ["c1"]
+
+
+def test_date_lookup_extracts_company_tax_day_clause_from_definition_chunk() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.3,
+            tax_year=None,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            text=(
+                "(23) “Tax Day” means— "
+                "(a) in the case of an assesse other than a company, the 30th (thirtieth) day of November following the end of the income year; "
+                "(b) in the case of a company, the 15th (fifteenth) day of the seventh month following the end of the income year or the fifteenth day of September following the end of the income year where the said fifteenth day falls before the fifteenth day of September; "
+                "(c) in the case of an assessee, who is an individual and has not submitted return before, the 30th (thirtieth) day of June following the end of the income year."
+            ),
+        ),
+    ]
+    query = preprocess_query("What is the Tax Day for a company?")
+
+    result = generate_answer("What is the Tax Day for a company?", hits, query, _options())
+
+    assert result.abstained is False
+    assert "Tax Day is the 15th (fifteenth) day of the seventh month" in result.answer_text
 
 
 def test_section_query_can_answer_from_heading_path_when_heading_is_best_signal() -> None:

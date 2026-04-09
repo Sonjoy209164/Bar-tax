@@ -3,8 +3,16 @@ from pathlib import Path
 
 from app.core.schemas import RetrievalHit
 from app.core.utils import ensure_directory
-from app.core.utils import extract_definition_target, preprocess_query, tokenize_for_bm25
-from app.retrieval.filters import authority_value, chunk_quality_score, filter_chunk_records
+from app.core.utils import extract_definition_target, extract_informative_query_terms, preprocess_query, tokenize_for_bm25
+from app.retrieval.filters import (
+    authority_value,
+    chunk_quality_score,
+    filter_chunk_records,
+    hit_has_amount_language,
+    hit_has_date_language,
+    hit_has_duration_language,
+    hit_looks_list_like,
+)
 from app.retrieval.sparse import DEFAULT_INDEX_DIR, load_chunk_records_from_jsonl
 
 
@@ -64,6 +72,7 @@ def dense_search(
         chunk_type=chunk_type,
     )
     query_tokens = set(tokenize_for_bm25(analyzed_query.normalized_query))
+    informative_terms = extract_informative_query_terms(analyzed_query.normalized_query, analyzed_query.query_intent)
     scored_hits: list[RetrievalHit] = []
     for chunk in filtered_records:
         weighted_text = " ".join([chunk.doc_title, " ".join(chunk.heading_path), chunk.normalized_text])
@@ -130,6 +139,67 @@ def dense_search(
                         score += 2.5
                 else:
                     score -= 1.2
+        pseudo_hit = RetrievalHit(
+            chunk_id=chunk.chunk_id,
+            doc_id=chunk.doc_id,
+            doc_title=chunk.doc_title,
+            page_no=chunk.page_no,
+            section_id=chunk.section_id,
+            subsection_id=chunk.subsection_id,
+            chunk_type=chunk.chunk_type,
+            authority_level=chunk.authority_level,
+            tax_year=chunk.tax_year,
+            original_text=chunk.original_text,
+            normalized_text=chunk.normalized_text,
+            heading_path=chunk.heading_path,
+            content=chunk.original_text,
+            score=round(score, 4),
+            intermediate_scores={},
+        )
+        informative_overlap = len(informative_terms & chunk_tokens)
+        if analyzed_query.query_intent == "amount_lookup":
+            if hit_has_amount_language(pseudo_hit):
+                score += 1.4
+            else:
+                score -= 1.2
+            if informative_terms:
+                score += min(informative_overlap * 0.9, 3.0)
+                if informative_overlap == 0:
+                    score -= 2.8
+        if analyzed_query.query_intent == "count_lookup":
+            if hit_looks_list_like(pseudo_hit) or any(token.isdigit() for token in chunk_tokens):
+                score += 1.2
+            if informative_terms:
+                score += min(informative_overlap * 0.9, 3.0)
+                if informative_overlap == 0:
+                    score -= 2.8
+        if analyzed_query.query_intent == "duration_lookup":
+            if hit_has_duration_language(pseudo_hit):
+                score += 1.3
+            else:
+                score -= 1.1
+            if informative_terms:
+                score += min(informative_overlap * 0.9, 3.0)
+                if informative_overlap == 0:
+                    score -= 2.8
+        if analyzed_query.query_intent == "date_lookup":
+            if hit_has_date_language(pseudo_hit):
+                score += 1.2
+            else:
+                score -= 1.0
+            if informative_terms:
+                score += min(informative_overlap * 0.8, 2.5)
+                if informative_overlap == 0:
+                    score -= 2.5
+        if analyzed_query.query_intent == "list_lookup":
+            if hit_looks_list_like(pseudo_hit):
+                score += 1.3
+            else:
+                score -= 0.8
+            if informative_terms:
+                score += min(informative_overlap * 0.8, 2.5)
+                if informative_overlap == 0:
+                    score -= 2.3
         if score <= 0:
             continue
         scored_hits.append(

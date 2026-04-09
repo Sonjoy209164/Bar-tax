@@ -120,6 +120,37 @@ def test_english_company_tax_question_is_rate_lookup() -> None:
     assert "software" in signals.rewritten_query
 
 
+def test_threshold_question_is_amount_lookup() -> None:
+    signals = preprocess_query(
+        "What is the threshold amount in the charitable purpose clause for services in exchange for consideration?"
+    )
+
+    assert signals.query_type == "amount_lookup"
+    assert signals.query_intent == "amount_lookup"
+    assert "threshold" in (signals.rewritten_query or "")
+
+
+def test_tax_day_question_is_date_lookup() -> None:
+    signals = preprocess_query("What is the Tax Day for a company?")
+
+    assert signals.query_type == "date_lookup"
+    assert signals.query_intent == "date_lookup"
+
+
+def test_how_many_items_question_is_count_lookup() -> None:
+    signals = preprocess_query("How many classes of income tax authorities are listed under section 4?")
+
+    assert signals.query_type == "count_lookup"
+    assert signals.query_intent == "count_lookup"
+
+
+def test_how_many_years_question_prefers_duration_lookup() -> None:
+    signals = preprocess_query("For how many successive assessment years can startup losses be carried forward?")
+
+    assert signals.query_type == "duration_lookup"
+    assert signals.query_intent == "duration_lookup"
+
+
 def test_filtering_by_tax_year() -> None:
     filtered = filter_chunk_records(_dataset(), tax_year="2025-2026")
 
@@ -202,6 +233,86 @@ def test_sparse_retrieval_drops_lexically_unrelated_hits_for_company_tax_query()
     assert response.hits
     assert response.hits[0].chunk_id == "company-rate"
     assert all(hit.chunk_id != "irrelevant" for hit in response.hits)
+
+
+def test_sparse_retrieval_prefers_amount_threshold_chunk() -> None:
+    dataset = [
+        _chunk(
+            chunk_id="threshold",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=12,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            heading_path=["2. Definitions"],
+            normalized_text="the aggregate value of such consideration in any income year exceeds Taka 1(one) crore;",
+        ),
+        _chunk(
+            chunk_id="irrelevant-rate",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=234,
+            section_id="3",
+            subsection_id=None,
+            chunk_type="table",
+            heading_path=["4. Tax rate table"],
+            normalized_text="the tax rate mentioned in column (3) shall be 100% higher",
+        ),
+    ]
+
+    response = search_sparse_index(
+        query="What is the threshold amount in the charitable purpose clause for services in exchange for consideration?",
+        index=build_sparse_index(dataset),
+        top_k=2,
+    )
+
+    assert response.hits
+    assert response.hits[0].chunk_id == "threshold"
+
+
+def test_sparse_retrieval_prefers_startup_loss_duration_chunk() -> None:
+    dataset = [
+        _chunk(
+            chunk_id="startup-loss",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=286,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            heading_path=["STARTUP SANDBOX"],
+            normalized_text="the amount of loss shall be carried forward and set off to the next 9 (nine) successive assessment years.",
+        ),
+        _chunk(
+            chunk_id="generic-assessment-year",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=234,
+            section_id="3",
+            subsection_id=None,
+            chunk_type="table",
+            heading_path=["4. Wealth tax table"],
+            normalized_text="assets and liabilities or balance sheet furnished with the return filed for the assessment year 2024-25.",
+        ),
+    ]
+
+    response = search_sparse_index(
+        query="For how many successive assessment years can startup losses be carried forward?",
+        index=build_sparse_index(dataset),
+        top_k=2,
+    )
+
+    assert response.hits
+    assert response.hits[0].chunk_id == "startup-loss"
 
 
 def test_exact_section_heading_is_preferred_over_incidental_section_reference() -> None:

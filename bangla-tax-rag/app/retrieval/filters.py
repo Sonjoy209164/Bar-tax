@@ -1,7 +1,7 @@
 import re
 
 from app.core.schemas import ChunkRecord, QuerySignals, RetrievalHit
-from app.core.utils import extract_definition_target, normalize_text
+from app.core.utils import extract_definition_target, extract_informative_query_terms, normalize_text, tokenize_for_bm25
 
 
 AUTHORITY_RANK = {
@@ -135,6 +135,111 @@ def has_exact_section_heading_match(hit: RetrievalHit, section_reference: str) -
     return any(heading_pattern.match(normalize_text(heading)) for heading in hit.heading_path)
 
 
+AMOUNT_PATTERN = re.compile(
+    r"(taka|crore|lakh|percent|%|threshold|limit|not more than|no more than|exceeds?|minimum|maximum)",
+    re.IGNORECASE,
+)
+DURATION_PATTERN = re.compile(
+    r"(\b\d+\s*\((?:[^)]*)\)\s*(?:successive\s+)?(?:assessment\s+)?(?:years?|months?|days?)|\b\d+\s+(?:successive\s+)?(?:assessment\s+)?years?\b|carry(?:ied)?\s+forward|period of|from .* to .*)",
+    re.IGNORECASE,
+)
+DATE_PATTERN = re.compile(
+    r"(\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b|\b\d{1,2}(?:st|nd|rd|th)\b|effective from|deadline|due date|tax day|by june|by july|by september|by november)",
+    re.IGNORECASE,
+)
+LIST_PATTERN = re.compile(r"(\([a-z]\)|\([ivx]+\)|namely|following classes|following items|following incomes|first year|second year)", re.IGNORECASE)
+
+
+def _build_searchable_text(hit: RetrievalHit) -> str:
+    return normalize_text(f"{' '.join(hit.heading_path)} {hit.normalized_text}").lower()
+
+
+def _satisfies_query_phrase_constraints(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    normalized_query = normalize_text(analyzed_query.original_query or analyzed_query.normalized_query).lower()
+    searchable_text = _build_searchable_text(hit)
+    required_phrases = [
+        "tax day",
+        "charitable purpose",
+        "income tax authorities",
+        "startup",
+    ]
+    for phrase in required_phrases:
+        if phrase in normalized_query and phrase not in searchable_text:
+            return False
+    if "carried forward" in normalized_query and "carried forward" not in searchable_text and "set off" not in searchable_text:
+        return False
+    return True
+
+
+def _informative_overlap_count(hit: RetrievalHit, analyzed_query: QuerySignals) -> int:
+    informative_terms = extract_informative_query_terms(
+        analyzed_query.original_query or analyzed_query.normalized_query,
+        analyzed_query.query_intent,
+    )
+    if not informative_terms:
+        return 0
+    searchable_terms = set(tokenize_for_bm25(_build_searchable_text(hit)))
+    return len(informative_terms & searchable_terms)
+
+
+def hit_has_amount_language(hit: RetrievalHit) -> bool:
+    return bool(AMOUNT_PATTERN.search(_build_searchable_text(hit)))
+
+
+def hit_has_duration_language(hit: RetrievalHit) -> bool:
+    return bool(DURATION_PATTERN.search(_build_searchable_text(hit)))
+
+
+def hit_has_date_language(hit: RetrievalHit) -> bool:
+    return bool(DATE_PATTERN.search(_build_searchable_text(hit)))
+
+
+def hit_looks_list_like(hit: RetrievalHit) -> bool:
+    return bool(LIST_PATTERN.search(_build_searchable_text(hit)))
+
+
+def hit_supports_amount(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    return (
+        _satisfies_query_phrase_constraints(hit, analyzed_query)
+        and _informative_overlap_count(hit, analyzed_query) > 0
+        and hit_has_amount_language(hit)
+    )
+
+
+def hit_supports_count(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    searchable_text = _build_searchable_text(hit)
+    has_numeric_phrase = bool(re.search(r"\b\d+\b", searchable_text))
+    return (
+        _satisfies_query_phrase_constraints(hit, analyzed_query)
+        and _informative_overlap_count(hit, analyzed_query) > 0
+        and (hit_looks_list_like(hit) or has_numeric_phrase)
+    )
+
+
+def hit_supports_duration(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    return (
+        _satisfies_query_phrase_constraints(hit, analyzed_query)
+        and _informative_overlap_count(hit, analyzed_query) > 0
+        and hit_has_duration_language(hit)
+    )
+
+
+def hit_supports_date(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    return (
+        _satisfies_query_phrase_constraints(hit, analyzed_query)
+        and _informative_overlap_count(hit, analyzed_query) > 0
+        and hit_has_date_language(hit)
+    )
+
+
+def hit_supports_list(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    return (
+        _satisfies_query_phrase_constraints(hit, analyzed_query)
+        and _informative_overlap_count(hit, analyzed_query) > 0
+        and hit_looks_list_like(hit)
+    )
+
+
 def hit_matches_definition_target_exactly(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
     focus_term = extract_definition_target(analyzed_query.original_query or analyzed_query.normalized_query)
     if not focus_term:
@@ -166,6 +271,16 @@ def hit_supports_query(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
     normalized_text = hit.normalized_text.lower()
     is_rate_lookup = analyzed_query.query_intent == "rate_lookup"
     has_rate_language = "করহার" in normalized_text or "কর হার" in normalized_text or "tax rate" in normalized_text
+    if analyzed_query.query_intent == "amount_lookup":
+        return hit_supports_amount(hit, analyzed_query)
+    if analyzed_query.query_intent == "count_lookup":
+        return hit_supports_count(hit, analyzed_query)
+    if analyzed_query.query_intent == "duration_lookup":
+        return hit_supports_duration(hit, analyzed_query)
+    if analyzed_query.query_intent == "date_lookup":
+        return hit_supports_date(hit, analyzed_query)
+    if analyzed_query.query_intent == "list_lookup":
+        return hit_supports_list(hit, analyzed_query)
     if analyzed_query.subsection_id:
         if hit.subsection_id == analyzed_query.subsection_id:
             return has_rate_language if is_rate_lookup else True
@@ -190,6 +305,26 @@ def filter_supportive_hits(hits: list[RetrievalHit], analyzed_query: QuerySignal
             return exact_target_hits
         if definition_hits:
             return definition_hits
+    if analyzed_query.query_intent == "amount_lookup":
+        amount_hits = [hit for hit in hits if hit_supports_amount(hit, analyzed_query)]
+        if amount_hits:
+            return amount_hits
+    if analyzed_query.query_intent == "count_lookup":
+        count_hits = [hit for hit in hits if hit_supports_count(hit, analyzed_query)]
+        if count_hits:
+            return count_hits
+    if analyzed_query.query_intent == "duration_lookup":
+        duration_hits = [hit for hit in hits if hit_supports_duration(hit, analyzed_query)]
+        if duration_hits:
+            return duration_hits
+    if analyzed_query.query_intent == "date_lookup":
+        date_hits = [hit for hit in hits if hit_supports_date(hit, analyzed_query)]
+        if date_hits:
+            return date_hits
+    if analyzed_query.query_intent == "list_lookup":
+        list_hits = [hit for hit in hits if hit_supports_list(hit, analyzed_query)]
+        if list_hits:
+            return list_hits
     if not analyzed_query.section_id and not analyzed_query.subsection_id:
         return hits
     supportive_hits = [hit for hit in hits if hit_supports_query(hit, analyzed_query)]

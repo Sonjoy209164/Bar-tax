@@ -3,15 +3,117 @@ import re
 from pathlib import Path
 
 from app.core.schemas import HybridRetrievalResponse, QuerySignals, RetrievalHit
-from app.core.utils import extract_salient_query_terms, preprocess_query, tokenize_for_bm25
+from app.core.utils import (
+    extract_informative_query_terms,
+    extract_salient_query_terms,
+    normalize_text,
+    preprocess_query,
+    tokenize_for_bm25,
+)
 from app.retrieval.dense import dense_search
-from app.retrieval.filters import authority_value, deduplicate_retrieval_hits, filter_supportive_hits, has_exact_section_heading_match
+from app.retrieval.filters import (
+    authority_value,
+    deduplicate_retrieval_hits,
+    filter_supportive_hits,
+    has_exact_section_heading_match,
+    hit_has_amount_language,
+    hit_has_date_language,
+    hit_has_duration_language,
+    hit_looks_list_like,
+)
 from app.retrieval.sparse import DEFAULT_INDEX_DIR, load_sparse_index, sparse_search
+from app.retrieval.sparse import load_chunk_records_from_jsonl
 
 logger = logging.getLogger(__name__)
 
 
 COMPANY_QUERY_PATTERN = re.compile(r"(কোম্প|কম্প|মকাম্প|ককাম্প|company)", re.IGNORECASE)
+STRICT_SUPPORT_INTENTS = {"amount_lookup", "count_lookup", "duration_lookup", "date_lookup", "list_lookup"}
+
+
+def _heading_signature(hit: RetrievalHit) -> str | None:
+    if not hit.heading_path:
+        return None
+    return normalize_text(hit.heading_path[-1]).lower()
+
+
+def _same_logical_unit(anchor_hit: RetrievalHit, candidate_hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    if anchor_hit.doc_id != candidate_hit.doc_id:
+        return False
+    if anchor_hit.chunk_id == candidate_hit.chunk_id:
+        return True
+
+    anchor_heading = _heading_signature(anchor_hit)
+    candidate_heading = _heading_signature(candidate_hit)
+    if anchor_heading and candidate_heading and anchor_heading == candidate_heading:
+        return abs(anchor_hit.page_no - candidate_hit.page_no) <= 1
+
+    if anchor_hit.subsection_id and candidate_hit.subsection_id and anchor_hit.subsection_id == candidate_hit.subsection_id:
+        return True
+
+    if anchor_hit.section_id and candidate_hit.section_id and anchor_hit.section_id == candidate_hit.section_id:
+        return abs(anchor_hit.page_no - candidate_hit.page_no) <= 2
+
+    if analyzed_query.section_reference:
+        anchor_has_section_heading = has_exact_section_heading_match(anchor_hit, analyzed_query.section_reference)
+        candidate_has_section_heading = has_exact_section_heading_match(candidate_hit, analyzed_query.section_reference)
+        if anchor_has_section_heading and candidate_has_section_heading:
+            return abs(anchor_hit.page_no - candidate_hit.page_no) <= 2
+
+    return False
+
+
+def _expand_logical_unit_hits(
+    candidate_hits: list[RetrievalHit],
+    all_hits: list[RetrievalHit],
+    analyzed_query: QuerySignals,
+    *,
+    final_top_k: int,
+    candidate_pool: list[RetrievalHit] | None = None,
+) -> list[RetrievalHit]:
+    should_expand = bool(analyzed_query.section_reference) or analyzed_query.query_intent in {
+        "count_lookup",
+        "list_lookup",
+        "date_lookup",
+        "amount_lookup",
+        "duration_lookup",
+        "definition",
+    }
+    if not should_expand or not candidate_hits:
+        return candidate_hits
+
+    anchor_count = 2 if analyzed_query.query_intent in {"count_lookup", "list_lookup"} else 1
+    anchors = candidate_hits[:anchor_count]
+    expanded_hits: list[RetrievalHit] = []
+    seen_chunk_ids: set[str] = set()
+
+    pool = list(all_hits)
+    if candidate_pool:
+        seen_pool_chunk_ids = {hit.chunk_id for hit in pool}
+        pool.extend(hit for hit in candidate_pool if hit.chunk_id not in seen_pool_chunk_ids)
+
+    for anchor_hit in anchors:
+        related_hits = [
+            hit
+            for hit in pool
+            if _same_logical_unit(anchor_hit, hit, analyzed_query)
+        ]
+        related_hits.sort(key=lambda hit: (-hit.score, hit.page_no, hit.chunk_id))
+        for hit in related_hits:
+            if hit.chunk_id in seen_chunk_ids:
+                continue
+            expanded_hits.append(hit)
+            seen_chunk_ids.add(hit.chunk_id)
+
+    if not expanded_hits:
+        return candidate_hits
+
+    # Keep more same-unit chunks for list/count queries where legal lists often spill over multiple chunks.
+    if analyzed_query.query_intent in {"count_lookup", "list_lookup"}:
+        max_hits = max(final_top_k, 3)
+    else:
+        max_hits = min(final_top_k, 3)
+    return expanded_hits[:max_hits]
 
 
 def reciprocal_rank_fusion(
@@ -98,6 +200,52 @@ def apply_hybrid_post_ranking(hit: RetrievalHit, analyzed_query: QuerySignals) -
                 adjusted_score -= 1.4
         if "software" in searchable_text.lower() and "service" in searchable_text.lower():
             adjusted_score += 1.5
+    informative_terms = extract_informative_query_terms(analyzed_query.normalized_query, analyzed_query.query_intent)
+    searchable_terms = set(tokenize_for_bm25(searchable_text.lower()))
+    informative_overlap = len(informative_terms & searchable_terms)
+    if analyzed_query.query_intent == "amount_lookup":
+        if hit_has_amount_language(adjusted_hit):
+            adjusted_score += 2.0
+        else:
+            adjusted_score -= 1.6
+        if informative_terms:
+            adjusted_score += min(informative_overlap * 1.0, 4.0)
+            if informative_overlap == 0:
+                adjusted_score -= 4.0
+    if analyzed_query.query_intent == "count_lookup":
+        if hit_looks_list_like(adjusted_hit) or any(token.isdigit() for token in searchable_terms):
+            adjusted_score += 1.8
+        if informative_terms:
+            adjusted_score += min(informative_overlap * 1.0, 4.0)
+            if informative_overlap == 0:
+                adjusted_score -= 4.0
+    if analyzed_query.query_intent == "duration_lookup":
+        if hit_has_duration_language(adjusted_hit):
+            adjusted_score += 2.0
+        else:
+            adjusted_score -= 1.5
+        if informative_terms:
+            adjusted_score += min(informative_overlap * 1.0, 4.0)
+            if informative_overlap == 0:
+                adjusted_score -= 4.0
+    if analyzed_query.query_intent == "date_lookup":
+        if hit_has_date_language(adjusted_hit):
+            adjusted_score += 1.8
+        else:
+            adjusted_score -= 1.4
+        if informative_terms:
+            adjusted_score += min(informative_overlap * 0.9, 3.5)
+            if informative_overlap == 0:
+                adjusted_score -= 3.5
+    if analyzed_query.query_intent == "list_lookup":
+        if hit_looks_list_like(adjusted_hit):
+            adjusted_score += 1.9
+        else:
+            adjusted_score -= 1.2
+        if informative_terms:
+            adjusted_score += min(informative_overlap * 0.9, 3.5)
+            if informative_overlap == 0:
+                adjusted_score -= 3.2
     adjusted_hit.score = round(adjusted_score, 6)
     adjusted_hit.intermediate_scores["postrank_score"] = adjusted_hit.score
     return adjusted_hit
@@ -125,6 +273,7 @@ def build_evidence_pack(
     analyzed_query: QuerySignals,
     *,
     final_top_k: int = 5,
+    candidate_pool: list[RetrievalHit] | None = None,
 ) -> tuple[list[RetrievalHit], str, list[str], list[str]]:
     reranked_hits = [apply_hybrid_post_ranking(hit, analyzed_query) for hit in fused_hits]
     reranked_hits.sort(key=lambda hit: hit.score, reverse=True)
@@ -150,25 +299,38 @@ def build_evidence_pack(
                 elif len(salient_terms & searchable_terms) >= 2:
                     semantically_aligned_hits.append(hit)
             supportive_hits = semantically_aligned_hits or exact_heading_hits
-    requires_exact_support = bool(analyzed_query.subsection_id) or (
-        analyzed_query.query_intent == "rate_lookup" and bool(analyzed_query.section_id)
+    requires_exact_support = (
+        bool(analyzed_query.subsection_id)
+        or (analyzed_query.query_intent == "rate_lookup" and bool(analyzed_query.section_id))
+        or analyzed_query.query_intent in STRICT_SUPPORT_INTENTS
     )
     if requires_exact_support and not supportive_hits:
         conflict_notes.append("No final evidence directly supports the requested section or subsection.")
         candidate_hits: list[RetrievalHit] = []
     else:
         candidate_hits = supportive_hits if supportive_hits else deduplicated_hits
+    candidate_hits = _expand_logical_unit_hits(
+        candidate_hits,
+        deduplicated_hits,
+        analyzed_query,
+        final_top_k=final_top_k,
+        candidate_pool=candidate_pool,
+    )
     selected_hits: list[RetrievalHit] = []
-    seen_chunk_types: set[str] = set()
-    for hit in candidate_hits:
-        if len(selected_hits) >= final_top_k:
-            break
-        if hit.chunk_type not in seen_chunk_types or len(selected_hits) < 2:
+    if analyzed_query.query_intent in {"count_lookup", "list_lookup", "date_lookup", "amount_lookup", "duration_lookup"} or analyzed_query.section_reference:
+        selected_hits = candidate_hits[:final_top_k]
+        selected_hits.sort(key=lambda hit: (0 if hit.score > 0 else 1, hit.page_no, -hit.score, hit.chunk_id))
+    else:
+        seen_chunk_types: set[str] = set()
+        for hit in candidate_hits:
+            if len(selected_hits) >= final_top_k:
+                break
+            if hit.chunk_type not in seen_chunk_types or len(selected_hits) < 2:
+                selected_hits.append(hit)
+                seen_chunk_types.add(hit.chunk_type)
+                continue
             selected_hits.append(hit)
-            seen_chunk_types.add(hit.chunk_type)
-            continue
-        selected_hits.append(hit)
-    selected_hits.sort(key=lambda hit: (authority_value(hit.authority_level), hit.score), reverse=True)
+        selected_hits.sort(key=lambda hit: (authority_value(hit.authority_level), hit.score), reverse=True)
     selected_hits = selected_hits[:final_top_k]
     evidence_summary = (
         "; ".join(f"{hit.chunk_id} p.{hit.page_no} {hit.chunk_type} {hit.authority_level}" for hit in selected_hits)
@@ -228,10 +390,37 @@ def run_hybrid_retrieval(
         ]
     )
     fused_hits = reciprocal_rank_fusion(sparse_hits=sparse_hits, dense_hits=dense_hits, rrf_k=rrf_k)
+    candidate_pool: list[RetrievalHit] | None = None
+    if sparse_hits_override is None and dense_hits_override is None:
+        try:
+            chunk_records = load_chunk_records_from_jsonl(Path(index_dir) / "chunks.jsonl")
+        except FileNotFoundError:
+            chunk_records = []
+        candidate_pool = [
+            RetrievalHit(
+                chunk_id=chunk.chunk_id,
+                doc_id=chunk.doc_id,
+                doc_title=chunk.doc_title,
+                page_no=chunk.page_no,
+                section_id=chunk.section_id,
+                subsection_id=chunk.subsection_id,
+                chunk_type=chunk.chunk_type,
+                authority_level=chunk.authority_level,
+                tax_year=chunk.tax_year,
+                original_text=chunk.original_text,
+                normalized_text=chunk.normalized_text,
+                heading_path=chunk.heading_path,
+                content=chunk.original_text,
+                score=0.0,
+                intermediate_scores={"from_corpus_pool": 1},
+            )
+            for chunk in chunk_records
+        ]
     final_hits, evidence_summary, conflict_notes, dropped_duplicates = build_evidence_pack(
         fused_hits,
         analyzed_query,
         final_top_k=final_top_k,
+        candidate_pool=candidate_pool,
     )
     return HybridRetrievalResponse(
         query_text=query,

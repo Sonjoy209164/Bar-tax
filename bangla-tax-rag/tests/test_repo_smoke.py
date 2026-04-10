@@ -20,7 +20,11 @@ def test_sparse_index_load(tmp_path: Path) -> None:
 
 
 def test_dense_index_load(tmp_path: Path) -> None:
-    output_dir, chunk_count = build_dense_index_artifacts("data/processed/sample_chunks.jsonl", tmp_path / "dense")
+    output_dir, chunk_count = build_dense_index_artifacts(
+        "data/processed/sample_chunks.jsonl",
+        tmp_path / "dense",
+        provider="mock",
+    )
     metadata = load_dense_index_metadata(output_dir)
 
     assert metadata["chunk_count"] == chunk_count

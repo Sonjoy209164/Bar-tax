@@ -21,6 +21,7 @@ from app.retrieval.filters import (
     hit_has_duration_language,
     hit_looks_list_like,
 )
+from app.retrieval.reranker import rerank_retrieval_hits
 from app.retrieval.sparse import DEFAULT_INDEX_DIR, load_sparse_index, sparse_search
 from app.retrieval.sparse import load_chunk_records_from_jsonl
 
@@ -29,6 +30,37 @@ logger = logging.getLogger(__name__)
 
 COMPANY_QUERY_PATTERN = re.compile(r"(কোম্প|কম্প|মকাম্প|ককাম্প|company)", re.IGNORECASE)
 STRICT_SUPPORT_INTENTS = {"amount_lookup", "count_lookup", "duration_lookup", "date_lookup", "list_lookup"}
+
+
+def _load_dense_hits_for_hybrid(
+    *,
+    query: str,
+    top_k: int,
+    effective_tax_year: str | None,
+    doc_type: str | None,
+    authority_level_min: str | None,
+    chunk_type: str | None,
+    dense_index_dir: str | Path,
+) -> list[RetrievalHit]:
+    try:
+        return [
+            RetrievalHit(**hit)
+            for hit in dense_search(
+                query,
+                top_k=top_k,
+                tax_year=effective_tax_year,
+                doc_type=doc_type,
+                authority_level_min=authority_level_min,
+                chunk_type=chunk_type,
+                index_dir=dense_index_dir,
+            )
+        ]
+    except FileNotFoundError as exc:
+        logger.warning("Dense index missing for hybrid retrieval; continuing with sparse hits only.", extra={"error": str(exc)})
+        return []
+    except Exception as exc:  # pragma: no cover - runtime fallback
+        logger.warning("Dense retrieval failed inside hybrid pipeline; continuing with sparse hits only.", extra={"error": str(exc)})
+        return []
 
 
 def _heading_signature(hit: RetrievalHit) -> str | None:
@@ -273,10 +305,17 @@ def build_evidence_pack(
     analyzed_query: QuerySignals,
     *,
     final_top_k: int = 5,
+    query_text: str | None = None,
     candidate_pool: list[RetrievalHit] | None = None,
 ) -> tuple[list[RetrievalHit], str, list[str], list[str]]:
     reranked_hits = [apply_hybrid_post_ranking(hit, analyzed_query) for hit in fused_hits]
     reranked_hits.sort(key=lambda hit: hit.score, reverse=True)
+    reranked_hits = rerank_retrieval_hits(
+        query_text=query_text or analyzed_query.original_query,
+        analyzed_query=analyzed_query,
+        hits=reranked_hits,
+        top_n=max(final_top_k * 4, 12),
+    )
     conflict_notes = detect_conflicts(reranked_hits[: max(final_top_k + 2, 4)])
     deduplicated_hits, dropped_duplicates = deduplicate_retrieval_hits(reranked_hits)
     supportive_hits = filter_supportive_hits(deduplicated_hits, analyzed_query)
@@ -352,6 +391,7 @@ def run_hybrid_retrieval(
     authority_level_min: str | None = None,
     chunk_type: str | None = None,
     index_dir: str | Path = DEFAULT_INDEX_DIR,
+    dense_index_dir: str | Path | None = None,
     sparse_hits_override: list[RetrievalHit] | None = None,
     dense_hits_override: list[RetrievalHit] | None = None,
 ) -> HybridRetrievalResponse:
@@ -376,18 +416,15 @@ def run_hybrid_retrieval(
     dense_hits = (
         dense_hits_override
         if dense_hits_override is not None
-        else [
-            RetrievalHit(**hit)
-            for hit in dense_search(
-                query,
-                top_k=dense_top_k,
-                tax_year=effective_tax_year,
-                doc_type=doc_type,
-                authority_level_min=authority_level_min,
-                chunk_type=chunk_type,
-                index_dir=index_dir,
-            )
-        ]
+        else _load_dense_hits_for_hybrid(
+            query=query,
+            top_k=dense_top_k,
+            effective_tax_year=effective_tax_year,
+            doc_type=doc_type,
+            authority_level_min=authority_level_min,
+            chunk_type=chunk_type,
+            dense_index_dir=dense_index_dir or index_dir,
+        )
     )
     fused_hits = reciprocal_rank_fusion(sparse_hits=sparse_hits, dense_hits=dense_hits, rrf_k=rrf_k)
     candidate_pool: list[RetrievalHit] | None = None
@@ -420,6 +457,7 @@ def run_hybrid_retrieval(
         fused_hits,
         analyzed_query,
         final_top_k=final_top_k,
+        query_text=query,
         candidate_pool=candidate_pool,
     )
     return HybridRetrievalResponse(
@@ -448,6 +486,7 @@ def hybrid_search(
     final_top_k: int | None = None,
     rrf_k: int = 60,
     index_dir: str | Path = DEFAULT_INDEX_DIR,
+    dense_index_dir: str | Path | None = None,
 ) -> list[dict[str, str | float | int | list[str] | None | dict[str, float | int | None]]]:
     response = run_hybrid_retrieval(
         query=query,
@@ -460,6 +499,7 @@ def hybrid_search(
         authority_level_min=authority_level_min,
         chunk_type=chunk_type,
         index_dir=index_dir,
+        dense_index_dir=dense_index_dir,
     )
     logger.info(
         "Hybrid retrieval complete",

@@ -31,7 +31,9 @@ class Settings(BaseSettings):
     abstention_score_threshold: float = Field(default=0.75, alias="ABSTENTION_SCORE_THRESHOLD")
     verification_enabled: bool = Field(default=True, alias="VERIFICATION_ENABLED")
     embedding_provider: str = Field(default="mock", alias="EMBEDDING_PROVIDER")
-    embedding_model_name: str = Field(default="mock-dense-overlap", alias="EMBEDDING_MODEL_NAME")
+    embedding_model_name: str = Field(default="BAAI/bge-m3", alias="EMBEDDING_MODEL_NAME")
+    reranker_provider: str = Field(default="mock", alias="RERANKER_PROVIDER")
+    reranker_model_name: str = Field(default="BAAI/bge-reranker-v2-m3", alias="RERANKER_MODEL_NAME")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -64,6 +66,8 @@ class Settings(BaseSettings):
             "verification_enabled": self.verification_enabled,
             "embedding_provider": self.embedding_provider,
             "embedding_model_name": self.embedding_model_name,
+            "reranker_provider": self.reranker_provider,
+            "reranker_model_name": self.reranker_model_name,
         }
 
 
@@ -77,6 +81,7 @@ def get_settings() -> Settings:
     generation_config = yaml_config.get("generation", {})
     paths_config = yaml_config.get("paths", {})
     embeddings_config = yaml_config.get("embeddings", {})
+    reranker_config = yaml_config.get("reranker", {})
     if "name" in app_config:
         flat_updates["app_name"] = app_config["name"]
     if "environment" in app_config:
@@ -114,4 +119,8 @@ def get_settings() -> Settings:
         flat_updates["embedding_provider"] = embeddings_config["provider"]
     if "model_name" in embeddings_config:
         flat_updates["embedding_model_name"] = embeddings_config["model_name"]
+    if "provider" in reranker_config:
+        flat_updates["reranker_provider"] = reranker_config["provider"]
+    if "model_name" in reranker_config:
+        flat_updates["reranker_model_name"] = reranker_config["model_name"]
     return settings.model_copy(update=flat_updates)

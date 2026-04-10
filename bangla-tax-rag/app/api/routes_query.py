@@ -62,6 +62,7 @@ def _run_query_pipeline(request: QueryRequest) -> QueryAPIResponse:
             authority_level_min=request.authority_level_min,
             chunk_type=request.chunk_type,
             index_dir=index_dir,
+            dense_index_dir=settings.dense_index_dir,
         )
         analyzed_query = hybrid_response.analyzed_query
         sparse_hits = hybrid_response.sparse_hits

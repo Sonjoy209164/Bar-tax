@@ -24,4 +24,7 @@ generation:
   verification_enabled: true
 embeddings:
   provider: mock
-  model_name: mock-dense-overlap
+  model_name: BAAI/bge-m3
+reranker:
+  provider: mock
+  model_name: BAAI/bge-reranker-v2-m3

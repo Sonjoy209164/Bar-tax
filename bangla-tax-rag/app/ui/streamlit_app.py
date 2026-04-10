@@ -157,10 +157,12 @@ def run_local_retrieval_inspection(
     final_evidence_k: int,
 ) -> dict[str, Any]:
     from app.core.utils import extract_salient_query_terms, preprocess_query, tokenize_for_bm25
+    from app.core.settings import get_settings
     from app.retrieval.dense import dense_search
     from app.retrieval.hybrid import run_hybrid_retrieval
     from app.retrieval.sparse import sparse_search
 
+    settings = get_settings()
     analyzed_query = preprocess_query(query_text)
     search_query = analyzed_query.rewritten_query or analyzed_query.normalized_query
     query_tokens = tokenize_for_bm25(search_query)
@@ -202,7 +204,7 @@ def run_local_retrieval_inspection(
             query_text,
             top_k=top_k,
             tax_year=effective_tax_year,
-            index_dir=index_dir,
+            index_dir=settings.dense_index_dir,
         )
         payload["dense_hits"] = dense_hits
         payload["final_hits"] = dense_hits
@@ -215,6 +217,7 @@ def run_local_retrieval_inspection(
         final_top_k=final_evidence_k,
         tax_year=effective_tax_year,
         index_dir=index_dir,
+        dense_index_dir=settings.dense_index_dir,
     )
     payload["sparse_hits"] = [hit.model_dump() for hit in hybrid_response.sparse_hits]
     payload["dense_hits"] = [hit.model_dump() for hit in hybrid_response.dense_hits]

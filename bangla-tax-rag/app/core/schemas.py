@@ -328,3 +328,5 @@ class ConfigResponse(BaseModel):
     verification_enabled: bool
     embedding_provider: str
     embedding_model_name: str
+    reranker_provider: str
+    reranker_model_name: str

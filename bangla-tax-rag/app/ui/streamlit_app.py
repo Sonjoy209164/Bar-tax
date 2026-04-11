@@ -20,6 +20,16 @@ try:
 except Exception:  # pragma: no cover - optional UI dependency
     fitz = None
 
+try:  # pragma: no cover - optional inspection dependency
+    import numpy as np
+except Exception:  # pragma: no cover - defensive UI fallback
+    np = None
+
+try:  # pragma: no cover - optional inspection dependency
+    import faiss
+except Exception:  # pragma: no cover - defensive UI fallback
+    faiss = None
+
 REQUEST_TIMEOUT_SECONDS = 30
 INGEST_TIMEOUT_SECONDS = 300
 INDEX_BUILD_TIMEOUT_SECONDS = 120
@@ -32,6 +42,14 @@ GENERATION_TEST_QUESTIONS = [
     "What does the Act say about software test lab service?",
     "What is the tax day for a company?",
 ]
+COMPARISON_TEST_QUESTIONS = [
+    "What is the definition of Commissioner?",
+    "What are the income tax authorities under section 4?",
+    "What is the tax day for a company?",
+    "Is software service mentioned in the Act?",
+    "What does the Act say about software test lab service?",
+    "For how many successive assessment years can startup losses be carried forward?",
+]
 
 
 def initialize_session_state() -> None:
@@ -42,14 +60,18 @@ def initialize_session_state() -> None:
         "last_ingest_response": None,
         "last_build_index_response": None,
         "last_retrieval_inspector_response": None,
+        "last_comparison_responses": None,
         "question_preset": GENERATION_TEST_QUESTIONS[0],
+        "comparison_question_preset": COMPARISON_TEST_QUESTIONS[0],
         "question_text": "২০২৫-২০২৬ করবর্ষে কোম্পানির করহার কী?",
+        "comparison_question_text": COMPARISON_TEST_QUESTIONS[0],
         "retrieval_mode": settings.retrieval_mode,
         "tax_year": "",
         "top_k": settings.top_k,
         "final_evidence_k": settings.final_evidence_k,
         "include_intermediate_hits": False,
         "generate_answer": True,
+        "comparison_generate_answer": True,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -107,6 +129,150 @@ def load_index_artifacts(
     if error_message:
         return {}, [], error_message
     return metadata, chunk_records, None
+
+
+@st.cache_data(show_spinner=False)
+def load_dense_index_artifacts(
+    index_dir: str,
+    *,
+    max_chunks: int = 100,
+    vector_preview_dims: int = 12,
+) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
+    path = Path(index_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    if not path.exists():
+        return {}, [], f"Dense index directory not found: {path}"
+
+    metadata_path = path / "metadata.json"
+    chunks_path = path / "chunks.jsonl"
+    embeddings_path = path / "embeddings.npy"
+    faiss_path = path / "index.faiss"
+
+    metadata: dict[str, Any] = {}
+    if metadata_path.exists():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return {}, [], f"Invalid metadata.json: {exc}"
+
+    chunk_records, error_message = load_chunk_records(str(chunks_path), max_chunks=max_chunks)
+    if error_message:
+        return {}, [], error_message
+
+    summary: dict[str, Any] = {
+        "index_dir": str(path),
+        "metadata": metadata,
+        "files": {
+            "metadata_json": metadata_path.exists(),
+            "chunks_jsonl": chunks_path.exists(),
+            "embeddings_npy": embeddings_path.exists(),
+            "index_faiss": faiss_path.exists(),
+        },
+    }
+
+    if embeddings_path.exists():
+        if np is None:
+            summary["embedding_error"] = "numpy is not available for embedding inspection."
+        else:
+            try:
+                embeddings = np.load(embeddings_path, mmap_mode="r")
+                sample_count = min(10, int(embeddings.shape[0]))
+                sample_norms = (
+                    np.linalg.norm(np.asarray(embeddings[:sample_count]), axis=1).round(6).tolist()
+                    if sample_count
+                    else []
+                )
+                summary["embedding_matrix"] = {
+                    "shape": [int(dim) for dim in embeddings.shape],
+                    "dtype": str(embeddings.dtype),
+                    "sample_vector_preview": (
+                        np.asarray(embeddings[0][:vector_preview_dims]).round(6).tolist()
+                        if embeddings.shape[0]
+                        else []
+                    ),
+                    "sample_norms": sample_norms,
+                }
+            except Exception as exc:  # pragma: no cover - defensive UI handling
+                summary["embedding_error"] = str(exc)
+
+    if faiss_path.exists():
+        if faiss is None:
+            summary["faiss_error"] = "faiss is not available for index inspection."
+        else:
+            try:
+                faiss_index = faiss.read_index(str(faiss_path))
+                summary["faiss_index"] = {
+                    "type": type(faiss_index).__name__,
+                    "ntotal": int(faiss_index.ntotal),
+                    "dimension": int(faiss_index.d),
+                }
+            except Exception as exc:  # pragma: no cover - defensive UI handling
+                summary["faiss_error"] = str(exc)
+
+    inferred_provider = metadata.get("provider") or "unknown"
+    inferred_backend = metadata.get("index_backend") or "unknown"
+    inferred_type = metadata.get("index_type") or "unknown"
+    if embeddings_path.exists():
+        inferred_provider = "transformers"
+        inferred_type = "dense_transformers"
+        inferred_backend = "faiss" if faiss_path.exists() else "numpy"
+    summary["inferred_runtime"] = {
+        "provider": inferred_provider,
+        "index_type": inferred_type,
+        "index_backend": inferred_backend,
+    }
+    summary["metadata_mismatch"] = bool(
+        embeddings_path.exists() and metadata.get("index_type") == "dense_overlap_placeholder"
+    )
+    return summary, chunk_records, None
+
+
+@st.cache_data(show_spinner=False)
+def load_dense_vector_neighbors(
+    index_dir: str,
+    *,
+    vector_index: int,
+    top_k: int = 5,
+) -> tuple[list[dict[str, Any]], str | None]:
+    if np is None:
+        return [], "numpy is not available for dense vector inspection."
+    path = Path(index_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    embeddings_path = path / "embeddings.npy"
+    chunks_path = path / "chunks.jsonl"
+    if not embeddings_path.exists():
+        return [], f"Embeddings file not found: {embeddings_path}"
+    if not chunks_path.exists():
+        return [], f"Chunk file not found: {chunks_path}"
+
+    embeddings = np.load(embeddings_path)
+    if vector_index < 0 or vector_index >= embeddings.shape[0]:
+        return [], f"Vector index {vector_index} is out of range."
+
+    chunk_records = load_chunk_records(str(chunks_path), max_chunks=max(int(embeddings.shape[0]), 1))[0]
+    anchor = embeddings[vector_index]
+    similarities = embeddings @ anchor
+    ranked_indices = np.argsort(-similarities)[:top_k]
+
+    neighbors: list[dict[str, Any]] = []
+    for neighbor_index in ranked_indices.tolist():
+        chunk = chunk_records[neighbor_index] if neighbor_index < len(chunk_records) else {}
+        neighbors.append(
+            {
+                "vector_index": int(neighbor_index),
+                "similarity": float(similarities[neighbor_index]),
+                "chunk_id": chunk.get("chunk_id"),
+                "page_no": chunk.get("page_no"),
+                "section_id": chunk.get("section_id"),
+                "subsection_id": chunk.get("subsection_id"),
+                "chunk_type": chunk.get("chunk_type"),
+                "heading_path": chunk.get("heading_path") or [],
+                "original_text": chunk.get("original_text") or "",
+            }
+        )
+    return neighbors, None
 
 
 @st.cache_data(show_spinner=False)
@@ -494,6 +660,39 @@ def render_hit_card(
         st.write(snippet)
 
 
+def render_hit_compact_card(
+    hit: dict[str, Any],
+    *,
+    show_intermediate_scores: bool = False,
+) -> None:
+    with st.container(border=True):
+        st.caption(
+            f"{hit.get('doc_title', 'Untitled Document')} | "
+            f"page {hit.get('page_no', '-')} | "
+            f"{hit.get('chunk_id', 'unknown-chunk')}"
+        )
+        metadata_columns = st.columns(4)
+        metadata_columns[0].metric(
+            "Score",
+            f"{hit.get('score', 0):.4f}" if isinstance(hit.get("score"), (int, float)) else hit.get("score", "-"),
+        )
+        metadata_columns[1].metric("Chunk Type", str(hit.get("chunk_type", "-")))
+        metadata_columns[2].metric("Authority", str(hit.get("authority_level", "-")))
+        metadata_columns[3].metric("Tax Year", str(hit.get("tax_year", "-")))
+        st.caption(
+            f"section={hit.get('section_id') or '-'} | "
+            f"subsection={hit.get('subsection_id') or '-'}"
+        )
+        heading_path = hit.get("heading_path") or []
+        if heading_path:
+            st.markdown(f"**Heading Path:** {' > '.join(heading_path)}")
+        if show_intermediate_scores and hit.get("intermediate_scores"):
+            st.markdown("**Intermediate Scores**")
+            st.json(hit.get("intermediate_scores"))
+        snippet = hit.get("original_text") or hit.get("content") or hit.get("normalized_text") or ""
+        st.code(snippet[:900], language="text")
+
+
 def render_chunk_card(chunk: dict[str, Any]) -> None:
     title = (
         f"{chunk.get('chunk_id', 'unknown-chunk')} | "
@@ -838,6 +1037,107 @@ def render_index_inspector() -> None:
             )
 
 
+def render_dense_vector_inspector() -> None:
+    st.subheader("Dense Vector Inspector")
+    st.caption("Inspect the local dense vector store, embedding matrix, FAISS index, and chunk-to-vector mapping.")
+
+    settings = get_settings()
+    last_build_index_response = st.session_state.get("last_build_index_response")
+    if not isinstance(last_build_index_response, dict):
+        last_build_index_response = {}
+    default_index_dir = last_build_index_response.get("dense_index_path") or settings.dense_index_dir or "indexes/dense"
+
+    config_left, config_right, config_far_right = st.columns([3, 1, 1])
+    with config_left:
+        index_dir = st.text_input(
+            "Dense Index Directory",
+            value=default_index_dir,
+            help="Point this to a dense index directory containing chunks.jsonl and embeddings.npy.",
+        )
+    with config_right:
+        preview_limit = st.number_input("Preview Chunks", min_value=5, max_value=500, value=50, step=5)
+    with config_far_right:
+        preview_dims = st.number_input("Preview Dims", min_value=4, max_value=64, value=12, step=4)
+
+    summary, chunk_records, error_message = load_dense_index_artifacts(
+        index_dir,
+        max_chunks=int(preview_limit),
+        vector_preview_dims=int(preview_dims),
+    )
+    if error_message:
+        st.warning(f"Error loading dense index: {error_message}")
+        return
+
+    if summary.get("metadata_mismatch"):
+        st.warning(
+            "Dense files exist on disk, but metadata.json still says placeholder/mock. "
+            "The inspector is showing the inferred runtime shape from the actual files."
+        )
+
+    st.json(summary)
+
+    if not chunk_records:
+        st.info("No preview chunks were loaded from this dense index.")
+        return
+
+    embedding_matrix = summary.get("embedding_matrix") or {}
+    vector_count = int((embedding_matrix.get("shape") or [0])[0]) if embedding_matrix.get("shape") else 0
+    if vector_count <= 0:
+        st.info("No embedding matrix was found yet. Build the dense index first to inspect stored vectors.")
+        return
+
+    chunk_options = [
+        (
+            index,
+            f"{index} | p.{chunk.get('page_no', '-')} | {chunk.get('chunk_id', 'unknown-chunk')} | "
+            f"{(chunk.get('heading_path') or ['-'])[-1]}"
+        )
+        for index, chunk in enumerate(chunk_records[:vector_count])
+    ]
+    option_labels = [label for _, label in chunk_options]
+    selected_label = st.selectbox("Select Vector / Chunk", options=option_labels, index=0)
+    selected_index = next(index for index, label in chunk_options if label == selected_label)
+    selected_chunk = chunk_records[selected_index]
+
+    vector_left, vector_right = st.columns([2, 3])
+    with vector_left:
+        st.markdown("**Selected Vector Metadata**")
+        st.json(
+            {
+                "vector_index": selected_index,
+                "chunk_id": selected_chunk.get("chunk_id"),
+                "page_no": selected_chunk.get("page_no"),
+                "section_id": selected_chunk.get("section_id"),
+                "subsection_id": selected_chunk.get("subsection_id"),
+                "chunk_type": selected_chunk.get("chunk_type"),
+                "heading_path": selected_chunk.get("heading_path"),
+            }
+        )
+    with vector_right:
+        st.markdown("**Selected Chunk Text**")
+        st.code(selected_chunk.get("original_text") or "", language="text")
+
+    neighbors, neighbor_error = load_dense_vector_neighbors(index_dir, vector_index=selected_index, top_k=5)
+    if neighbor_error:
+        st.warning(neighbor_error)
+        return
+
+    st.markdown("**Nearest Neighbor Vectors**")
+    for neighbor in neighbors:
+        with st.container(border=True):
+            st.caption(
+                f"vector {neighbor['vector_index']} | sim={neighbor['similarity']:.4f} | "
+                f"{neighbor.get('chunk_id', 'unknown-chunk')}"
+            )
+            st.write(
+                f"page={neighbor.get('page_no', '-')} | "
+                f"section={neighbor.get('section_id', '-')} | "
+                f"subsection={neighbor.get('subsection_id', '-')}"
+            )
+            st.write(" > ".join(neighbor.get("heading_path") or ["-"]))
+            st.code((neighbor.get("original_text") or "")[:900], language="text")
+
+
 def render_retrieval_inspector() -> None:
     st.subheader("Retrieval Inspector")
     st.caption("Inspect local retrieval before generation. This runs sparse, dense, or hybrid retrieval directly against the selected index directory.")
@@ -952,6 +1252,168 @@ def render_retrieval_inspector() -> None:
         render_hit_card(hit, show_intermediate_scores=True)
 
 
+def render_comparison_result_column(mode_name: str, payload: dict[str, Any]) -> None:
+    st.markdown(f"### {mode_name.title()}")
+    analyzed_query = payload.get("analyzed_query") or {}
+    answer_text = payload.get("answer")
+    abstained = payload.get("abstained")
+    confidence_score = payload.get("confidence_score")
+    final_hits = payload.get("final_hits") or []
+
+    metric_columns = st.columns(3)
+    metric_columns[0].metric("Answer Status", "Abstained" if abstained else ("Answered" if answer_text else "No Answer"))
+    metric_columns[1].metric("Confidence", f"{confidence_score:.4f}" if isinstance(confidence_score, (int, float)) else "-")
+    metric_columns[2].metric("Final Hits", str(len(final_hits)))
+
+    rewritten_query = analyzed_query.get("rewritten_query")
+    if rewritten_query and rewritten_query != analyzed_query.get("normalized_query"):
+        st.caption(f"Rewritten: {rewritten_query}")
+
+    if abstained:
+        st.warning(payload.get("abstention_reason") or "Generation abstained.")
+    elif answer_text:
+        st.markdown("**Answer**")
+        st.write(answer_text)
+    else:
+        st.info("No answer returned.")
+
+    top_hit = final_hits[0] if final_hits else None
+    if top_hit:
+        st.markdown("**Top Evidence**")
+        st.caption(
+            f"{top_hit.get('chunk_id')} | page {top_hit.get('page_no')} | "
+            f"section {top_hit.get('section_id') or '-'} | score {top_hit.get('score', '-')}"
+        )
+        st.code((top_hit.get("original_text") or "")[:900], language="text")
+
+    with st.expander("All Final Evidence", expanded=False):
+        if not final_hits:
+            st.caption("No final evidence hits returned.")
+        for hit in final_hits:
+            render_hit_compact_card(hit)
+
+    if payload.get("conflict_notes"):
+        with st.expander("Conflict Notes", expanded=False):
+            for note in payload.get("conflict_notes") or []:
+                st.write(f"- {note}")
+
+
+def render_method_comparison(base_url: str) -> None:
+    st.subheader("Method Comparison")
+    st.caption("Run the same easy question through sparse, dense, and hybrid retrieval and compare answers side by side.")
+
+    with st.expander("Easy Comparison Questions", expanded=False):
+        selector_column, action_column = st.columns([3, 1])
+        with selector_column:
+            selected_question = st.selectbox(
+                "Comparison Question Preset",
+                options=COMPARISON_TEST_QUESTIONS,
+                key="comparison_question_preset",
+            )
+        with action_column:
+            st.write("")
+            if st.button("Use For Comparison", use_container_width=True):
+                st.session_state["comparison_question_text"] = selected_question
+                st.session_state["last_comparison_responses"] = None
+        for question in COMPARISON_TEST_QUESTIONS:
+            st.code(question, language="text")
+
+    with st.form("comparison_form", clear_on_submit=False):
+        question_text = st.text_area(
+            "Comparison Question",
+            key="comparison_question_text",
+            height=90,
+            placeholder="Ask one clear question and compare how each retrieval method responds.",
+        )
+        form_left, form_middle, form_right = st.columns(3)
+        with form_left:
+            tax_year = st.text_input("Tax Year (optional)", value="", placeholder="2025-2026")
+        with form_middle:
+            top_k = st.number_input("Top K", min_value=1, max_value=20, value=5, step=1, key="comparison_top_k")
+        with form_right:
+            final_evidence_k = st.number_input(
+                "Final Evidence K",
+                min_value=1,
+                max_value=20,
+                value=3,
+                step=1,
+                key="comparison_final_evidence_k",
+            )
+        selected_modes = st.multiselect(
+            "Methods To Compare",
+            options=["sparse", "dense", "hybrid"],
+            default=["sparse", "dense", "hybrid"],
+            key="comparison_modes",
+        )
+        generate_answer = st.checkbox("Generate Grounded Answer", key="comparison_generate_answer")
+        submitted = st.form_submit_button("Compare Methods", use_container_width=True)
+
+    if submitted:
+        if not selected_modes:
+            st.error("Select at least one method to compare.")
+        else:
+            comparison_results: dict[str, Any] = {}
+            for mode_name in selected_modes:
+                payload = {
+                    "question_text": question_text,
+                    "retrieval_mode": mode_name,
+                    "tax_year": tax_year or None,
+                    "top_k": int(top_k),
+                    "final_evidence_k": int(final_evidence_k),
+                    "include_intermediate_hits": True,
+                    "generate_answer": generate_answer,
+                }
+                success, response_payload, error_message = api_post(
+                    base_url,
+                    "/query",
+                    payload,
+                    timeout_seconds=QUERY_TIMEOUT_SECONDS,
+                )
+                comparison_results[mode_name] = (
+                    response_payload if success and response_payload is not None
+                    else {"status": "error", "error": error_message}
+                )
+            st.session_state["last_comparison_responses"] = comparison_results
+            st.success("Method comparison completed.")
+
+    comparison_results = st.session_state.get("last_comparison_responses")
+    if not comparison_results:
+        st.info("Run a comparison to see how sparse, dense, and hybrid behave on the same question.")
+        return
+
+    successful_results = {mode_name: payload for mode_name, payload in comparison_results.items() if payload.get("status") == "success"}
+    failed_results = {mode_name: payload for mode_name, payload in comparison_results.items() if payload.get("status") != "success"}
+
+    if failed_results:
+        st.warning("Some methods failed during comparison.")
+        for mode_name, payload in failed_results.items():
+            st.write(f"- {mode_name}: {payload.get('error') or 'unknown error'}")
+
+    if not successful_results:
+        return
+
+    all_top_chunks = {
+        mode_name: ((payload.get("final_hits") or [{}])[0].get("chunk_id") if payload.get("final_hits") else None)
+        for mode_name, payload in successful_results.items()
+    }
+    all_answers = {
+        mode_name: bool(payload.get("answer")) and not payload.get("abstained")
+        for mode_name, payload in successful_results.items()
+    }
+    summary_columns = st.columns(3)
+    summary_columns[0].metric("Methods Compared", str(len(successful_results)))
+    summary_columns[1].metric("Answered", str(sum(1 for answered in all_answers.values() if answered)))
+    summary_columns[2].metric("Distinct Top Hits", str(len({chunk_id for chunk_id in all_top_chunks.values() if chunk_id})))
+
+    st.markdown("**Top-1 Evidence Comparison**")
+    st.json(all_top_chunks)
+
+    result_columns = st.columns(len(successful_results))
+    for column, (mode_name, payload) in zip(result_columns, successful_results.items(), strict=False):
+        with column:
+            render_comparison_result_column(mode_name, payload)
+
+
 def render_results_panel() -> None:
     st.subheader("Results")
     response_payload = st.session_state.get("last_query_response")
@@ -1033,7 +1495,14 @@ def main() -> None:
     st.sidebar.header("Navigation")
     view_name = st.sidebar.radio(
         "View",
-        options=["Research Workspace", "Parser Inspector", "Index Inspector", "Retrieval Inspector"],
+        options=[
+            "Research Workspace",
+            "Parser Inspector",
+            "Index Inspector",
+            "Dense Vector Inspector",
+            "Retrieval Inspector",
+            "Method Comparison",
+        ],
         index=0,
     )
 
@@ -1050,8 +1519,14 @@ def main() -> None:
     if view_name == "Index Inspector":
         render_index_inspector()
         return
+    if view_name == "Dense Vector Inspector":
+        render_dense_vector_inspector()
+        return
     if view_name == "Retrieval Inspector":
         render_retrieval_inspector()
+        return
+    if view_name == "Method Comparison":
+        render_method_comparison(st.session_state["backend_base_url"])
         return
 
     ingest_column, build_column = st.columns(2)

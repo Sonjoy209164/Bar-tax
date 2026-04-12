@@ -50,6 +50,110 @@ COMPARISON_TEST_QUESTIONS = [
     "What does the Act say about software test lab service?",
     "For how many successive assessment years can startup losses be carried forward?",
 ]
+COMPARISON_REFERENCE_CASES = [
+    {
+        "category": "What",
+        "question": "What is the definition of Commissioner?",
+        "expected": "“Commissioner” means Commissioner of Taxes or Commissioner of Taxes (Large Assessee Unit), as referred to in section 4.",
+        "source": "income-tax-act-2023.jsonl (line 14)",
+    },
+    {
+        "category": "What",
+        "question": "What is the Tax Day for a company?",
+        "expected": "The 15th day of the seventh month following the end of the income year, or 15 September if that date falls earlier.",
+        "source": "income-tax-act-2023.jsonl (line 17)",
+    },
+    {
+        "category": "What",
+        "question": "What is the threshold amount in the charitable purpose clause for services in exchange for consideration?",
+        "expected": "Taka 1(one) crore.",
+        "source": "income-tax-act-2023.jsonl (line 27), income-tax-act-2023.jsonl (line 28)",
+    },
+    {
+        "category": "What",
+        "question": "What tax rate applies to stock dividend under section 23?",
+        "expected": "10% (ten percent).",
+        "source": "income-tax-act-2023.jsonl (line 85)",
+    },
+    {
+        "category": "What",
+        "question": "What is the minimum tax rate for growth years of a registered startup?",
+        "expected": "0.1% (zero point one percent).",
+        "source": "income-tax-act-2023.jsonl (line 1078)",
+    },
+    {
+        "category": "What",
+        "question": "What does the Act say about software test lab service?",
+        "expected": "It is explicitly listed among software-related services, along with website development/service and IT assistance/software maintenance service.",
+        "source": "income-tax-act-2023.jsonl (line 1023)",
+    },
+    {
+        "category": "How",
+        "question": "How many classes of income tax authorities are listed under section 4?",
+        "expected": "15 classes, from (a) to (o).",
+        "source": "income-tax-act-2023.jsonl (line 56), income-tax-act-2023.jsonl (line 57), income-tax-act-2023.jsonl (line 58)",
+    },
+    {
+        "category": "How",
+        "question": "How many successive assessment years can startup losses be carried forward?",
+        "expected": "9 successive assessment years.",
+        "source": "income-tax-act-2023.jsonl (line 1077)",
+    },
+    {
+        "category": "How",
+        "question": "How many days make an individual a resident under clause 45?",
+        "expected": "183 days, or 90 days with the prior-presence condition.",
+        "source": "income-tax-act-2023.jsonl (line 28)",
+    },
+    {
+        "category": "How",
+        "question": "How many growth years are given to startups incorporated on or after July 1, 2023?",
+        "expected": "5 years from the year of incorporation.",
+        "source": "income-tax-act-2023.jsonl (line 1082)",
+    },
+    {
+        "category": "Comparison",
+        "question": "Compare the Tax Day for a company and for an assessee other than a company.",
+        "expected": "Company: 15th day of the seventh month, or 15 September if earlier. Other than company: 30 November.",
+        "source": "income-tax-act-2023.jsonl (line 17)",
+    },
+    {
+        "category": "Comparison",
+        "question": "Compare startup growth years for startups incorporated between July 1, 2017 and June 30, 2023 versus startups incorporated on or after July 1, 2023.",
+        "expected": "Earlier group: 3 years from July 1, 2023 to June 30, 2027. Later group: 5 years from the year of incorporation.",
+        "source": "income-tax-act-2023.jsonl (line 1082)",
+    },
+    {
+        "category": "Comparison",
+        "question": "Compare the tax treatment of dividend income for a company and for a person other than a company.",
+        "expected": "Company: 20%. Other than a company: included in total income and taxed at the applicable rate.",
+        "source": "income-tax-act-2023.jsonl (line 1051)",
+    },
+    {
+        "category": "Reasoning-Style",
+        "question": "Why would an organization fail to qualify as charitable purpose under clause 43 in the services-for-consideration case?",
+        "expected": "Because improvement or advancement of general public utility is not treated as charitable purpose if it renders services for consideration and the aggregate value exceeds Taka 1(one) crore, and it also requires approval by the Commissioner of Taxes.",
+        "source": "income-tax-act-2023.jsonl (line 27), income-tax-act-2023.jsonl (line 28)",
+    },
+    {
+        "category": "Reasoning-Style",
+        "question": "Why is a startup incorporated before July 1, 2017 not eligible for sandbox registration?",
+        "expected": "Because the Act expressly says a startup is not eligible if it was incorporated prior to the first day of July 2017.",
+        "source": "income-tax-act-2023.jsonl (line 1081)",
+    },
+    {
+        "category": "Reasoning-Style",
+        "question": "Why can software-related businesses under the listed exemption not freely use cash transactions after July 1, 2024?",
+        "expected": "Because the Act requires all income, expenditure, and investment of that business to be performed wholly through bank transfer from July 1, 2024.",
+        "source": "income-tax-act-2023.jsonl (line 1023)",
+    },
+]
+COMPARISON_BEST_FIRST_QUESTIONS = [
+    "What is the definition of Commissioner?",
+    "How many classes of income tax authorities are listed under section 4?",
+    "Compare the Tax Day for a company and for an assessee other than a company.",
+    "Why would an organization fail to qualify as charitable purpose under clause 43 in the services-for-consideration case?",
+]
 
 
 def initialize_session_state() -> None:
@@ -1317,6 +1421,24 @@ def render_method_comparison(base_url: str) -> None:
                 st.session_state["last_comparison_responses"] = None
         for question in COMPARISON_TEST_QUESTIONS:
             st.code(question, language="text")
+
+    with st.expander("Reference Questions And Expected Answers", expanded=False):
+        st.caption("Use this as a quick oracle while comparing sparse, dense, and hybrid outputs.")
+        st.markdown("**Best First Questions**")
+        for question in COMPARISON_BEST_FIRST_QUESTIONS:
+            st.code(question, language="text")
+
+        categories: dict[str, list[dict[str, str]]] = {}
+        for case in COMPARISON_REFERENCE_CASES:
+            categories.setdefault(case["category"], []).append(case)
+
+        for category, cases in categories.items():
+            st.markdown(f"**{category}**")
+            for case in cases:
+                with st.container(border=True):
+                    st.markdown(f"**Question:** {case['question']}")
+                    st.markdown(f"**Expected:** {case['expected']}")
+                    st.caption(f"Source: {case['source']}")
 
     with st.form("comparison_form", clear_on_submit=False):
         question_text = st.text_area(

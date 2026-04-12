@@ -148,6 +148,10 @@ DATE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 LIST_PATTERN = re.compile(r"(\([a-z]\)|\([ivx]+\)|namely|following classes|following items|following incomes|first year|second year)", re.IGNORECASE)
+ELIGIBILITY_PATTERN = re.compile(
+    r"(chargeable to tax|taxable income|tax exemption|employee|employment|income from employment|salary|salaried|individual|resident|assessee|day labourer|day laborer|worker|labour|labor|wage|wages)",
+    re.IGNORECASE,
+)
 
 
 def _build_searchable_text(hit: RetrievalHit) -> str:
@@ -240,6 +244,40 @@ def hit_supports_list(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
     )
 
 
+def hit_supports_eligibility(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    searchable_text = _build_searchable_text(hit)
+    normalized_query = normalize_text(analyzed_query.original_query or analyzed_query.normalized_query).lower()
+    informative_overlap = _informative_overlap_count(hit, analyzed_query)
+    has_eligibility_language = bool(ELIGIBILITY_PATTERN.search(searchable_text))
+    if not has_eligibility_language:
+        return False
+
+    role_terms_by_query = {
+        "labour": ("day labourer", "day laborer", "worker", "employee", "employment"),
+        "labor": ("day labourer", "day laborer", "worker", "employee", "employment"),
+        "worker": ("day labourer", "day laborer", "worker", "employee", "employment"),
+        "salary": ("salary", "employee", "employment", "income from employment"),
+        "salaried": ("salary", "employee", "employment", "income from employment"),
+        "employee": ("employee", "employment", "income from employment"),
+        "resident": ("resident", "individual", "assessee"),
+        "individual": ("individual", "resident", "assessee"),
+    }
+    has_general_taxability_anchor = any(
+        phrase in searchable_text for phrase in ("chargeable to tax", "tax exemption", "taxable income")
+    )
+    for trigger, expected_terms in role_terms_by_query.items():
+        if trigger in normalized_query and not any(term in searchable_text for term in expected_terms) and not has_general_taxability_anchor:
+            return False
+
+    return _satisfies_query_phrase_constraints(hit, analyzed_query) and (
+        informative_overlap > 0
+        or any(
+            phrase in searchable_text
+            for phrase in ("chargeable to tax", "day labourer", "day laborer", "income from employment", "tax exemption")
+        )
+    )
+
+
 def hit_matches_definition_target_exactly(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
     focus_term = extract_definition_target(analyzed_query.original_query or analyzed_query.normalized_query)
     if not focus_term:
@@ -271,6 +309,8 @@ def hit_supports_query(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
     normalized_text = hit.normalized_text.lower()
     is_rate_lookup = analyzed_query.query_intent == "rate_lookup"
     has_rate_language = "করহার" in normalized_text or "কর হার" in normalized_text or "tax rate" in normalized_text
+    if analyzed_query.query_intent == "eligibility":
+        return hit_supports_eligibility(hit, analyzed_query)
     if analyzed_query.query_intent == "amount_lookup":
         return hit_supports_amount(hit, analyzed_query)
     if analyzed_query.query_intent == "count_lookup":
@@ -298,6 +338,10 @@ def hit_supports_query(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
 
 
 def filter_supportive_hits(hits: list[RetrievalHit], analyzed_query: QuerySignals) -> list[RetrievalHit]:
+    if analyzed_query.query_intent == "eligibility":
+        eligibility_hits = [hit for hit in hits if hit_supports_eligibility(hit, analyzed_query)]
+        if eligibility_hits:
+            return eligibility_hits
     if analyzed_query.query_intent == "definition":
         definition_hits = [hit for hit in hits if hit_supports_definition(hit, analyzed_query)]
         exact_target_hits = [hit for hit in definition_hits if hit_matches_definition_target_exactly(hit, analyzed_query)]

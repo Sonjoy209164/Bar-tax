@@ -21,6 +21,7 @@ from app.retrieval.filters import (
     hit_has_amount_language,
     hit_has_date_language,
     hit_has_duration_language,
+    hit_supports_eligibility,
     hit_looks_list_like,
 )
 
@@ -164,6 +165,32 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
     ):
         boosted_score -= 1.0
     informative_overlap = len(informative_terms & searchable_terms)
+    if query_signals.query_intent == "eligibility":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        normalized_query = query_signals.normalized_query.lower()
+        if hit_supports_eligibility(pseudo_hit, query_signals):
+            boosted_score += 1.9
+        else:
+            boosted_score -= 1.4
+        if any(term in normalized_query for term in ("labour", "labor", "worker")):
+            if any(term in searchable_text for term in ("day labourer", "day laborer", "worker")):
+                boosted_score += 2.4
+            elif any(term in searchable_text for term in ("employee", "employment")):
+                boosted_score += 0.8
+            else:
+                boosted_score -= 0.8
+        if any(term in normalized_query for term in ("salary", "salaried", "employee")):
+            if any(term in searchable_text for term in ("salary", "employee", "employment", "income from employment")):
+                boosted_score += 1.2
+            else:
+                boosted_score -= 0.9
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.1, 3.8)
+            if informative_overlap == 0 and all(
+                phrase not in searchable_text
+                for phrase in ("chargeable to tax", "day labourer", "day laborer", "income from employment", "tax exemption")
+            ):
+                boosted_score -= 3.0
     if query_signals.query_intent == "amount_lookup":
         pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
         if hit_has_amount_language(pseudo_hit):
@@ -321,7 +348,11 @@ def search_sparse_index(
             continue
         informative_terms = extract_informative_query_terms(query_signals.normalized_query, query_signals.query_intent)
         informative_overlap = len(informative_terms & searchable_tokens)
-        if informative_terms and query_signals.query_intent in {"amount_lookup", "count_lookup", "duration_lookup", "date_lookup", "list_lookup"} and informative_overlap == 0:
+        if informative_terms and query_signals.query_intent == "eligibility" and informative_overlap == 0:
+            pseudo_hit = _to_retrieval_hit(chunk, final_score)
+            if not hit_supports_eligibility(pseudo_hit, query_signals):
+                continue
+        elif informative_terms and query_signals.query_intent in {"amount_lookup", "count_lookup", "duration_lookup", "date_lookup", "list_lookup"} and informative_overlap == 0:
             continue
         scored_hits.append(_to_retrieval_hit(chunk, final_score))
     ranked_hits = sorted(scored_hits, key=lambda hit: hit.score, reverse=True)[:top_k]

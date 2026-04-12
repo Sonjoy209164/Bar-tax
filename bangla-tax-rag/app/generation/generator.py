@@ -610,6 +610,116 @@ def _build_date_lookup_answer(
     return build_mock_grounded_answer(question_text, evidence_hits, citations)
 
 
+def _build_eligibility_answer(
+    question_text: str,
+    evidence_hits: list[RetrievalHit],
+    citations: list[CitationRecord],
+) -> tuple[list[AnswerSentence], list[str]]:
+    lower_question = normalize_text(question_text).lower()
+    labour_like = any(term in lower_question for term in ("labour", "labor", "worker", "day labourer", "day laborer"))
+    salary_like = any(term in lower_question for term in ("salary", "salaried", "employee", "employment"))
+
+    labour_marker: str | None = None
+    chargeable_marker: str | None = None
+    status_marker: str | None = None
+    labour_sentence: str | None = None
+    chargeable_sentence: str | None = None
+    status_sentence: str | None = None
+
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        for sentence in split_sentences(_clean_evidence_text(hit.original_text)):
+            lowered_sentence = normalize_text(sentence).lower()
+            if labour_sentence is None and any(term in lowered_sentence for term in ("day labourer", "day laborer", "worker")):
+                labour_sentence = sentence.strip()
+                labour_marker = citation.marker
+            if chargeable_sentence is None and any(
+                phrase in lowered_sentence
+                for phrase in ("chargeable to tax", "tax payable on income", "minimum tax is payable")
+            ):
+                chargeable_sentence = sentence.strip()
+                chargeable_marker = citation.marker
+            if status_sentence is None and any(
+                phrase in lowered_sentence for phrase in ("income from employment", "employee", "individual", "resident", "assessee", "tax exemption")
+            ):
+                status_sentence = sentence.strip()
+                status_marker = citation.marker
+
+    markers = [
+        marker
+        for marker in dict.fromkeys([labour_marker, chargeable_marker, status_marker])
+        if marker is not None
+    ]
+    if not markers:
+        markers = [citations[0].marker]
+
+    if labour_like and labour_sentence and chargeable_sentence:
+        answer_sentences = [
+            AnswerSentence(
+                sentence_text=(
+                    "If by labour you mean a day labourer, one relevant definition says the term "
+                    '"employee" does not include a day labourer; the Act still does not let me compute '
+                    "your exact tax from that alone because tax depends on whether your income is chargeable to tax under the Act."
+                ),
+                citation_markers=markers[:2],
+            ),
+            AnswerSentence(
+                sentence_text="Please share your annual income and tax year for a closer estimate under the Act.",
+                citation_markers=markers[:1],
+            ),
+        ]
+        return answer_sentences, []
+
+    if labour_like and labour_sentence:
+        answer_sentences = [
+            AnswerSentence(
+                sentence_text=(
+                    'If by labour you mean a day labourer, one relevant definition says the term "employee" '
+                    "does not include a day labourer, so the Act does not let me compute your exact tax from that description alone."
+                ),
+                citation_markers=markers[:1],
+            ),
+            AnswerSentence(
+                sentence_text="Please share your annual income, tax year, and income source for a closer estimate under the Act.",
+                citation_markers=markers[:1],
+            ),
+        ]
+        return answer_sentences, []
+
+    if salary_like and (status_sentence or chargeable_sentence):
+        answer_sentences = [
+            AnswerSentence(
+                sentence_text=(
+                    "The Act does not let me compute your exact tax from occupation alone; income from employment "
+                    "is treated separately, and tax still depends on whether your income is chargeable to tax under the Act."
+                ),
+                citation_markers=markers[:2],
+            ),
+            AnswerSentence(
+                sentence_text="Please share your annual income and tax year if you want a closer estimate.",
+                citation_markers=markers[:1],
+            ),
+        ]
+        return answer_sentences, []
+
+    if chargeable_sentence or status_sentence:
+        answer_sentences = [
+            AnswerSentence(
+                sentence_text=(
+                    "I cannot determine your exact tax from this question alone; under the Act, tax depends on whether "
+                    "your income is chargeable to tax, and the answer can vary for an individual assessee or employee."
+                ),
+                citation_markers=markers[:2],
+            ),
+            AnswerSentence(
+                sentence_text="Please share your annual income, tax year, and income source for a closer estimate.",
+                citation_markers=markers[:1],
+            ),
+        ]
+        return answer_sentences, []
+
+    return build_mock_grounded_answer(question_text, evidence_hits, citations)
+
+
 def _build_list_lookup_answer(
     question_text: str,
     evidence_hits: list[RetrievalHit],
@@ -766,6 +876,8 @@ def build_mock_grounded_answer(
         return _build_definition_answer(question_text, evidence_hits, citations, analyzed_query)
     if analyzed_query and analyzed_query.query_intent == "rate_lookup":
         return _build_rate_lookup_answer(question_text, evidence_hits, citations)
+    if analyzed_query and analyzed_query.query_intent == "eligibility":
+        return _build_eligibility_answer(question_text, evidence_hits, citations)
     if analyzed_query and analyzed_query.query_intent == "amount_lookup":
         return _build_amount_lookup_answer(question_text, evidence_hits, citations)
     if analyzed_query and analyzed_query.query_intent == "count_lookup":

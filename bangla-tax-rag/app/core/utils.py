@@ -7,6 +7,10 @@ from app.core.schemas import QuerySignals
 BANGLA_DIGIT_MAP = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 SECTION_KEYWORDS = ("ধারা", "উপ-ধারা", "উপধারা", "পরিশিষ্ট", "অনুচ্ছেদ")
 QUERY_TYPE_PATTERNS = {
+    "eligibility": re.compile(
+        r"(\bam i\b|\bdo i (?:have to|need to) pay tax\b|\bwill i (?:have to )?pay tax\b|\bwhat will be my tax\b|\bwhat is my tax\b|\bdo i qualify\b|\bam i eligible\b|\bi am (?:a|an)\b.*\btax\b|\bas a (?:day labourer|day laborer|labourer|laborer|worker|employee|salaried|individual)\b.*\btax\b)",
+        re.IGNORECASE,
+    ),
     "amount_lookup": re.compile(
         r"(threshold|amount|limit|maximum|minim(?:um)?|ceiling|floor|not more than|no more than|exceeds? taka|taka|lakh|crore)",
         re.IGNORECASE,
@@ -46,6 +50,7 @@ QUERY_TYPE_PATTERNS = {
     "comparison": re.compile(r"(compare|comparison|তুলনা|versus|পার্থক্য)", re.IGNORECASE),
 }
 QUERY_TYPE_PRIORITY = [
+    "eligibility",
     "amount_lookup",
     "duration_lookup",
     "date_lookup",
@@ -63,8 +68,10 @@ QUERY_TYPE_PRIORITY = [
 ENGLISH_STOPWORDS = {
     "a",
     "an",
+    "am",
     "as",
     "at",
+    "be",
     "by",
     "do",
     "for",
@@ -72,12 +79,15 @@ ENGLISH_STOPWORDS = {
     "i",
     "in",
     "is",
+    "me",
+    "my",
     "of",
     "on",
     "or",
     "the",
     "to",
     "what",
+    "will",
 }
 BANGla_STOPWORDS = {"এ", "কি", "কী", "কি?", "কী?", "আমি", "আমার", "এর", "ও", "এবং"}
 GENERIC_QUERY_TERMS = {
@@ -326,6 +336,28 @@ def extract_informative_query_terms(text: str, query_type: str | None = None) ->
         if token in GENERIC_QUERY_TERMS:
             continue
         informative_terms.add(token)
+    if query_type == "eligibility":
+        normalized_text = normalize_text(text).lower()
+        for phrase in (
+            "day labourer",
+            "day laborer",
+            "labour",
+            "labor",
+            "worker",
+            "employee",
+            "employment",
+            "salary",
+            "salaried",
+            "individual",
+            "resident",
+            "assessee",
+            "chargeable to tax",
+            "tax exemption",
+        ):
+            if phrase in normalized_text:
+                informative_terms.update(
+                    token for token in tokenize_for_bm25(phrase) if token not in GENERIC_QUERY_TERMS
+                )
     if query_type == "definition":
         focus_term = extract_definition_target(text)
         if focus_term:
@@ -344,6 +376,27 @@ def detect_query_type(text: str) -> str:
 def rewrite_query(normalized_query: str, query_type: str) -> str:
     rewritten_terms = list(dict.fromkeys(tokenize_for_bm25(normalized_query)))
     lower_query = normalized_query.lower()
+    if query_type == "eligibility":
+        rewritten_terms.extend(
+            [
+                "taxable",
+                "chargeable to tax",
+                "tax exemption",
+                "individual",
+                "resident",
+                "assessee",
+                "income",
+                "employee",
+                "employment",
+                "income from employment",
+            ]
+        )
+        if any(term in lower_query for term in ("labour", "labor", "worker", "day labourer", "day laborer")):
+            rewritten_terms.extend(["day labourer", "worker", "employee"])
+        if any(term in lower_query for term in ("salary", "salaried", "employee", "employment")):
+            rewritten_terms.extend(["salary", "employee", "income from employment"])
+        if any(term in lower_query for term in ("resident", "individual")):
+            rewritten_terms.extend(["resident", "individual assessee"])
     if query_type == "amount_lookup":
         rewritten_terms.extend(["threshold", "amount", "limit", "taka", "lakh", "crore", "not more than", "exceeds"])
     if query_type == "count_lookup":

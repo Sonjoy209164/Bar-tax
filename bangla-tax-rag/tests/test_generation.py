@@ -249,6 +249,13 @@ def test_preprocess_query_detects_count_lookup() -> None:
     assert signals.query_intent == "count_lookup"
 
 
+def test_preprocess_query_detects_eligibility_lookup() -> None:
+    signals = preprocess_query("I am a labour, what will be my tax?")
+
+    assert signals.query_type == "eligibility"
+    assert signals.query_intent == "eligibility"
+
+
 def test_mention_lookup_uses_deterministic_grounded_answer() -> None:
     hits = [
         _hit(
@@ -575,3 +582,39 @@ def test_section_query_can_answer_from_heading_path_when_heading_is_best_signal(
     assert result.verification_passed is True
     assert "income tax authorities" in result.answer_text.lower()
     assert "[C1]" in result.answer_text
+
+
+def test_eligibility_query_returns_cautious_grounded_answer() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.6,
+            tax_year=None,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            text=(
+                "employee means any employee and also includes all other persons who receive income from employment "
+                "under section 32: Provided that it shall not include any worker of a tea garden and day labourer."
+            ),
+        ),
+        _hit(
+            chunk_id="c2",
+            score=3.4,
+            tax_year=None,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            text="income includes any income, receipts, profits or gains which is chargeable to tax under any provision of this Act.",
+        ),
+    ]
+    query = preprocess_query("I am a labour, what will be my tax?")
+
+    result = generate_answer("I am a labour, what will be my tax?", hits, query, _options())
+
+    assert result.abstained is False
+    assert result.verification_passed is True
+    assert "day labourer" in result.answer_text.lower()
+    assert "chargeable to tax" in result.answer_text.lower()
+    assert "exact tax" in result.answer_text.lower()
+    assert result.used_chunk_ids == ["c1", "c2"]

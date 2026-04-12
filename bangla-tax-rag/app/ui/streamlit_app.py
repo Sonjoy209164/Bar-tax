@@ -41,6 +41,7 @@ GENERATION_TEST_QUESTIONS = [
     "Is software service mentioned in the Act?",
     "What does the Act say about software test lab service?",
     "What is the tax day for a company?",
+    "I am a labour, what will be my tax?",
 ]
 COMPARISON_TEST_QUESTIONS = [
     "What is the definition of Commissioner?",
@@ -49,6 +50,7 @@ COMPARISON_TEST_QUESTIONS = [
     "Is software service mentioned in the Act?",
     "What does the Act say about software test lab service?",
     "For how many successive assessment years can startup losses be carried forward?",
+    "I am a labour, what will be my tax?",
 ]
 COMPARISON_REFERENCE_CASES = [
     {
@@ -147,12 +149,19 @@ COMPARISON_REFERENCE_CASES = [
         "expected": "Because the Act requires all income, expenditure, and investment of that business to be performed wholly through bank transfer from July 1, 2024.",
         "source": "income-tax-act-2023.jsonl (line 1023)",
     },
+    {
+        "category": "Eligibility",
+        "question": "I am a labour, what will be my tax?",
+        "expected": "A careful answer should not guess a personal tax number. It should explain that the Act does not let us compute an exact tax from occupation alone, that a day labourer is excluded from the definition of employee, and that tax still depends on whether income is chargeable to tax under the Act.",
+        "source": "income-tax-act-2023.jsonl (line 19), income-tax-act-2023.jsonl (line 11), income-tax-act-2023.jsonl (line 16)",
+    },
 ]
 COMPARISON_BEST_FIRST_QUESTIONS = [
     "What is the definition of Commissioner?",
     "How many classes of income tax authorities are listed under section 4?",
     "Compare the Tax Day for a company and for an assessee other than a company.",
     "Why would an organization fail to qualify as charitable purpose under clause 43 in the services-for-consideration case?",
+    "I am a labour, what will be my tax?",
 ]
 
 

@@ -17,6 +17,7 @@ from app.retrieval.filters import (
     hit_has_amount_language,
     hit_has_date_language,
     hit_has_duration_language,
+    hit_supports_eligibility,
     hit_looks_list_like,
 )
 from app.retrieval.sparse import build_weighted_search_text, load_chunk_records_from_jsonl
@@ -271,6 +272,31 @@ def _apply_dense_query_boosts(
     pseudo_hit = _to_retrieval_hit(chunk, score)
     informative_terms = extract_informative_query_terms(analyzed_query.normalized_query, analyzed_query.query_intent)
     informative_overlap = len(informative_terms & chunk_tokens)
+    if analyzed_query.query_intent == "eligibility":
+        normalized_query = analyzed_query.normalized_query.lower()
+        if hit_supports_eligibility(pseudo_hit, analyzed_query):
+            score += 1.5
+        else:
+            score -= 1.2
+        if any(term in normalized_query for term in ("labour", "labor", "worker")):
+            if any(term in searchable_text for term in ("day labourer", "day laborer", "worker")):
+                score += 1.8
+            elif any(term in searchable_text for term in ("employee", "employment")):
+                score += 0.6
+            else:
+                score -= 0.7
+        if any(term in normalized_query for term in ("salary", "salaried", "employee")):
+            if any(term in searchable_text for term in ("salary", "employee", "employment", "income from employment")):
+                score += 1.0
+            else:
+                score -= 0.8
+        if informative_terms:
+            score += min(informative_overlap * 0.9, 3.0)
+            if informative_overlap == 0 and all(
+                phrase not in searchable_text
+                for phrase in ("chargeable to tax", "day labourer", "day laborer", "income from employment", "tax exemption")
+            ):
+                score -= 2.8
     if analyzed_query.query_intent == "amount_lookup":
         if hit_has_amount_language(pseudo_hit):
             score += 1.4

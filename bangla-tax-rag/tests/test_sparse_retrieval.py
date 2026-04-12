@@ -120,6 +120,14 @@ def test_english_company_tax_question_is_rate_lookup() -> None:
     assert "software" in signals.rewritten_query
 
 
+def test_personal_labour_tax_question_is_eligibility() -> None:
+    signals = preprocess_query("I am a labour, what will be my tax?")
+
+    assert signals.query_type == "eligibility"
+    assert signals.query_intent == "eligibility"
+    assert "day labourer" in (signals.rewritten_query or "")
+
+
 def test_threshold_question_is_amount_lookup() -> None:
     signals = preprocess_query(
         "What is the threshold amount in the charitable purpose clause for services in exchange for consideration?"
@@ -273,6 +281,64 @@ def test_sparse_retrieval_prefers_amount_threshold_chunk() -> None:
 
     assert response.hits
     assert response.hits[0].chunk_id == "threshold"
+
+
+def test_sparse_retrieval_prefers_labour_status_chunk_for_personal_tax_question() -> None:
+    dataset = [
+        _chunk(
+            chunk_id="labour-status",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=8,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            heading_path=["2. Definitions"],
+            normalized_text=(
+                "employee means any employee and also includes all other persons who receive income from employment "
+                "under section 32: Provided that it shall not include any worker of a tea garden and day labourer."
+            ),
+        ),
+        _chunk(
+            chunk_id="chargeable-income",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=4,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="section",
+            heading_path=["2. Definitions"],
+            normalized_text="income includes any income which is chargeable to tax under any provision of this Act.",
+        ),
+        _chunk(
+            chunk_id="irrelevant-company-rate",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=230,
+            section_id="163",
+            subsection_id=None,
+            chunk_type="table",
+            heading_path=["163. Rates of tax for company"],
+            normalized_text="the rate of tax for a company shall be 20 percent.",
+        ),
+    ]
+
+    response = search_sparse_index(
+        query="I am a labour, what will be my tax?",
+        index=build_sparse_index(dataset),
+        top_k=3,
+    )
+
+    assert response.signals.query_intent == "eligibility"
+    assert response.hits
+    assert response.hits[0].chunk_id == "labour-status"
+    assert "chargeable-income" in {hit.chunk_id for hit in response.hits[:2]}
 
 
 def test_sparse_retrieval_prefers_startup_loss_duration_chunk() -> None:

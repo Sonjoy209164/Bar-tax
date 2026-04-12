@@ -19,6 +19,7 @@ from app.retrieval.filters import (
     hit_has_amount_language,
     hit_has_date_language,
     hit_has_duration_language,
+    hit_supports_eligibility,
     hit_looks_list_like,
 )
 from app.retrieval.reranker import rerank_retrieval_hits
@@ -104,6 +105,7 @@ def _expand_logical_unit_hits(
     candidate_pool: list[RetrievalHit] | None = None,
 ) -> list[RetrievalHit]:
     should_expand = bool(analyzed_query.section_reference) or analyzed_query.query_intent in {
+        "eligibility",
         "count_lookup",
         "list_lookup",
         "date_lookup",
@@ -114,7 +116,7 @@ def _expand_logical_unit_hits(
     if not should_expand or not candidate_hits:
         return candidate_hits
 
-    anchor_count = 2 if analyzed_query.query_intent in {"count_lookup", "list_lookup"} else 1
+    anchor_count = 2 if analyzed_query.query_intent in {"eligibility", "count_lookup", "list_lookup"} else 1
     anchors = candidate_hits[:anchor_count]
     expanded_hits: list[RetrievalHit] = []
     seen_chunk_ids: set[str] = set()
@@ -235,6 +237,31 @@ def apply_hybrid_post_ranking(hit: RetrievalHit, analyzed_query: QuerySignals) -
     informative_terms = extract_informative_query_terms(analyzed_query.normalized_query, analyzed_query.query_intent)
     searchable_terms = set(tokenize_for_bm25(searchable_text.lower()))
     informative_overlap = len(informative_terms & searchable_terms)
+    if analyzed_query.query_intent == "eligibility":
+        normalized_query = analyzed_query.normalized_query.lower()
+        if hit_supports_eligibility(adjusted_hit, analyzed_query):
+            adjusted_score += 1.8
+        else:
+            adjusted_score -= 1.4
+        if any(term in normalized_query for term in ("labour", "labor", "worker")):
+            if any(term in searchable_text.lower() for term in ("day labourer", "day laborer", "worker")):
+                adjusted_score += 2.1
+            elif any(term in searchable_text.lower() for term in ("employee", "employment")):
+                adjusted_score += 0.7
+            else:
+                adjusted_score -= 0.8
+        if any(term in normalized_query for term in ("salary", "salaried", "employee")):
+            if any(term in searchable_text.lower() for term in ("salary", "employee", "employment", "income from employment")):
+                adjusted_score += 1.1
+            else:
+                adjusted_score -= 0.9
+        if informative_terms:
+            adjusted_score += min(informative_overlap * 0.9, 3.5)
+            if informative_overlap == 0 and all(
+                phrase not in searchable_text.lower()
+                for phrase in ("chargeable to tax", "day labourer", "day laborer", "income from employment", "tax exemption")
+            ):
+                adjusted_score -= 3.2
     if analyzed_query.query_intent == "amount_lookup":
         if hit_has_amount_language(adjusted_hit):
             adjusted_score += 2.0
@@ -356,7 +383,7 @@ def build_evidence_pack(
         candidate_pool=candidate_pool,
     )
     selected_hits: list[RetrievalHit] = []
-    if analyzed_query.query_intent in {"count_lookup", "list_lookup", "date_lookup", "amount_lookup", "duration_lookup"} or analyzed_query.section_reference:
+    if analyzed_query.query_intent in {"eligibility", "count_lookup", "list_lookup", "date_lookup", "amount_lookup", "duration_lookup"} or analyzed_query.section_reference:
         selected_hits = candidate_hits[:final_top_k]
         selected_hits.sort(key=lambda hit: (0 if hit.score > 0 else 1, hit.page_no, -hit.score, hit.chunk_id))
     else:

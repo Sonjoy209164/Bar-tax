@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, status
 from app.core.schemas import QueryAPIResponse, QueryRequest, RetrievalHit
 from app.core.settings import get_settings
 from app.core.utils import preprocess_query
-from app.generation.generator import generate_answer
+from app.generation.generator import build_generation_options, generate_answer
 from app.retrieval.dense import dense_search
 from app.retrieval.filters import filter_supportive_hits
 from app.retrieval.hybrid import run_hybrid_retrieval
@@ -78,6 +78,7 @@ def _run_query_pipeline(request: QueryRequest) -> QueryAPIResponse:
     abstained: bool | None = None
     abstention_reason: str | None = None
     confidence_score: float | None = None
+    effective_generation_model_name = request.generator_model_name or settings.generator_model_name
     supportive_hits = filter_supportive_hits(final_hits, analyzed_query)
     requires_exact_support = bool(analyzed_query.subsection_id) or (
         analyzed_query.query_intent == "rate_lookup" and bool(analyzed_query.section_id)
@@ -90,10 +91,17 @@ def _run_query_pipeline(request: QueryRequest) -> QueryAPIResponse:
             conflict_notes = list(dict.fromkeys([*conflict_notes, "No final evidence directly supports the requested section or subsection."]))
     if request.generate_answer:
         generation_hits = final_hits
+        generation_options = build_generation_options(
+            provider=settings.generator_provider,
+            model_name=effective_generation_model_name,
+            base_url=settings.generator_base_url,
+            api_key=settings.generator_api_key,
+        )
         generated_answer = generate_answer(
             request.question_text,
             generation_hits,
             analyzed_query,
+            options=generation_options,
             conflict_notes=conflict_notes,
         )
         answer_text = generated_answer.answer_text if not generated_answer.abstained else None
@@ -111,6 +119,7 @@ def _run_query_pipeline(request: QueryRequest) -> QueryAPIResponse:
         status="success",
         retrieval_mode=request.retrieval_mode,
         analyzed_query=analyzed_query,
+        generation_model_name=effective_generation_model_name if request.generate_answer else None,
         final_hits=final_hits,
         conflict_notes=conflict_notes,
         answer=answer_text,

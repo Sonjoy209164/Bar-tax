@@ -34,6 +34,13 @@ REQUEST_TIMEOUT_SECONDS = 30
 INGEST_TIMEOUT_SECONDS = 300
 INDEX_BUILD_TIMEOUT_SECONDS = 120
 QUERY_TIMEOUT_SECONDS = 90
+OLLAMA_GENERATOR_MODEL_PRESETS = [
+    "deepseek-r1:7b",
+    "llama3.1:8b",
+    "gemma2:9b",
+    "mixtral:8x7b",
+    "Custom...",
+]
 GENERATION_TEST_QUESTIONS = [
     "What are the income tax authorities under section 4?",
     "What is the definition of Commissioner?",
@@ -185,9 +192,21 @@ def initialize_session_state() -> None:
         "include_intermediate_hits": False,
         "generate_answer": True,
         "comparison_generate_answer": True,
+        "query_generator_model_preset": settings.generator_model_name if settings.generator_model_name in OLLAMA_GENERATOR_MODEL_PRESETS else "Custom...",
+        "query_custom_generator_model": settings.generator_model_name if settings.generator_model_name not in OLLAMA_GENERATOR_MODEL_PRESETS else "",
+        "comparison_generator_model_preset": settings.generator_model_name if settings.generator_model_name in OLLAMA_GENERATOR_MODEL_PRESETS else "Custom...",
+        "comparison_custom_generator_model": settings.generator_model_name if settings.generator_model_name not in OLLAMA_GENERATOR_MODEL_PRESETS else "",
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
+
+
+def resolve_selected_generator_model(*, preset_key: str, custom_key: str) -> str | None:
+    preset_value = st.session_state.get(preset_key)
+    if preset_value == "Custom...":
+        custom_value = str(st.session_state.get(custom_key) or "").strip()
+        return custom_value or None
+    return str(preset_value).strip() or None
 
 
 def load_chunk_records(chunk_jsonl_path: str, *, max_chunks: int = 100) -> tuple[list[dict[str, Any]], str | None]:
@@ -707,9 +726,28 @@ def render_query_panel(base_url: str) -> None:
             final_evidence_k = st.number_input("Final Evidence K", min_value=1, max_value=20, step=1, key="final_evidence_k")
             include_intermediate_hits = st.checkbox("Include Intermediate Hits", key="include_intermediate_hits")
             generate_answer = st.checkbox("Generate Grounded Answer", key="generate_answer")
+        model_left, model_right = st.columns([2, 3])
+        with model_left:
+            st.selectbox(
+                "Generator Model",
+                options=OLLAMA_GENERATOR_MODEL_PRESETS,
+                key="query_generator_model_preset",
+                help="Uses the Ollama/OpenAI-compatible backend configured in the API.",
+            )
+        with model_right:
+            if st.session_state.get("query_generator_model_preset") == "Custom...":
+                st.text_input(
+                    "Custom Generator Model",
+                    key="query_custom_generator_model",
+                    placeholder="e.g. qwen2.5:7b-instruct",
+                )
         submitted = st.form_submit_button("Run Query", use_container_width=True)
 
     if submitted:
+        selected_generator_model = resolve_selected_generator_model(
+            preset_key="query_generator_model_preset",
+            custom_key="query_custom_generator_model",
+        )
         payload = {
             "question_text": question_text,
             "retrieval_mode": retrieval_mode,
@@ -718,6 +756,7 @@ def render_query_panel(base_url: str) -> None:
             "final_evidence_k": int(final_evidence_k),
             "include_intermediate_hits": include_intermediate_hits,
             "generate_answer": generate_answer,
+            "generator_model_name": selected_generator_model if generate_answer else None,
         }
         success, response_payload, error_message = api_post(
             base_url,
@@ -1372,11 +1411,14 @@ def render_comparison_result_column(mode_name: str, payload: dict[str, Any]) -> 
     abstained = payload.get("abstained")
     confidence_score = payload.get("confidence_score")
     final_hits = payload.get("final_hits") or []
+    generation_model_name = payload.get("generation_model_name")
 
     metric_columns = st.columns(3)
     metric_columns[0].metric("Answer Status", "Abstained" if abstained else ("Answered" if answer_text else "No Answer"))
     metric_columns[1].metric("Confidence", f"{confidence_score:.4f}" if isinstance(confidence_score, (int, float)) else "-")
     metric_columns[2].metric("Final Hits", str(len(final_hits)))
+    if generation_model_name:
+        st.caption(f"Generation model: {generation_model_name}")
 
     rewritten_query = analyzed_query.get("rewritten_query")
     if rewritten_query and rewritten_query != analyzed_query.get("normalized_query"):
@@ -1477,6 +1519,21 @@ def render_method_comparison(base_url: str) -> None:
             key="comparison_modes",
         )
         generate_answer = st.checkbox("Generate Grounded Answer", key="comparison_generate_answer")
+        comparison_model_left, comparison_model_right = st.columns([2, 3])
+        with comparison_model_left:
+            st.selectbox(
+                "Generator Model",
+                options=OLLAMA_GENERATOR_MODEL_PRESETS,
+                key="comparison_generator_model_preset",
+                help="Applies the same Ollama model across compared retrieval methods.",
+            )
+        with comparison_model_right:
+            if st.session_state.get("comparison_generator_model_preset") == "Custom...":
+                st.text_input(
+                    "Custom Generator Model",
+                    key="comparison_custom_generator_model",
+                    placeholder="e.g. qwen2.5:7b-instruct",
+                )
         submitted = st.form_submit_button("Compare Methods", use_container_width=True)
 
     if submitted:
@@ -1484,6 +1541,10 @@ def render_method_comparison(base_url: str) -> None:
             st.error("Select at least one method to compare.")
         else:
             comparison_results: dict[str, Any] = {}
+            selected_generator_model = resolve_selected_generator_model(
+                preset_key="comparison_generator_model_preset",
+                custom_key="comparison_custom_generator_model",
+            )
             for mode_name in selected_modes:
                 payload = {
                     "question_text": question_text,
@@ -1493,6 +1554,7 @@ def render_method_comparison(base_url: str) -> None:
                     "final_evidence_k": int(final_evidence_k),
                     "include_intermediate_hits": True,
                     "generate_answer": generate_answer,
+                    "generator_model_name": selected_generator_model if generate_answer else None,
                 }
                 success, response_payload, error_message = api_post(
                     base_url,
@@ -1564,6 +1626,9 @@ def render_results_panel() -> None:
     abstained = response_payload.get("abstained")
     abstention_reason = response_payload.get("abstention_reason")
     confidence_score = response_payload.get("confidence_score")
+    generation_model_name = response_payload.get("generation_model_name")
+    if generation_model_name:
+        st.caption(f"Generation model: {generation_model_name}")
     if abstained:
         st.warning(f"Generation abstained. {abstention_reason or ''}".strip())
     elif answer_text:

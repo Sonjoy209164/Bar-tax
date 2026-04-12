@@ -84,6 +84,7 @@ class QueryRequest(BaseModel):
     doc_type: str | None = None
     authority_level_min: str | None = None
     chunk_type: str | None = None
+    generator_model_name: str | None = None
     final_evidence_k: int | None = Field(default=None, ge=1, le=20)
     include_intermediate_hits: bool = False
     generate_answer: bool = True
@@ -201,6 +202,7 @@ class QueryAPIResponse(BaseModel):
     status: str
     retrieval_mode: Literal["sparse", "dense", "hybrid"]
     analyzed_query: QuerySignals
+    generation_model_name: str | None = None
     final_hits: list[RetrievalHit] = Field(default_factory=list)
     conflict_notes: list[str] = Field(default_factory=list)
     answer: str | None = None

@@ -214,14 +214,14 @@ This file is meant to be used as our implementation board:
 
 ## Phase 13: Query Transformation
 
-- [ ] Create `app/retrieval/query_transformer.py`
-- [ ] Transform one legal query into `3-5` focused sub-queries.
-- [ ] Expand legal terminology.
-- [ ] Expand definitional ambiguity.
-- [ ] Expand scenario decomposition.
-- [ ] Expand section reference disambiguation.
-- [ ] Return a typed `QueryPlan`.
-- [ ] Add query-transformer tests.
+- [x] Create `app/retrieval/query_transformer.py`
+- [x] Transform one legal query into `3-5` focused sub-queries.
+- [x] Expand legal terminology.
+- [x] Expand definitional ambiguity.
+- [x] Expand scenario decomposition.
+- [x] Expand section reference disambiguation.
+- [x] Return a typed `QueryPlan`.
+- [x] Add query-transformer tests.
 
 ## Phase 14: Hybrid Retrieval
 

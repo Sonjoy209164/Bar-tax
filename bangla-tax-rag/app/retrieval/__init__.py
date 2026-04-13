@@ -25,6 +25,12 @@ from app.retrieval.embedder import (
 )
 from app.retrieval.milvus_store import MilvusVectorStore
 from app.retrieval.pinecone_store import PineconeVectorStore
+from app.retrieval.query_transformer import (
+    QueryPlan,
+    QueryTransformer,
+    QueryTransformerConfig,
+    build_query_plan,
+)
 from app.retrieval.vector_store_base import (
     VectorRecord,
     VectorSearchMatch,
@@ -51,10 +57,14 @@ __all__ = [
     "EmbeddingProvider",
     "OpenAITextEmbedder",
     "PineconeVectorStore",
+    "QueryPlan",
+    "QueryTransformer",
+    "QueryTransformerConfig",
     "TextEmbedder",
     "TransformersTextEmbedder",
     "MilvusVectorStore",
     "build_bm25_index",
+    "build_query_plan",
     "VectorRecord",
     "VectorSearchMatch",
     "VectorSearchResult",

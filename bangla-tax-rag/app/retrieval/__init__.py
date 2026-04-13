@@ -23,6 +23,13 @@ from app.retrieval.embedder import (
     embed_texts,
     embedder_config_from_settings,
 )
+from app.retrieval.hybrid_retriever import (
+    HybridCandidate,
+    HybridRetriever,
+    HybridRetrieverConfig,
+    HybridRetrievalResult,
+    HybridSearchRequest,
+)
 from app.retrieval.milvus_store import MilvusVectorStore
 from app.retrieval.pinecone_store import PineconeVectorStore
 from app.retrieval.query_transformer import (
@@ -55,6 +62,11 @@ __all__ = [
     "EmbedderConfig",
     "EmbeddingBatch",
     "EmbeddingProvider",
+    "HybridCandidate",
+    "HybridRetriever",
+    "HybridRetrieverConfig",
+    "HybridRetrievalResult",
+    "HybridSearchRequest",
     "OpenAITextEmbedder",
     "PineconeVectorStore",
     "QueryPlan",

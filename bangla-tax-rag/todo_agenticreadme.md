@@ -225,12 +225,12 @@ This file is meant to be used as our implementation board:
 
 ## Phase 14: Hybrid Retrieval
 
-- [ ] Create `app/retrieval/hybrid_retriever.py`
-- [ ] Merge dense + BM25 candidates.
-- [ ] Add metadata filtering before rerank.
-- [ ] Add parent/child graph expansion.
-- [ ] Return top evidence candidates plus parent context.
-- [ ] Add hybrid retrieval tests.
+- [x] Create `app/retrieval/hybrid_retriever.py`
+- [x] Merge dense + BM25 candidates.
+- [x] Add metadata filtering before rerank.
+- [x] Add parent/child graph expansion.
+- [x] Return top evidence candidates plus parent context.
+- [x] Add hybrid retrieval tests.
 
 ## Phase 15: Graph Expansion
 

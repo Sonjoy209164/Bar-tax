@@ -41,3 +41,4 @@ vector_store:
 reranker:
   provider: transformers
   model_name: BAAI/bge-reranker-v2-m3
+  base_url:

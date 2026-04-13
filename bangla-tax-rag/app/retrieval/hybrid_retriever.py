@@ -5,14 +5,15 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.core.utils import truncate_text
-from app.domain import CitationRelation, EvidenceItem, LegalNode, QueryType, canonicalize_query_type
+from app.domain import CitationRelation, EvidenceItem, QueryType, canonicalize_query_type
 from app.ingestion.chunker import ChunkingArtifacts, LegalChunk
 from app.ingestion.parent_child_linker import LinkedLegalDocument
 from app.reasoning import QueryPlanStep
 from app.retrieval.bm25_index import BM25Index, BM25SearchRequest, build_bm25_index
 from app.retrieval.embedder import TextEmbedder
+from app.retrieval.graph_expander import GraphExpander, GraphExpansionConfig
 from app.retrieval.query_transformer import QueryPlan, QueryTransformer, build_query_plan
+from app.retrieval.reranker import DocumentReranker, RerankerDocument
 from app.retrieval.vector_store_base import VectorSearchMatch, VectorStore
 
 
@@ -20,6 +21,7 @@ class HybridRetrieverConfig(BaseModel):
     sparse_top_k: int = Field(default=8, ge=1, le=50)
     dense_top_k: int = Field(default=8, ge=1, le=50)
     final_top_k: int = Field(default=5, ge=1, le=20)
+    rerank_top_n: int = Field(default=12, ge=1, le=100)
     max_expanded_nodes_per_candidate: int = Field(default=4, ge=0, le=20)
     reciprocal_rank_constant: int = Field(default=60, ge=1, le=200)
 
@@ -69,6 +71,8 @@ class HybridRetriever:
         vector_store: VectorStore,
         bm25_index: BM25Index | None = None,
         query_transformer: QueryTransformer | None = None,
+        graph_expander: GraphExpander | None = None,
+        reranker: DocumentReranker | None = None,
         config: HybridRetrieverConfig | None = None,
     ) -> None:
         self.linked_document = linked_document
@@ -78,8 +82,12 @@ class HybridRetriever:
         self.config = config or HybridRetrieverConfig()
         self.chunks = _resolve_retrieval_chunks(chunks_or_artifacts)
         self.chunk_map = {chunk.chunk_id: chunk for chunk in self.chunks}
-        self.node_map = {node.node_id: node for node in linked_document.nodes}
         self.bm25_index = bm25_index or build_bm25_index(self.chunks)
+        self.graph_expander = graph_expander or GraphExpander(
+            linked_document,
+            config=GraphExpansionConfig(max_related_nodes=self.config.max_expanded_nodes_per_candidate),
+        )
+        self.reranker = reranker
 
     def search(self, request: HybridSearchRequest) -> HybridRetrievalResult:
         query_plan = request.query_plan or self.query_transformer.transform(
@@ -125,7 +133,7 @@ class HybridRetriever:
                 record["source_methods"].add("dense")
                 record["step_indices"].add(step_index)
 
-        sorted_candidates = sorted(
+        preliminary_candidates = sorted(
             aggregate.values(),
             key=lambda item: (
                 item["fused_score"],
@@ -133,13 +141,18 @@ class HybridRetriever:
                 item.get("sparse_score") or 0.0,
             ),
             reverse=True,
+        )
+        sorted_candidates = self._apply_reranker(
+            preliminary_candidates,
+            question=request.question,
+            top_k=top_k,
         )[:top_k]
 
         candidates: list[HybridCandidate] = []
         evidence_by_key: dict[tuple[str, CitationRelation], EvidenceItem] = {}
         for candidate_record in sorted_candidates:
-            evidence = self._build_candidate_evidence(candidate_record["chunk"])
-            for item in evidence:
+            expansion_result = self.graph_expander.expand_chunk(candidate_record["chunk"])
+            for item in expansion_result.evidence:
                 evidence_by_key.setdefault((item.node_id, item.citation.relation), item)
             candidates.append(
                 HybridCandidate(
@@ -151,10 +164,14 @@ class HybridRetriever:
                     dense_rank=candidate_record.get("dense_rank"),
                     matched_sub_queries=sorted(candidate_record["matched_sub_queries"]),
                     source_methods=sorted(candidate_record["source_methods"]),
-                    evidence=evidence,
+                    evidence=expansion_result.evidence,
                     metadata={
                         "step_indices": sorted(candidate_record["step_indices"]),
                         "reasoning_parent_id": candidate_record["chunk"].reasoning_parent_id,
+                        "expanded_node_ids": expansion_result.expanded_node_ids,
+                        "reranker_score": candidate_record.get("reranker_score"),
+                        "reranker_rank": candidate_record.get("reranker_rank"),
+                        "reranker_backend": candidate_record.get("reranker_backend"),
                     },
                 )
             )
@@ -192,77 +209,51 @@ class HybridRetriever:
             filtered_matches.append(match)
         return filtered_matches
 
-    def _build_candidate_evidence(self, chunk: LegalChunk) -> list[EvidenceItem]:
-        evidence: list[EvidenceItem] = []
-        source_node = self.node_map.get(chunk.source_node_id)
-        if source_node is not None:
-            evidence.append(
-                _build_evidence_item(
-                    node=source_node,
-                    relation=CitationRelation.DIRECT,
-                    retrieval_method="hybrid_direct",
-                    score=1.0,
+    def _apply_reranker(
+        self,
+        candidates: list[dict[str, Any]],
+        *,
+        question: str,
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        if self.reranker is None or not candidates:
+            return candidates
+
+        rerank_pool = candidates[: max(top_k, self.config.rerank_top_n)]
+        rerank_result = self.reranker.rerank(
+            question,
+            [
+                RerankerDocument(
+                    document_id=candidate["chunk"].chunk_id,
+                    text=_build_reranker_text(candidate["chunk"]),
+                    metadata={
+                        "section_number": candidate["chunk"].section_number,
+                        "chunk_type": candidate["chunk"].chunk_type,
+                        "source_node_type": candidate["chunk"].source_node_type.value,
+                    },
                 )
-            )
+                for candidate in rerank_pool
+            ],
+            top_k=len(rerank_pool),
+        )
 
-        expanded_node_ids = []
-        if chunk.reasoning_parent_id:
-            expanded_node_ids.append(chunk.reasoning_parent_id)
-        expanded_node_ids.extend(chunk.metadata.get("expand_to_node_ids", []))
-        if source_node is not None:
-            expanded_node_ids.extend(source_node.metadata.get("expand_to_node_ids", []))
-        expanded_node_ids = _ordered_unique(node_id for node_id in expanded_node_ids if node_id and node_id != chunk.source_node_id)
-
-        for node_id in expanded_node_ids[: self.config.max_expanded_nodes_per_candidate]:
-            node = self.node_map.get(node_id)
-            if node is None:
+        reranked_records: list[dict[str, Any]] = []
+        candidate_map = {candidate["chunk"].chunk_id: candidate for candidate in rerank_pool}
+        for item in rerank_result.results:
+            candidate = candidate_map.get(item.document_id)
+            if candidate is None:
                 continue
-            relation = _relation_for_expanded_node(chunk, node_id)
-            evidence.append(
-                _build_evidence_item(
-                    node=node,
-                    relation=relation,
-                    retrieval_method="hybrid_context",
-                    score=0.5,
-                )
-            )
+            candidate["reranker_score"] = item.relevance_score
+            candidate["reranker_rank"] = item.rank
+            candidate["reranker_backend"] = rerank_result.backend
+            reranked_records.append(candidate)
 
-        return _deduplicate_evidence(evidence)
-
-
-def _build_evidence_item(
-    *,
-    node: LegalNode,
-    relation: CitationRelation,
-    retrieval_method: str,
-    score: float,
-) -> EvidenceItem:
-    snippet = truncate_text(node.text, max_length=280)
-    return EvidenceItem(
-        evidence_id=f"{node.node_id}:{relation.value}",
-        node_id=node.node_id,
-        parent_node_id=node.parent_id,
-        citation=node.to_citation(snippet=snippet).model_copy(update={"relation": relation}),
-        source_text=node.text,
-        score=score,
-        retrieval_method=retrieval_method,
-        supporting_node_ids=node.child_ids,
-        metadata={"node_type": node.node_type.value},
-    )
-
-
-def _relation_for_expanded_node(chunk: LegalChunk, node_id: str) -> CitationRelation:
-    if node_id == chunk.reasoning_parent_id:
-        return CitationRelation.PARENT_CONTEXT
-    if node_id == chunk.metadata.get("governing_rule_id"):
-        return CitationRelation.GOVERNING_RULE
-    if node_id in chunk.metadata.get("attached_table_ids", []):
-        return CitationRelation.ATTACHED_TABLE
-    if node_id in chunk.metadata.get("sibling_ids", []):
-        return CitationRelation.SIBLING_CONTEXT
-    if node_id in chunk.metadata.get("attached_proviso_ids", []) or node_id in chunk.metadata.get("attached_explanation_ids", []):
-        return CitationRelation.GOVERNING_RULE
-    return CitationRelation.PARENT_CONTEXT
+        reranked_ids = {candidate["chunk"].chunk_id for candidate in reranked_records}
+        for candidate in rerank_pool:
+            if candidate["chunk"].chunk_id not in reranked_ids:
+                reranked_records.append(candidate)
+        reranked_records.extend(candidates[len(rerank_pool) :])
+        return reranked_records
 
 
 def _rrf_score(rank: int, constant: int) -> float:
@@ -273,6 +264,11 @@ def _merge_filters(base_filters: dict[str, Any], step_filters: dict[str, Any]) -
     merged = dict(base_filters)
     merged.update(step_filters)
     return merged
+
+
+def _build_reranker_text(chunk: LegalChunk) -> str:
+    parts = [chunk.citability_label, chunk.label, chunk.title, chunk.text]
+    return "\n".join(part.strip() for part in parts if part and part.strip())
 
 
 def _resolve_retrieval_chunks(chunks_or_artifacts: list[LegalChunk] | ChunkingArtifacts) -> list[LegalChunk]:
@@ -293,29 +289,6 @@ def _empty_aggregate(chunk: LegalChunk) -> dict[str, Any]:
         "source_methods": set(),
         "step_indices": set(),
     }
-
-
-def _ordered_unique(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        ordered.append(value)
-    return ordered
-
-
-def _deduplicate_evidence(items: list[EvidenceItem]) -> list[EvidenceItem]:
-    deduped: list[EvidenceItem] = []
-    seen: set[tuple[str, CitationRelation]] = set()
-    for item in items:
-        key = (item.node_id, item.citation.relation)
-        if key in seen:
-            continue
-        deduped.append(item)
-        seen.add(key)
-    return deduped
 
 
 def _chunk_matches_filters(chunk: LegalChunk, filters: dict[str, Any]) -> bool:

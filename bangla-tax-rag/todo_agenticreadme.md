@@ -234,34 +234,34 @@ This file is meant to be used as our implementation board:
 
 ## Phase 15: Graph Expansion
 
-- [ ] Create `app/retrieval/graph_expander.py`
-- [ ] Expand from child hit to parent section.
-- [ ] Expand sibling clauses when needed.
-- [ ] Expand attached provisos.
-- [ ] Expand attached explanations.
-- [ ] Expand linked tables.
-- [ ] Add graph-expansion tests.
+- [x] Create `app/retrieval/graph_expander.py`
+- [x] Expand from child hit to parent section.
+- [x] Expand sibling clauses when needed.
+- [x] Expand attached provisos.
+- [x] Expand attached explanations.
+- [x] Expand linked tables.
+- [x] Add graph-expansion tests.
 
 ## Phase 16: Reranker
 
-- [ ] Create `app/retrieval/reranker.py` in the new architecture.
-- [ ] Add `Cohere Rerank` provider integration.
-- [ ] Keep reranker behind an interface.
-- [ ] Rerank only bounded candidate sets.
-- [ ] Record reranker scores in traces.
-- [ ] Add reranker tests.
+- [x] Create `app/retrieval/reranker.py` in the new architecture.
+- [x] Add `Cohere Rerank` provider integration.
+- [x] Keep reranker behind an interface.
+- [x] Rerank only bounded candidate sets.
+- [x] Record reranker scores in traces.
+- [x] Add reranker tests.
 
 ## Phase 17: Evidence Pack Builders
 
-- [ ] Create `app/retrieval/evidence_packs.py`
-- [ ] Build `DefinitionEvidencePack`
-- [ ] Build `SectionLookupEvidencePack`
-- [ ] Build `RateTableEvidencePack`
-- [ ] Build `ScenarioEvidencePack`
-- [ ] Build `CrossSectionEvidencePack`
-- [ ] Build `ComparisonEvidencePack`
-- [ ] Ensure each evidence pack includes linked parent context.
-- [ ] Add evidence pack tests.
+- [x] Create `app/retrieval/evidence_packs.py`
+- [x] Build `DefinitionEvidencePack`
+- [x] Build `SectionLookupEvidencePack`
+- [x] Build `RateTableEvidencePack`
+- [x] Build `ScenarioEvidencePack`
+- [x] Build `CrossSectionEvidencePack`
+- [x] Build `ComparisonEvidencePack`
+- [x] Ensure each evidence pack includes linked parent context.
+- [x] Add evidence pack tests.
 
 ## Phase 18: Reasoning Graph
 

@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     milvus_collection_name: str | None = Field(default=None, alias="MILVUS_COLLECTION_NAME")
     reranker_provider: str = Field(default="transformers", alias="RERANKER_PROVIDER")
     reranker_model_name: str = Field(default="BAAI/bge-reranker-v2-m3", alias="RERANKER_MODEL_NAME")
+    reranker_base_url: str | None = Field(default=None, alias="RERANKER_BASE_URL")
+    reranker_api_key: str | None = Field(default=None, alias="RERANKER_API_KEY")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -94,6 +96,7 @@ class Settings(BaseSettings):
             "milvus_collection_name": self.milvus_collection_name,
             "reranker_provider": self.reranker_provider,
             "reranker_model_name": self.reranker_model_name,
+            "reranker_base_url": self.reranker_base_url,
         }
 
 
@@ -173,4 +176,6 @@ def get_settings() -> Settings:
         flat_updates["reranker_provider"] = reranker_config["provider"]
     if "model_name" in reranker_config:
         flat_updates["reranker_model_name"] = reranker_config["model_name"]
+    if "base_url" in reranker_config:
+        flat_updates["reranker_base_url"] = reranker_config["base_url"]
     return settings.model_copy(update=flat_updates)

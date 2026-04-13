@@ -3,67 +3,68 @@ from pathlib import Path
 import json
 
 from app.core.schemas import QuerySignals
+from app.domain.query_taxonomy import QueryExecutionPath, QueryType, build_query_taxonomy_decision, canonicalize_query_type
 
 BANGLA_DIGIT_MAP = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 SECTION_KEYWORDS = ("ধারা", "উপ-ধারা", "উপধারা", "পরিশিষ্ট", "অনুচ্ছেদ")
 QUERY_TYPE_PATTERNS = {
-    "eligibility": re.compile(
+    QueryType.ELIGIBILITY: re.compile(
         r"(\bam i\b|\bdo i (?:have to|need to) pay tax\b|\bwill i (?:have to )?pay tax\b|\bwhat will be my tax\b|\bwhat is my tax\b|\bdo i qualify\b|\bam i eligible\b|\bi am (?:a|an)\b.*\btax\b|\bas a (?:day labourer|day laborer|labourer|laborer|worker|employee|salaried|individual)\b.*\btax\b)",
         re.IGNORECASE,
     ),
-    "amount_lookup": re.compile(
+    QueryType.AMOUNT_LOOKUP: re.compile(
         r"(threshold|amount|limit|maximum|minim(?:um)?|ceiling|floor|not more than|no more than|exceeds? taka|taka|lakh|crore)",
         re.IGNORECASE,
     ),
-    "count_lookup": re.compile(
+    QueryType.COUNT_LOOKUP: re.compile(
         r"(how many|number of|count of|how many classes|how many items|how many authorities)",
         re.IGNORECASE,
     ),
-    "duration_lookup": re.compile(
+    QueryType.DURATION_LOOKUP: re.compile(
         r"(for how many .*years|for how many .*months|for how many .*days|successive assessment years|carry(?:ied)? forward|period of \d+|how long|duration)",
         re.IGNORECASE,
     ),
-    "date_lookup": re.compile(
+    QueryType.DATE_LOOKUP: re.compile(
         r"(tax day|due date|deadline|effective from|from what date|what date|which date|when\b|by june|by july|by september|by november)",
         re.IGNORECASE,
     ),
-    "rate_lookup": re.compile(
+    QueryType.RATE_LOOKUP: re.compile(
         r"(হার|rate|slab|করহার|tax rate|rate of tax|what tax|how much tax|tax payable|pay tax|percentage)",
         re.IGNORECASE,
     ),
-    "amendment": re.compile(r"(amend|সংশোধন|পরিবর্তন|change)", re.IGNORECASE),
-    "example": re.compile(r"(উদাহরণ|example|illustration)", re.IGNORECASE),
-    "list_lookup": re.compile(
+    QueryType.AMENDMENT: re.compile(r"(amend|সংশোধন|পরিবর্তন|change)", re.IGNORECASE),
+    QueryType.EXAMPLE: re.compile(r"(উদাহরণ|example|illustration)", re.IGNORECASE),
+    QueryType.LIST_LOOKUP: re.compile(
         r"(list\b|what are the .*authorit|what are the .*classes|which .*are listed|following classes|following incomes|listed under)",
         re.IGNORECASE,
     ),
-    "mention_lookup": re.compile(
+    QueryType.MENTION_LOOKUP: re.compile(
         r"(mentioned|mention|appears?|included?|include|listed?|contains?|is .*mentioned|is .*included|say about|says about|what does .* say about|উল্লেখ|আছে কি|আছে কিনা)",
         re.IGNORECASE,
     ),
-    "definition": re.compile(
+    QueryType.DEFINITION: re.compile(
         r"(definition|defined as|what is the definition of|definition of|what does .* mean|meaning of|সংজ্ঞা|মানে কী|কি বলা হয়েছে|কী বলা হয়েছে)",
         re.IGNORECASE,
     ),
-    "procedure": re.compile(r"(প্রক্রিয়া|পদ্ধতি|how to|process|steps)", re.IGNORECASE),
-    "calculation": re.compile(r"(calculate|calculation|গণনা|compute)", re.IGNORECASE),
-    "comparison": re.compile(r"(compare|comparison|তুলনা|versus|পার্থক্য)", re.IGNORECASE),
+    QueryType.PROCEDURE: re.compile(r"(প্রক্রিয়া|পদ্ধতি|how to|process|steps)", re.IGNORECASE),
+    QueryType.CALCULATION: re.compile(r"(calculate|calculation|গণনা|compute)", re.IGNORECASE),
+    QueryType.COMPARISON: re.compile(r"(compare|comparison|তুলনা|versus|পার্থক্য)", re.IGNORECASE),
 }
 QUERY_TYPE_PRIORITY = [
-    "eligibility",
-    "comparison",
-    "amount_lookup",
-    "duration_lookup",
-    "date_lookup",
-    "count_lookup",
-    "list_lookup",
-    "mention_lookup",
-    "definition",
-    "rate_lookup",
-    "amendment",
-    "example",
-    "procedure",
-    "calculation",
+    QueryType.ELIGIBILITY,
+    QueryType.COMPARISON,
+    QueryType.AMOUNT_LOOKUP,
+    QueryType.DURATION_LOOKUP,
+    QueryType.DATE_LOOKUP,
+    QueryType.COUNT_LOOKUP,
+    QueryType.LIST_LOOKUP,
+    QueryType.MENTION_LOOKUP,
+    QueryType.DEFINITION,
+    QueryType.RATE_LOOKUP,
+    QueryType.AMENDMENT,
+    QueryType.EXAMPLE,
+    QueryType.PROCEDURE,
+    QueryType.CALCULATION,
 ]
 ENGLISH_STOPWORDS = {
     "a",
@@ -337,13 +338,14 @@ def extract_salient_query_terms(text: str) -> set[str]:
     return salient_terms
 
 
-def extract_informative_query_terms(text: str, query_type: str | None = None) -> set[str]:
+def extract_informative_query_terms(text: str, query_type: str | QueryType | None = None) -> set[str]:
+    query_type = canonicalize_query_type(query_type)
     informative_terms = set()
     for token in extract_salient_query_terms(text):
         if token in GENERIC_QUERY_TERMS:
             continue
         informative_terms.add(token)
-    if query_type == "eligibility":
+    if query_type == QueryType.ELIGIBILITY:
         normalized_text = normalize_text(text).lower()
         for phrase in (
             "day labourer",
@@ -365,25 +367,26 @@ def extract_informative_query_terms(text: str, query_type: str | None = None) ->
                 informative_terms.update(
                     token for token in tokenize_for_bm25(phrase) if token not in GENERIC_QUERY_TERMS
                 )
-    if query_type == "definition":
+    if query_type == QueryType.DEFINITION:
         focus_term = extract_definition_target(text)
         if focus_term:
             informative_terms.update(token for token in tokenize_for_bm25(focus_term) if token not in GENERIC_QUERY_TERMS)
     return informative_terms
 
 
-def detect_query_type(text: str) -> str:
+def detect_query_type(text: str) -> QueryType:
     for query_type in QUERY_TYPE_PRIORITY:
         pattern = QUERY_TYPE_PATTERNS[query_type]
         if pattern.search(text):
             return query_type
-    return "general"
+    return QueryType.GENERAL
 
 
-def rewrite_query(normalized_query: str, query_type: str) -> str:
+def rewrite_query(normalized_query: str, query_type: str | QueryType) -> str:
+    query_type = canonicalize_query_type(query_type)
     rewritten_terms = list(dict.fromkeys(tokenize_for_bm25(normalized_query)))
     lower_query = normalized_query.lower()
-    if query_type == "eligibility":
+    if query_type == QueryType.ELIGIBILITY:
         rewritten_terms.extend(
             [
                 "taxable",
@@ -404,15 +407,15 @@ def rewrite_query(normalized_query: str, query_type: str) -> str:
             rewritten_terms.extend(["salary", "employee", "income from employment"])
         if any(term in lower_query for term in ("resident", "individual")):
             rewritten_terms.extend(["resident", "individual assessee"])
-    if query_type == "amount_lookup":
+    if query_type == QueryType.AMOUNT_LOOKUP:
         rewritten_terms.extend(["threshold", "amount", "limit", "taka", "lakh", "crore", "not more than", "exceeds"])
-    if query_type == "count_lookup":
+    if query_type == QueryType.COUNT_LOOKUP:
         rewritten_terms.extend(["count", "number", "classes", "items", "listed", "namely"])
-    if query_type == "duration_lookup":
+    if query_type == QueryType.DURATION_LOOKUP:
         rewritten_terms.extend(["years", "months", "days", "period", "carry forward", "successive"])
-    if query_type == "date_lookup":
+    if query_type == QueryType.DATE_LOOKUP:
         rewritten_terms.extend(["date", "deadline", "due date", "effective date", "day", "month", "year"])
-    if query_type == "rate_lookup":
+    if query_type == QueryType.RATE_LOOKUP:
         if "software" in lower_query:
             rewritten_terms.extend(["software", "service"])
         if "company" in lower_query or "কোম্পানি" in lower_query:
@@ -421,7 +424,7 @@ def rewrite_query(normalized_query: str, query_type: str) -> str:
             rewritten_terms.extend(["tax rate", "rate of tax", "tax payable"])
         if "করহার" in lower_query:
             rewritten_terms.extend(["করহার", "কর হার"])
-    if query_type == "mention_lookup":
+    if query_type == QueryType.MENTION_LOOKUP:
         rewritten_terms.extend(["mentioned", "included", "listed"])
         if "software" in lower_query:
             rewritten_terms.extend(
@@ -436,16 +439,16 @@ def rewrite_query(normalized_query: str, query_type: str) -> str:
             )
         if "act" in lower_query:
             rewritten_terms.extend(["act", "income tax act"])
-    if query_type == "definition" and "commissioner" in lower_query:
+    if query_type == QueryType.DEFINITION and "commissioner" in lower_query:
         rewritten_terms.extend(["definition", "definitions", "commissioner", "means"])
-    elif query_type == "definition":
+    elif query_type == QueryType.DEFINITION:
         rewritten_terms.extend(["definition", "definitions", "means"])
         focus_term = extract_definition_target(normalized_query)
         if focus_term:
             rewritten_terms.extend(tokenize_for_bm25(focus_term))
-    if query_type == "list_lookup":
+    if query_type == QueryType.LIST_LOOKUP:
         rewritten_terms.extend(["list", "listed", "namely", "following", "classes"])
-    if query_type == "comparison":
+    if query_type == QueryType.COMPARISON:
         rewritten_terms.extend(["compare", "versus", "difference", "company", "other than company"])
     return " ".join(dict.fromkeys(rewritten_terms))
 
@@ -470,6 +473,7 @@ def extract_definition_target(text: str) -> str | None:
 def preprocess_query(query: str) -> QuerySignals:
     normalized_query = normalize_text(query)
     query_type = detect_query_type(normalized_query)
+    taxonomy = build_query_taxonomy_decision(query_type)
     tax_years = extract_tax_years(query)
     section_ids = extract_query_section_references(query)
     appendix_ids = extract_appendix_ids(query)
@@ -499,8 +503,9 @@ def preprocess_query(query: str) -> QuerySignals:
         appendix_id=appendix_ids[0] if appendix_ids else None,
         sro_reference=sro_ids[0] if sro_ids else None,
         sro_id=sro_ids[0] if sro_ids else None,
-        query_type=query_type,
-        query_intent=query_type,
+        query_type=taxonomy.query_type,
+        query_intent=taxonomy.query_type,
+        execution_path=taxonomy.execution_path,
     )
 
 

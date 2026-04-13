@@ -2,6 +2,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.domain.query_taxonomy import QueryExecutionPath, QueryType
+
 
 class HealthResponse(BaseModel):
     status: str
@@ -103,8 +105,9 @@ class QuerySignals(BaseModel):
     appendix_id: str | None = None
     sro_reference: str | None = None
     sro_id: str | None = None
-    query_type: str = "general"
-    query_intent: str = "general"
+    query_type: QueryType = QueryType.GENERAL
+    query_intent: QueryType = QueryType.GENERAL
+    execution_path: QueryExecutionPath = QueryExecutionPath.FAST_PATH
 
 
 class RetrievalHit(BaseModel):

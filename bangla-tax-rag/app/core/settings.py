@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     sparse_index_dir: str = Field(default="indexes/sparse", alias="SPARSE_INDEX_DIR")
     dense_index_dir: str = Field(default="indexes/dense", alias="DENSE_INDEX_DIR")
     results_dir: str = Field(default="results", alias="RESULTS_DIR")
+    parser_provider: str = Field(default="fallback", alias="PARSER_PROVIDER")
+    llama_parse_result_type: str = Field(default="markdown", alias="LLAMAPARSE_RESULT_TYPE")
+    llama_cloud_api_key: str | None = Field(default=None, alias="LLAMA_CLOUD_API_KEY")
     ui_backend_base_url: str = Field(default="http://127.0.0.1:8000", alias="UI_BACKEND_BASE_URL")
     retrieval_mode: str = Field(default="hybrid", alias="RETRIEVAL_MODE")
     top_k: int = Field(default=5, alias="TOP_K")
@@ -53,6 +56,8 @@ class Settings(BaseSettings):
             "sparse_index_dir": self.sparse_index_dir,
             "dense_index_dir": self.dense_index_dir,
             "results_dir": self.results_dir,
+            "parser_provider": self.parser_provider,
+            "llama_parse_result_type": self.llama_parse_result_type,
             "ui_backend_base_url": self.ui_backend_base_url,
             "retrieval_mode": self.retrieval_mode,
             "top_k": self.top_k,
@@ -80,6 +85,7 @@ def get_settings() -> Settings:
     retrieval_config = yaml_config.get("retrieval", {})
     generation_config = yaml_config.get("generation", {})
     paths_config = yaml_config.get("paths", {})
+    parser_config = yaml_config.get("parser", {})
     embeddings_config = yaml_config.get("embeddings", {})
     reranker_config = yaml_config.get("reranker", {})
     if "name" in app_config:
@@ -113,6 +119,10 @@ def get_settings() -> Settings:
     for key in ("raw_data_dir", "processed_data_dir", "sparse_index_dir", "dense_index_dir", "results_dir"):
         if key in paths_config:
             flat_updates[key] = paths_config[key]
+    if "provider" in parser_config:
+        flat_updates["parser_provider"] = parser_config["provider"]
+    if "result_type" in parser_config:
+        flat_updates["llama_parse_result_type"] = parser_config["result_type"]
     if "ui_backend_base_url" in paths_config:
         flat_updates["ui_backend_base_url"] = paths_config["ui_backend_base_url"]
     if "provider" in embeddings_config:

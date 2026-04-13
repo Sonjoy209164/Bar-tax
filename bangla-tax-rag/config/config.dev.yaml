@@ -10,6 +10,9 @@ paths:
   dense_index_dir: indexes/dense
   results_dir: results
   ui_backend_base_url: http://127.0.0.1:8000
+parser:
+  provider: fallback
+  result_type: markdown
 retrieval:
   mode: hybrid
   top_k: 5

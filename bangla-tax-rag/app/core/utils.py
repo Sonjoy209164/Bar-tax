@@ -51,6 +51,7 @@ QUERY_TYPE_PATTERNS = {
 }
 QUERY_TYPE_PRIORITY = [
     "eligibility",
+    "comparison",
     "amount_lookup",
     "duration_lookup",
     "date_lookup",
@@ -63,7 +64,6 @@ QUERY_TYPE_PRIORITY = [
     "example",
     "procedure",
     "calculation",
-    "comparison",
 ]
 ENGLISH_STOPWORDS = {
     "a",
@@ -224,6 +224,8 @@ def select_primary_section_markers(
     text_markers: list[str] = []
     fallback_markers: list[str] = []
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+    first_line = lines[0] if lines else ""
+    first_line_normalized = normalize_text(first_line)
     for line in lines[:8]:
         text_markers.extend(extract_query_section_references(line))
         heading_marker = detect_heading_marker(line)
@@ -238,7 +240,12 @@ def select_primary_section_markers(
         cleaned_marker = clean_section_marker(marker)
         if cleaned_marker:
             fallback_markers.append(cleaned_marker)
-    candidate_markers = text_markers if text_markers else fallback_markers
+    starts_with_list_continuation = bool(re.match(r"^\((?:[a-z0-9]+|[ivxlcdm]+)\)\s+", first_line_normalized, flags=re.IGNORECASE))
+    leading_heading_marker = detect_heading_marker(first_line) if first_line else None
+    if fallback_markers and (not text_markers or starts_with_list_continuation or not leading_heading_marker):
+        candidate_markers = fallback_markers + [marker for marker in text_markers if marker not in fallback_markers]
+    else:
+        candidate_markers = text_markers if text_markers else fallback_markers
     filtered_markers: list[str] = []
     for marker in candidate_markers:
         if not marker or is_year_like_marker(marker):
@@ -438,6 +445,8 @@ def rewrite_query(normalized_query: str, query_type: str) -> str:
             rewritten_terms.extend(tokenize_for_bm25(focus_term))
     if query_type == "list_lookup":
         rewritten_terms.extend(["list", "listed", "namely", "following", "classes"])
+    if query_type == "comparison":
+        rewritten_terms.extend(["compare", "versus", "difference", "company", "other than company"])
     return " ".join(dict.fromkeys(rewritten_terms))
 
 

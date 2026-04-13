@@ -262,6 +262,178 @@ def test_evidence_pack_prefers_exact_section_heading_when_available() -> None:
     assert final_hits[0].chunk_id == "exact-section"
 
 
+def test_definition_evidence_pack_prefers_exact_definition_hit() -> None:
+    analyzed_query = run_hybrid_retrieval(
+        query="What is the definition of Commissioner?",
+        sparse_hits_override=[],
+        dense_hits_override=[],
+    ).analyzed_query
+    fused_hits = [
+        _hit(
+            chunk_id="definition-exact",
+            score=5.4,
+            page_no=6,
+            section_id="2",
+            chunk_type="section",
+            heading_path=["2. Definitions"],
+            text='(19) "Commissioner" means Commissioner of Taxes or Commissioner of Taxes (Large Assessee Unit).',
+        ),
+        _hit(
+            chunk_id="definition-incidental",
+            score=5.1,
+            page_no=18,
+            section_id="4",
+            chunk_type="section",
+            heading_path=["4. Income tax authorities"],
+            text="The Commissioner of Taxes shall exercise the following powers under this Act.",
+        ),
+    ]
+
+    final_hits, _, _, _ = build_evidence_pack(
+        fused_hits,
+        analyzed_query,
+        final_top_k=2,
+    )
+
+    assert final_hits
+    assert final_hits[0].chunk_id == "definition-exact"
+    assert all(hit.chunk_id != "definition-incidental" for hit in final_hits[1:])
+
+
+def test_evidence_pack_expands_to_adjacent_clause_continuation_from_candidate_pool() -> None:
+    analyzed_query = run_hybrid_retrieval(
+        query="How many classes of income tax authorities are listed under section 4?",
+        sparse_hits_override=[],
+        dense_hits_override=[],
+    ).analyzed_query
+    fused_hits = [
+        _hit(
+            chunk_id="section-4-anchor",
+            score=5.8,
+            page_no=24,
+            section_id="4",
+            chunk_type="section",
+            heading_path=["4. Income tax authorities.—For the purposes of this Act"],
+            text="4. Income tax authorities.—For the purposes of this Act, there shall be the following classes of income tax authorities, namely:— (a) The National Board of Revenue; (b) Chief Commissioner of Taxes;",
+        ),
+    ]
+    candidate_pool = [
+        _hit(
+            chunk_id="section-4-anchor",
+            score=5.8,
+            page_no=24,
+            section_id="4",
+            chunk_type="section",
+            heading_path=["4. Income tax authorities.—For the purposes of this Act"],
+            text="4. Income tax authorities.—For the purposes of this Act, there shall be the following classes of income tax authorities, namely:— (a) The National Board of Revenue; (b) Chief Commissioner of Taxes;",
+        ),
+        _hit(
+            chunk_id="section-4-continuation",
+            score=0.0,
+            page_no=25,
+            section_id="4",
+            chunk_type="section",
+            heading_path=[],
+            text="(c) Director General (Inspection); (d) Commissioner of Taxes (Appeals); (e) Commissioner of Taxes (Large Assessee Unit);",
+        ),
+    ]
+    candidate_pool[1].intermediate_scores = {"from_corpus_pool": 1}
+
+    final_hits, _, _, _ = build_evidence_pack(
+        fused_hits,
+        analyzed_query,
+        final_top_k=3,
+        candidate_pool=candidate_pool,
+    )
+
+    assert {hit.chunk_id for hit in final_hits} >= {"section-4-anchor", "section-4-continuation"}
+
+
+def test_comparison_evidence_pack_keeps_complementary_hits() -> None:
+    analyzed_query = run_hybrid_retrieval(
+        query="Compare the Tax Day for a company and for an assessee other than a company.",
+        sparse_hits_override=[],
+        dense_hits_override=[],
+    ).analyzed_query
+    fused_hits = [
+        _hit(
+            chunk_id="company-tax-day",
+            score=5.0,
+            page_no=8,
+            section_id="2",
+            chunk_type="section",
+            heading_path=["2. Definitions"],
+            text="(65)(b) in the case of a company, the 15th day of the seventh month following the end of the income year or 15 September, whichever is earlier;",
+        ),
+        _hit(
+            chunk_id="other-tax-day",
+            score=4.8,
+            page_no=8,
+            section_id="2",
+            chunk_type="section",
+            heading_path=["2. Definitions"],
+            text="(65)(a) in the case of an assessee other than a company, the 30th day of November following the end of the income year;",
+        ),
+        _hit(
+            chunk_id="irrelevant-date",
+            score=4.7,
+            page_no=30,
+            section_id="17",
+            chunk_type="section",
+            heading_path=["17. Assessment year"],
+            text="Assessment year means the period of twelve months commencing on the first day of July.",
+        ),
+    ]
+
+    final_hits, _, _, _ = build_evidence_pack(
+        fused_hits,
+        analyzed_query,
+        final_top_k=3,
+    )
+
+    assert {hit.chunk_id for hit in final_hits} >= {"company-tax-day", "other-tax-day"}
+    assert all(hit.chunk_id != "irrelevant-date" for hit in final_hits)
+
+
+def test_comparison_evidence_pack_prefers_self_contained_comparison_chunk() -> None:
+    analyzed_query = run_hybrid_retrieval(
+        query="Compare the Tax Day for a company and for an assessee other than a company.",
+        sparse_hits_override=[],
+        dense_hits_override=[],
+    ).analyzed_query
+    fused_hits = [
+        _hit(
+            chunk_id="combined-tax-day",
+            score=4.9,
+            page_no=7,
+            section_id="2",
+            chunk_type="section",
+            heading_path=["2. Definitions"],
+            text=(
+                "(23) Tax Day means (a) in the case of an assessee other than a company, the 30th day of November; "
+                "(b) in the case of a company, the 15th day of the seventh month following the end of the income year."
+            ),
+        ),
+        _hit(
+            chunk_id="tax-day-penalty",
+            score=4.8,
+            page_no=121,
+            section_id="173",
+            chunk_type="section",
+            heading_path=["173. Regarding payment of income tax and surcharge on or before the Tax Day"],
+            text="The assessee would have paid if he had filed the return on the tax day.",
+        ),
+    ]
+
+    final_hits, _, _, _ = build_evidence_pack(
+        fused_hits,
+        analyzed_query,
+        final_top_k=3,
+    )
+
+    assert [hit.chunk_id for hit in final_hits] == ["combined-tax-day"]
+
+
 def test_hybrid_evidence_pack_prefers_startup_duration_hit_for_duration_query() -> None:
     analyzed_query = run_hybrid_retrieval(
         query="For how many successive assessment years can startup losses be carried forward?",

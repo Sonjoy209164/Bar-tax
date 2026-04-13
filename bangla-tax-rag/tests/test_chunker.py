@@ -206,6 +206,80 @@ def test_header_only_blocks_are_dropped() -> None:
     assert chunks == []
 
 
+def test_clause_safe_chunking_keeps_statute_clauses_intact() -> None:
+    pages = [
+        ParsedPage(
+            page_no=1,
+            raw_text=(
+                "32. Income from employment.—(1) Subject to the provisions of sub-section (2), income from employment shall include the following incomes, namely:—\n"
+                "(a) any monetary receipts, salaries and benefits received or receivable from employment;\n"
+                "(b) income earned from employee share schemes;\n"
+                "(c) untaxed arrear salary; and\n"
+                "(d) any amount or benefit received from a past or future employer."
+            ),
+            normalized_text=(
+                "32. Income from employment.—(1) Subject to the provisions of sub-section (2), income from employment shall include the following incomes, namely:—\n"
+                "(a) any monetary receipts, salaries and benefits received or receivable from employment;\n"
+                "(b) income earned from employee share schemes;\n"
+                "(c) untaxed arrear salary; and\n"
+                "(d) any amount or benefit received from a past or future employer."
+            ),
+            headings=["32. Income from employment.—(1) Subject to the provisions of sub-section (2), income from employment shall include the following incomes, namely:—"],
+            section_markers=["32"],
+            tax_years=[],
+            sro_ids=[],
+            is_appendix=False,
+            is_example=False,
+            is_table_like=False,
+            line_count=5,
+        )
+    ]
+
+    chunks = section_aware_chunking(pages, _sample_metadata(), chunk_size=180)
+
+    assert len(chunks) >= 2
+    assert any("(a) any monetary receipts" in chunk.normalized_text for chunk in chunks)
+    assert any("(b) income earned from employee share schemes;" in chunk.normalized_text for chunk in chunks)
+    assert all(not chunk.normalized_text.startswith("ployee share schemes;") for chunk in chunks)
+    assert all(not chunk.normalized_text.startswith("ntaxed arrear salary;") for chunk in chunks)
+
+
+def test_amendment_footnotes_are_trimmed_from_statute_clause_chunks() -> None:
+    pages = [
+        ParsedPage(
+            page_no=24,
+            raw_text=(
+                "4. Income tax authorities.—For the purposes of this Act, there shall be the following classes of income tax authorities, namely:—\n"
+                "(k) Deputy Commissioners of Taxes;\n"
+                "(l) Tax Recovery Officers nominated by the Commissioner of Taxes;\n"
+                "1 The words and brackets “Director (Central Intelligence Cell)” were substituted by section 16(a) of the Finance Act, 2024.\n"
+                "(Act No. V of 2024) with effect from 1st July 2024."
+            ),
+            normalized_text=(
+                "4. Income tax authorities.—For the purposes of this Act, there shall be the following classes of income tax authorities, namely:—\n"
+                "(k) Deputy Commissioners of Taxes;\n"
+                "(l) Tax Recovery Officers nominated by the Commissioner of Taxes;\n"
+                "1 The words and brackets “Director (Central Intelligence Cell)” were substituted by section 16(a) of the Finance Act, 2024.\n"
+                "(Act No. V of 2024) with effect from 1st July 2024."
+            ),
+            headings=["4. Income tax authorities.—For the purposes of this Act, there shall be the following classes of income tax authorities, namely:—"],
+            section_markers=["4", "16"],
+            tax_years=[],
+            sro_ids=[],
+            is_appendix=False,
+            is_example=False,
+            is_table_like=False,
+            line_count=5,
+        )
+    ]
+
+    chunks = section_aware_chunking(pages, _sample_metadata(), chunk_size=500)
+
+    assert len(chunks) == 1
+    assert "Finance Act, 2024" not in chunks[0].normalized_text
+    assert "(l) Tax Recovery Officers" in chunks[0].normalized_text
+
+
 def test_statute_sections_are_split_cleanly_and_carried_across_pages() -> None:
     pages = [
         ParsedPage(

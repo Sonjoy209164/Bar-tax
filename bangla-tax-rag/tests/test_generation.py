@@ -441,6 +441,76 @@ def test_duration_lookup_returns_successive_years_phrase() -> None:
     assert result.used_chunk_ids == ["c1"]
 
 
+def test_rate_lookup_prefers_percentage_linked_to_agricultural_income() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.8,
+            tax_year=None,
+            section_id="40",
+            subsection_id=None,
+            chunk_type="section",
+            text=(
+                "40% (forty percent) of the proceeds from the sale of tea and rubber, produced and processed by any person, "
+                "shall be deemed to be business income and 60% (sixty percent) shall be deemed to be income from agriculture."
+            ),
+        ),
+    ]
+    query = preprocess_query("What percentage of tea and rubber production is considered agricultural income?")
+
+    result = generate_answer(
+        "What percentage of tea and rubber production is considered agricultural income?",
+        hits,
+        query,
+        _options(),
+    )
+
+    assert result.abstained is False
+    assert "60%" in result.answer_text
+    assert "income from agriculture" in result.answer_text.lower()
+    assert result.used_chunk_ids == ["c1"]
+
+
+def test_rate_lookup_stays_deterministic_even_with_llm_provider() -> None:
+    hits = [
+        _hit(
+            chunk_id="c1",
+            score=3.8,
+            tax_year=None,
+            section_id="40",
+            subsection_id=None,
+            chunk_type="section",
+            text=(
+                "40% (forty percent) of the proceeds from the sale of tea and rubber, produced and processed by any person, "
+                "shall be deemed to be business income and 60% (sixty percent) shall be deemed to be income from agriculture."
+            ),
+        ),
+    ]
+    query = preprocess_query("What percentage of tea and rubber production is considered agricultural income?")
+    options = GenerationOptions(
+        provider="openai_compatible",
+        model_name="deepseek-r1:7b",
+        base_url="http://127.0.0.1:11434/v1",
+        api_key=None,
+        max_generation_tokens=256,
+        temperature=0.0,
+        abstention_score_threshold=0.75,
+        verification_enabled=True,
+        fallback_to_mock=True,
+    )
+
+    result = generate_answer(
+        "What percentage of tea and rubber production is considered agricultural income?",
+        hits,
+        query,
+        options,
+        mocked_response='{"answer_sentences":[{"sentence":"The evidence conflicts between 40% and 60%.","citations":["[C1]"]}],"conflict_notes":["percentages conflict"]}',
+    )
+
+    assert result.abstained is False
+    assert "60%" in result.answer_text
+
+
 def test_count_lookup_counts_enumerated_items() -> None:
     hits = [
         _hit(

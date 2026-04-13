@@ -408,6 +408,291 @@ def load_dense_vector_neighbors(
 
 
 @st.cache_data(show_spinner=False)
+def load_dense_vector_slice(
+    index_dir: str,
+    *,
+    vector_index: int,
+    dim_start: int = 0,
+    dim_count: int = 32,
+    compare_indices: tuple[int, ...] = (),
+) -> tuple[dict[str, Any], str | None]:
+    if np is None:
+        return {}, "numpy is not available for embedding inspection."
+    path = Path(index_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    embeddings_path = path / "embeddings.npy"
+    if not embeddings_path.exists():
+        return {}, f"Embeddings file not found: {embeddings_path}"
+
+    embeddings = np.load(embeddings_path)
+    if vector_index < 0 or vector_index >= embeddings.shape[0]:
+        return {}, f"Vector index {vector_index} is out of range."
+
+    total_dims = int(embeddings.shape[1]) if embeddings.ndim > 1 else 0
+    safe_start = max(0, min(int(dim_start), max(total_dims - 1, 0)))
+    safe_count = max(1, min(int(dim_count), max(total_dims - safe_start, 1)))
+    safe_end = min(safe_start + safe_count, total_dims)
+
+    selected_vector = np.asarray(embeddings[vector_index], dtype=np.float32)
+    compare_vectors: dict[int, np.ndarray] = {}
+    for neighbor_index in compare_indices:
+        if 0 <= int(neighbor_index) < embeddings.shape[0]:
+            compare_vectors[int(neighbor_index)] = np.asarray(embeddings[int(neighbor_index)], dtype=np.float32)
+
+    rows: list[dict[str, Any]] = []
+    for dim_index in range(safe_start, safe_end):
+        row = {
+            "dim": int(dim_index),
+            "selected": round(float(selected_vector[dim_index]), 6),
+        }
+        for neighbor_index, neighbor_vector in compare_vectors.items():
+            row[f"neighbor_{neighbor_index}"] = round(float(neighbor_vector[dim_index]), 6)
+            row[f"delta_{neighbor_index}"] = round(
+                float(selected_vector[dim_index] - neighbor_vector[dim_index]),
+                6,
+            )
+        rows.append(row)
+
+    stats = {
+        "vector_index": int(vector_index),
+        "dimension_count": total_dims,
+        "slice_start": safe_start,
+        "slice_end_exclusive": safe_end,
+        "min": round(float(selected_vector.min()), 6),
+        "max": round(float(selected_vector.max()), 6),
+        "mean": round(float(selected_vector.mean()), 6),
+        "std": round(float(selected_vector.std()), 6),
+        "norm": round(float(np.linalg.norm(selected_vector)), 6),
+    }
+    return {"stats": stats, "rows": rows}, None
+
+
+@st.cache_data(show_spinner=False)
+def load_dense_similarity_matrix(
+    index_dir: str,
+    *,
+    vector_indices: tuple[int, ...],
+) -> tuple[dict[str, Any], str | None]:
+    if np is None:
+        return {}, "numpy is not available for similarity inspection."
+    path = Path(index_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    embeddings_path = path / "embeddings.npy"
+    chunks_path = path / "chunks.jsonl"
+    if not embeddings_path.exists():
+        return {}, f"Embeddings file not found: {embeddings_path}"
+    if not chunks_path.exists():
+        return {}, f"Chunk file not found: {chunks_path}"
+
+    embeddings = np.load(embeddings_path)
+    chunk_records = load_chunk_records(str(chunks_path), max_chunks=max(int(embeddings.shape[0]), 1))[0]
+
+    valid_indices = [index for index in vector_indices if 0 <= int(index) < embeddings.shape[0]]
+    if not valid_indices:
+        return {}, "No valid vector indices were supplied."
+
+    selected = np.asarray(embeddings[valid_indices], dtype=np.float32)
+    similarities = selected @ selected.T
+
+    labels: dict[int, str] = {}
+    for index in valid_indices:
+        chunk = chunk_records[index] if index < len(chunk_records) else {}
+        labels[index] = (
+            f"{index} | p.{chunk.get('page_no', '-')}"
+            f" | {(chunk.get('heading_path') or ['-'])[-1]}"
+        )
+
+    rows: list[dict[str, Any]] = []
+    for source_offset, source_index in enumerate(valid_indices):
+        for target_offset, target_index in enumerate(valid_indices):
+            rows.append(
+                {
+                    "source": labels[source_index],
+                    "target": labels[target_index],
+                    "similarity": round(float(similarities[source_offset, target_offset]), 6),
+                }
+            )
+
+    return {"rows": rows, "labels": labels, "size": len(valid_indices)}, None
+
+
+@st.cache_data(show_spinner=False)
+def load_dense_projection(
+    index_dir: str,
+    *,
+    focus_indices: tuple[int, ...] = (),
+    max_points: int = 250,
+) -> tuple[list[dict[str, Any]], str | None]:
+    if np is None:
+        return [], "numpy is not available for projection inspection."
+    path = Path(index_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    embeddings_path = path / "embeddings.npy"
+    chunks_path = path / "chunks.jsonl"
+    if not embeddings_path.exists():
+        return [], f"Embeddings file not found: {embeddings_path}"
+    if not chunks_path.exists():
+        return [], f"Chunk file not found: {chunks_path}"
+
+    embeddings = np.load(embeddings_path)
+    total_vectors = int(embeddings.shape[0])
+    if total_vectors == 0:
+        return [], None
+
+    if total_vectors <= max_points:
+        sampled_indices = list(range(total_vectors))
+    else:
+        sampled_indices = np.linspace(0, total_vectors - 1, num=max_points, dtype=int).tolist()
+
+    for focus_index in focus_indices:
+        if 0 <= int(focus_index) < total_vectors:
+            sampled_indices.append(int(focus_index))
+
+    sampled_indices = sorted(set(sampled_indices))
+    sampled_embeddings = np.asarray(embeddings[sampled_indices], dtype=np.float32)
+    centered = sampled_embeddings - sampled_embeddings.mean(axis=0, keepdims=True)
+
+    if centered.shape[1] >= 2:
+        _, _, vt = np.linalg.svd(centered, full_matrices=False)
+        components = vt[:2]
+        coords = centered @ components.T
+    elif centered.shape[1] == 1:
+        coords = np.hstack([centered, np.zeros((centered.shape[0], 1), dtype=np.float32)])
+    else:
+        coords = np.zeros((centered.shape[0], 2), dtype=np.float32)
+
+    chunk_records = load_chunk_records(str(chunks_path), max_chunks=max(total_vectors, 1))[0]
+    focus_set = {int(index) for index in focus_indices}
+    points: list[dict[str, Any]] = []
+    for row_offset, vector_index in enumerate(sampled_indices):
+        chunk = chunk_records[vector_index] if vector_index < len(chunk_records) else {}
+        role = "focus" if vector_index in focus_set else "sample"
+        points.append(
+            {
+                "vector_index": int(vector_index),
+                "x": round(float(coords[row_offset, 0]), 6),
+                "y": round(float(coords[row_offset, 1]), 6),
+                "role": role,
+                "chunk_id": chunk.get("chunk_id"),
+                "page_no": chunk.get("page_no"),
+                "section_id": chunk.get("section_id"),
+                "heading": (chunk.get("heading_path") or ["-"])[-1],
+            }
+        )
+    return points, None
+
+
+@st.cache_data(show_spinner=False)
+def load_query_embedding_comparison(
+    index_dir: str,
+    *,
+    query_text: str,
+    compare_indices: tuple[int, ...],
+    dim_start: int = 0,
+    dim_count: int = 24,
+    top_k: int = 5,
+) -> tuple[dict[str, Any], str | None]:
+    if np is None:
+        return {}, "numpy is not available for query embedding inspection."
+    if not query_text.strip():
+        return {}, None
+
+    path = Path(index_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    metadata_path = path / "metadata.json"
+    chunks_path = path / "chunks.jsonl"
+    embeddings_path = path / "embeddings.npy"
+    if not metadata_path.exists():
+        return {}, f"Dense metadata not found: {metadata_path}"
+    if not chunks_path.exists():
+        return {}, f"Chunk file not found: {chunks_path}"
+    if not embeddings_path.exists():
+        return {}, f"Embeddings file not found: {embeddings_path}"
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if metadata.get("index_type") != "dense_transformers":
+        return {}, "Query embedding comparison requires a real transformers-based dense index."
+
+    from app.retrieval.dense import (
+        _encode_texts_with_transformers,
+        _search_dense_vectors,
+        load_dense_index_metadata,
+    )
+
+    dense_metadata = load_dense_index_metadata(path)
+    embeddings = np.load(embeddings_path)
+    chunk_records = load_chunk_records(str(chunks_path), max_chunks=max(int(embeddings.shape[0]), 1))[0]
+
+    query_vector = _encode_texts_with_transformers(
+        [query_text],
+        model_name=dense_metadata.get("model_name") or get_settings().embedding_model_name,
+    )[0]
+    scores, indices = _search_dense_vectors(
+        query_embedding=query_vector,
+        index_dir=path,
+        metadata=dense_metadata,
+        embeddings=embeddings,
+    )
+
+    total_dims = int(query_vector.shape[0]) if query_vector.ndim == 1 else 0
+    safe_start = max(0, min(int(dim_start), max(total_dims - 1, 0)))
+    safe_count = max(1, min(int(dim_count), max(total_dims - safe_start, 1)))
+    safe_end = min(safe_start + safe_count, total_dims)
+
+    compare_vectors: dict[int, np.ndarray] = {}
+    for vector_index in compare_indices:
+        if 0 <= int(vector_index) < embeddings.shape[0]:
+            compare_vectors[int(vector_index)] = np.asarray(embeddings[int(vector_index)], dtype=np.float32)
+
+    rows: list[dict[str, Any]] = []
+    for dim_index in range(safe_start, safe_end):
+        row = {
+            "dim": int(dim_index),
+            "query": round(float(query_vector[dim_index]), 6),
+        }
+        for vector_index, vector in compare_vectors.items():
+            row[f"chunk_{vector_index}"] = round(float(vector[dim_index]), 6)
+            row[f"delta_{vector_index}"] = round(float(query_vector[dim_index] - vector[dim_index]), 6)
+        rows.append(row)
+
+    nearest_hits: list[dict[str, Any]] = []
+    for similarity, vector_index in zip(scores.tolist()[:top_k], indices.tolist()[:top_k], strict=False):
+        if vector_index < 0 or vector_index >= len(chunk_records):
+            continue
+        chunk = chunk_records[vector_index]
+        nearest_hits.append(
+            {
+                "vector_index": int(vector_index),
+                "similarity": round(float(similarity), 6),
+                "chunk_id": chunk.get("chunk_id"),
+                "page_no": chunk.get("page_no"),
+                "section_id": chunk.get("section_id"),
+                "heading": (chunk.get("heading_path") or ["-"])[-1],
+                "text_preview": (chunk.get("original_text") or "")[:400],
+            }
+        )
+
+    return {
+        "stats": {
+            "dimension_count": total_dims,
+            "slice_start": safe_start,
+            "slice_end_exclusive": safe_end,
+            "norm": round(float(np.linalg.norm(query_vector)), 6),
+            "min": round(float(query_vector.min()), 6),
+            "max": round(float(query_vector.max()), 6),
+            "mean": round(float(query_vector.mean()), 6),
+            "std": round(float(query_vector.std()), 6),
+        },
+        "rows": rows,
+        "nearest_hits": nearest_hits,
+    }, None
+
+
+@st.cache_data(show_spinner=False)
 def load_parsed_pages(pdf_path: str) -> tuple[list[dict[str, Any]], str | None]:
     path = Path(pdf_path)
     if not path.is_absolute():
@@ -1273,6 +1558,184 @@ def render_dense_vector_inspector() -> None:
     if neighbor_error:
         st.warning(neighbor_error)
         return
+
+    st.markdown("**Embedding Value Browser**")
+    total_dims = int((embedding_matrix.get("shape") or [0, 0])[1]) if embedding_matrix.get("shape") else 0
+    browser_left, browser_mid, browser_right = st.columns([1, 1, 2])
+    with browser_left:
+        dim_start = st.number_input(
+            "Dimension Start",
+            min_value=0,
+            max_value=max(total_dims - 1, 0),
+            value=0,
+            step=1,
+            key=f"dense_dim_start::{index_dir}",
+        )
+    with browser_mid:
+        dim_count = st.number_input(
+            "Dimensions To Show",
+            min_value=4,
+            max_value=min(max(total_dims, 4), 256),
+            value=min(24, max(total_dims, 4)),
+            step=4,
+            key=f"dense_dim_count::{index_dir}",
+        )
+    with browser_right:
+        compare_neighbor_count = st.slider(
+            "Compare With Nearest Neighbors",
+            min_value=0,
+            max_value=min(3, max(len(neighbors) - 1, 0)),
+            value=min(2, max(len(neighbors) - 1, 0)),
+            step=1,
+            key=f"dense_neighbor_compare::{index_dir}",
+            help="Adds nearest-neighbor vector values beside the selected vector for the same dimensions.",
+        )
+
+    compare_indices = tuple(neighbor["vector_index"] for neighbor in neighbors[1 : 1 + compare_neighbor_count])
+    vector_slice_payload, vector_slice_error = load_dense_vector_slice(
+        index_dir,
+        vector_index=selected_index,
+        dim_start=int(dim_start),
+        dim_count=int(dim_count),
+        compare_indices=compare_indices,
+    )
+    if vector_slice_error:
+        st.warning(vector_slice_error)
+        return
+
+    st.caption("The table below shows actual stored embedding values for the selected vector slice.")
+    st.json(vector_slice_payload.get("stats", {}))
+    st.dataframe(vector_slice_payload.get("rows", []), use_container_width=True, hide_index=True)
+
+    matrix_indices = (selected_index,) + tuple(neighbor["vector_index"] for neighbor in neighbors[1:4])
+    similarity_matrix_payload, similarity_matrix_error = load_dense_similarity_matrix(
+        index_dir,
+        vector_indices=matrix_indices,
+    )
+    if similarity_matrix_error:
+        st.warning(similarity_matrix_error)
+    elif similarity_matrix_payload:
+        st.markdown("**Cosine Similarity Matrix**")
+        st.caption("A heatmap-like view of cosine similarity between the selected vector and its nearest neighbors.")
+        st.vega_lite_chart(
+            {
+                "data": {"values": similarity_matrix_payload.get("rows", [])},
+                "mark": {"type": "rect"},
+                "encoding": {
+                    "x": {"field": "source", "type": "nominal", "title": "Source Vector"},
+                    "y": {"field": "target", "type": "nominal", "title": "Target Vector"},
+                    "color": {
+                        "field": "similarity",
+                        "type": "quantitative",
+                        "scale": {"scheme": "blues"},
+                        "title": "Cosine Similarity",
+                    },
+                    "tooltip": [
+                        {"field": "source", "type": "nominal"},
+                        {"field": "target", "type": "nominal"},
+                        {"field": "similarity", "type": "quantitative", "format": ".6f"},
+                    ],
+                },
+                "width": "container",
+                "height": 260,
+            },
+            use_container_width=True,
+        )
+
+    projection_point_count = st.slider(
+        "Projection Sample Size",
+        min_value=50,
+        max_value=500,
+        value=200,
+        step=25,
+        key=f"dense_projection_points::{index_dir}",
+        help="Projects a sample of chunk embeddings into 2D using PCA for visual inspection.",
+    )
+    projection_points, projection_error = load_dense_projection(
+        index_dir,
+        focus_indices=matrix_indices,
+        max_points=int(projection_point_count),
+    )
+    if projection_error:
+        st.warning(projection_error)
+    elif projection_points:
+        st.markdown("**2D Embedding Projection**")
+        st.caption("This PCA projection helps show where the selected chunk sits relative to the sampled dense vector space.")
+        st.vega_lite_chart(
+            {
+                "data": {"values": projection_points},
+                "mark": {"type": "circle", "filled": True, "size": 80},
+                "encoding": {
+                    "x": {"field": "x", "type": "quantitative", "title": "PCA-1"},
+                    "y": {"field": "y", "type": "quantitative", "title": "PCA-2"},
+                    "color": {
+                        "field": "role",
+                        "type": "nominal",
+                        "scale": {"domain": ["sample", "focus"], "range": ["#4b83d1", "#d14b6c"]},
+                        "title": "Role",
+                    },
+                    "tooltip": [
+                        {"field": "vector_index", "type": "quantitative"},
+                        {"field": "chunk_id", "type": "nominal"},
+                        {"field": "page_no", "type": "quantitative"},
+                        {"field": "section_id", "type": "nominal"},
+                        {"field": "heading", "type": "nominal"},
+                    ],
+                },
+                "width": "container",
+                "height": 320,
+            },
+            use_container_width=True,
+        )
+
+    st.markdown("**Query Embedding Comparison**")
+    st.caption("Encode a query with the same dense model and compare its embedding against the selected chunk and neighbors.")
+    query_text = st.text_area(
+        "Query Text For Dense Embedding Comparison",
+        value="What are the income tax authorities under section 4?",
+        height=80,
+        key=f"dense_query_compare::{index_dir}",
+    )
+    query_compare_k = st.slider(
+        "Query Nearest Hits",
+        min_value=1,
+        max_value=10,
+        value=5,
+        step=1,
+        key=f"dense_query_compare_k::{index_dir}",
+    )
+    query_comparison_payload, query_comparison_error = load_query_embedding_comparison(
+        index_dir,
+        query_text=query_text,
+        compare_indices=matrix_indices,
+        dim_start=int(dim_start),
+        dim_count=int(dim_count),
+        top_k=int(query_compare_k),
+    )
+    if query_comparison_error:
+        st.warning(query_comparison_error)
+    elif query_comparison_payload:
+        query_left, query_right = st.columns([2, 3])
+        with query_left:
+            st.markdown("**Query Embedding Stats**")
+            st.json(query_comparison_payload.get("stats", {}))
+        with query_right:
+            st.markdown("**Query Embedding Slice**")
+            st.dataframe(query_comparison_payload.get("rows", []), use_container_width=True, hide_index=True)
+
+        st.markdown("**Nearest Chunks For Query Embedding**")
+        for nearest_hit in query_comparison_payload.get("nearest_hits", []):
+            with st.container(border=True):
+                st.caption(
+                    f"vector {nearest_hit['vector_index']} | sim={nearest_hit['similarity']:.4f} | "
+                    f"{nearest_hit.get('chunk_id', 'unknown-chunk')}"
+                )
+                st.write(
+                    f"page={nearest_hit.get('page_no', '-')} | "
+                    f"section={nearest_hit.get('section_id', '-')}"
+                )
+                st.write(nearest_hit.get("heading", "-"))
+                st.code(nearest_hit.get("text_preview") or "", language="text")
 
     st.markdown("**Nearest Neighbor Vectors**")
     for neighbor in neighbors:

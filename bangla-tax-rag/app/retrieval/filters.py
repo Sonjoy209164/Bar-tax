@@ -36,14 +36,30 @@ def chunk_quality_score(text: str) -> float:
     stripped_text = text.strip()
     if not stripped_text:
         return 0.0
+    lines = [line.strip() for line in stripped_text.splitlines() if line.strip()]
+    word_count = len(re.findall(r"\b[\w\u0980-\u09ff]+\b", stripped_text))
     bangla_char_count = len(re.findall(r"[\u0980-\u09ff]", stripped_text))
+    latin_char_count = len(re.findall(r"[A-Za-z]", stripped_text))
     digit_count = sum(character.isdigit() for character in stripped_text)
     alpha_count = sum(character.isalpha() for character in stripped_text)
-    length_score = min(len(stripped_text) / 120.0, 1.0)
-    bangla_score = min(bangla_char_count / 25.0, 1.0)
+    length_score = min(len(stripped_text) / 180.0, 1.0)
+    alpha_density = alpha_count / max(len(stripped_text), 1)
+    alpha_score = min(alpha_density / 0.45, 1.0)
+    lexical_score = min(word_count / 28.0, 1.0)
+    script_presence_score = 1.0 if max(bangla_char_count, latin_char_count) >= 18 else min((bangla_char_count + latin_char_count) / 18.0, 1.0)
     digit_penalty = min(digit_count / max(len(stripped_text), 1), 1.0)
-    alpha_score = min(alpha_count / max(len(stripped_text), 1), 1.0)
-    score = (length_score * 0.35) + (bangla_score * 0.45) + (alpha_score * 0.35) - (digit_penalty * 0.35)
+    structural_line_count = sum(
+        1 for line in lines if re.fullmatch(r"[0-9 .:/()%\-|]+", line)
+    )
+    structural_penalty = structural_line_count / max(len(lines), 1)
+    score = (
+        (length_score * 0.25)
+        + (alpha_score * 0.35)
+        + (lexical_score * 0.2)
+        + (script_presence_score * 0.25)
+        - (digit_penalty * 0.2)
+        - (structural_penalty * 0.35)
+    )
     if re.fullmatch(r"[0-9 .:/()%\-]+", stripped_text):
         score -= 0.7
     return max(0.0, min(1.0, score))
@@ -244,6 +260,25 @@ def hit_supports_list(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
     )
 
 
+def hit_supports_comparison(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
+    searchable_text = _build_searchable_text(hit)
+    normalized_query = normalize_text(analyzed_query.original_query or analyzed_query.normalized_query).lower()
+    if not _satisfies_query_phrase_constraints(hit, analyzed_query):
+        return False
+    if "tax day" in normalized_query and not hit_has_date_language(hit):
+        return False
+    informative_overlap = _informative_overlap_count(hit, analyzed_query)
+    comparison_focus_phrases = [
+        "company",
+        "other than a company",
+        "assessee",
+        "startup",
+        "dividend",
+    ]
+    focus_match = any(phrase in normalized_query and phrase in searchable_text for phrase in comparison_focus_phrases)
+    return informative_overlap > 0 or focus_match
+
+
 def hit_supports_eligibility(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
     searchable_text = _build_searchable_text(hit)
     normalized_query = normalize_text(analyzed_query.original_query or analyzed_query.normalized_query).lower()
@@ -321,6 +356,8 @@ def hit_supports_query(hit: RetrievalHit, analyzed_query: QuerySignals) -> bool:
         return hit_supports_date(hit, analyzed_query)
     if analyzed_query.query_intent == "list_lookup":
         return hit_supports_list(hit, analyzed_query)
+    if analyzed_query.query_intent == "comparison":
+        return hit_supports_comparison(hit, analyzed_query)
     if analyzed_query.subsection_id:
         if hit.subsection_id == analyzed_query.subsection_id:
             return has_rate_language if is_rate_lookup else True
@@ -369,6 +406,10 @@ def filter_supportive_hits(hits: list[RetrievalHit], analyzed_query: QuerySignal
         list_hits = [hit for hit in hits if hit_supports_list(hit, analyzed_query)]
         if list_hits:
             return list_hits
+    if analyzed_query.query_intent == "comparison":
+        comparison_hits = [hit for hit in hits if hit_supports_comparison(hit, analyzed_query)]
+        if comparison_hits:
+            return comparison_hits
     if not analyzed_query.section_id and not analyzed_query.subsection_id:
         return hits
     supportive_hits = [hit for hit in hits if hit_supports_query(hit, analyzed_query)]

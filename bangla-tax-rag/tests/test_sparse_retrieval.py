@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from app.core.schemas import ChunkRecord
-from app.core.utils import preprocess_query
-from app.retrieval.filters import authority_value, filter_chunk_records
+from app.core.utils import preprocess_query, select_primary_section_markers
+from app.retrieval.filters import authority_value, chunk_quality_score, filter_chunk_records
 from app.retrieval.sparse import (
     apply_score_boosts,
     build_sparse_index,
@@ -138,6 +138,17 @@ def test_threshold_question_is_amount_lookup() -> None:
     assert "threshold" in (signals.rewritten_query or "")
 
 
+def test_section_marker_selection_prefers_heading_for_list_continuations_with_footnotes() -> None:
+    section_id, subsection_id = select_primary_section_markers(
+        "(k) Deputy Commissioners of Taxes;\n1 The words ... by section 16(a) of the Finance Act, 2024.",
+        heading_path=["TAX ADMINISTRATION", "4. Income tax authorities.—For the purposes of this Act"],
+        page_section_markers=["4", "16"],
+    )
+
+    assert section_id == "4"
+    assert subsection_id is None
+
+
 def test_tax_day_question_is_date_lookup() -> None:
     signals = preprocess_query("What is the Tax Day for a company?")
 
@@ -159,10 +170,26 @@ def test_how_many_years_question_prefers_duration_lookup() -> None:
     assert signals.query_intent == "duration_lookup"
 
 
+def test_compare_question_is_detected_as_comparison() -> None:
+    signals = preprocess_query("Compare the Tax Day for a company and for an assessee other than a company.")
+
+    assert signals.query_type == "comparison"
+    assert signals.query_intent == "comparison"
+
+
 def test_filtering_by_tax_year() -> None:
     filtered = filter_chunk_records(_dataset(), tax_year="2025-2026")
 
     assert {chunk.chunk_id for chunk in filtered} == {"c1", "c3"}
+
+
+def test_chunk_quality_score_treats_english_legal_text_as_substantive() -> None:
+    text = (
+        "4. Income tax authorities.—For the purposes of this Act, there shall be the following classes "
+        "of income tax authorities, namely: (a) The National Board of Revenue; (b) Chief Commissioner of Taxes."
+    )
+
+    assert chunk_quality_score(text) >= 0.3
 
 
 def test_section_match_boost_and_authority_boost() -> None:
@@ -281,6 +308,48 @@ def test_sparse_retrieval_prefers_amount_threshold_chunk() -> None:
 
     assert response.hits
     assert response.hits[0].chunk_id == "threshold"
+
+
+def test_field_aware_sparse_index_prefers_exact_section_chunk_over_incidental_reference() -> None:
+    dataset = [
+        _chunk(
+            chunk_id="exact-section",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=24,
+            section_id="4",
+            subsection_id=None,
+            chunk_type="section",
+            heading_path=["4. Income tax authorities"],
+            normalized_text="There shall be the following classes of income tax authorities, namely.",
+        ),
+        _chunk(
+            chunk_id="incidental-reference",
+            doc_id="act-2023",
+            doc_title="Income Tax Act 2023",
+            authority_level="national",
+            tax_year=None,
+            page_no=207,
+            section_id="295",
+            subsection_id=None,
+            chunk_type="section",
+            heading_path=["295. Appeal to the Appellate Division"],
+            normalized_text="A Commissioner of Taxes from among the income tax authorities under section 4 may represent in the Alternative Dispute Resolution process.",
+        ),
+    ]
+
+    response = search_sparse_index(
+        query="What are the income tax authorities under section 4?",
+        index=build_sparse_index(dataset),
+        top_k=2,
+    )
+
+    assert response.hits
+    assert response.hits[0].chunk_id == "exact-section"
+    assert response.hits[0].intermediate_scores["field_heading_score"] >= 0
+    assert "field_structure_score" in response.hits[0].intermediate_scores
 
 
 def test_sparse_retrieval_prefers_labour_status_chunk_for_personal_tax_question() -> None:

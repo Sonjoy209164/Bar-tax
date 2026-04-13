@@ -1,0 +1,1 @@
+nohup .venv/bin/streamlit run app/ui/streamlit_app.py --server.port 4839 --server.address 0.0.0.0 > /tmp/bangla-tax-rag-streamlit.log 2>&1 &

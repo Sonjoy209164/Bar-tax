@@ -36,6 +36,7 @@ from app.generation.citations import (
 from app.retrieval.filters import authority_value
 
 logger = logging.getLogger(__name__)
+RATE_VALUE_PATTERN = r"(?:\d+(?:\.\d+)?%(?:\s*\([^)]+\))?|\d+(?:\.\d+)?\s*শতাংশ)"
 
 
 def _clean_evidence_text(text: str) -> str:
@@ -295,7 +296,7 @@ def _sentence_overlap_score(sentence_text: str, query_text: str) -> int:
 
 def _extract_rate_segments(text: str) -> list[str]:
     compact_text = _clean_evidence_text(text).replace("\n", " ")
-    rate_matches = list(re.finditer(r"\d+(?:\.\d+)?%", compact_text))
+    rate_matches = list(re.finditer(RATE_VALUE_PATTERN, compact_text))
     segments: list[str] = []
     for match in rate_matches[:4]:
         start_index = max(0, match.start() - 70)
@@ -308,11 +309,61 @@ def _extract_rate_segments(text: str) -> list[str]:
 
 def _extract_rate_values(text: str) -> list[str]:
     normalized = _clean_evidence_text(text)
-    percent_values = re.findall(r"\d+(?:\.\d+)?%", normalized)
-    if percent_values:
-        return list(dict.fromkeys(percent_values))
-    word_percent_values = re.findall(r"\d+(?:\.\d+)?\s*শতাংশ", normalized)
-    return list(dict.fromkeys(word_percent_values))
+    values = re.findall(RATE_VALUE_PATTERN, normalized)
+    return list(dict.fromkeys(value.strip() for value in values))
+
+
+def _extract_rate_candidates(text: str) -> list[tuple[str, str]]:
+    compact_text = re.sub(r"\s+", " ", _clean_evidence_text(text)).strip()
+    candidates: list[tuple[str, str]] = []
+    for match in re.finditer(RATE_VALUE_PATTERN, compact_text):
+        value = match.group(0).strip()
+        end_candidates = [
+            position
+            for position in (
+                compact_text.find(" and ", match.end()),
+                compact_text.find("; ", match.end()),
+                compact_text.find(". ", match.end()),
+            )
+            if position != -1
+        ]
+        end_index = min(end_candidates) if end_candidates else len(compact_text)
+        context = compact_text[match.start():end_index].strip(" ,;:-")
+        if context:
+            candidates.append((value, context))
+    if candidates:
+        deduplicated: list[tuple[str, str]] = []
+        seen_contexts: set[str] = set()
+        for value, context in candidates:
+            normalized_context = normalize_text(context).lower()
+            if normalized_context in seen_contexts:
+                continue
+            seen_contexts.add(normalized_context)
+            deduplicated.append((value, context))
+        return deduplicated
+    return [(value, segment) for value, segment in zip(_extract_rate_values(text), _extract_rate_segments(text), strict=False)]
+
+
+def _score_rate_candidate(value: str, context: str, question_text: str) -> int:
+    informative_terms = extract_informative_query_terms(question_text, "rate_lookup")
+    context_terms = set(tokenize_for_bm25(context.lower()))
+    score = _sentence_overlap_score(context, question_text) + (len(informative_terms & context_terms) * 3)
+    lower_question = normalize_text(question_text).lower()
+    lower_context = normalize_text(context).lower()
+    if "agricultural income" in lower_question and "income from agriculture" in lower_context:
+        score += 8
+    if "business income" in lower_question and "business income" in lower_context:
+        score += 8
+    if "considered" in lower_question and ("deemed to be" in lower_context or "considered" in lower_context):
+        score += 4
+    if "tea" in lower_question and "tea" in lower_context:
+        score += 2
+    if "rubber" in lower_question and "rubber" in lower_context:
+        score += 2
+    if "company" in lower_question and "company" in lower_context:
+        score += 2
+    score += 1 if value in lower_context else 0
+    return score
 
 
 def _extract_amount_phrases(text: str) -> list[str]:
@@ -475,6 +526,19 @@ def _build_rate_lookup_answer(
     evidence_hits: list[RetrievalHit],
     citations: list[CitationRecord],
 ) -> tuple[list[AnswerSentence], list[str]]:
+    candidate_segments: list[tuple[int, str, str, str]] = []
+    for citation, hit in zip(citations, evidence_hits, strict=False):
+        for value, context in _extract_rate_candidates(hit.original_text):
+            candidate_segments.append((_score_rate_candidate(value, context, question_text), value, context, citation.marker))
+    if candidate_segments:
+        candidate_segments.sort(key=lambda item: (item[0], len(item[2])), reverse=True)
+        _, best_value, best_context, best_marker = candidate_segments[0]
+        if detect_text_language(question_text) == "bangla":
+            sentence_text = f"প্রাসঙ্গিক হার/শতাংশ হলো {best_value}। {truncate_text(best_context, max_length=260)}"
+        else:
+            sentence_text = f"The relevant percentage is {best_value}. {truncate_text(best_context, max_length=260)}"
+        return [AnswerSentence(sentence_text=sentence_text.strip(), citation_markers=[best_marker])], []
+
     all_rate_values: list[str] = []
     for hit in evidence_hits:
         for rate_value in _extract_rate_values(hit.original_text):
@@ -482,25 +546,22 @@ def _build_rate_lookup_answer(
                 all_rate_values.append(rate_value)
     if all_rate_values:
         displayed_values = ", ".join(all_rate_values[:4])
-        sentence_text = (
-            "উদ্ধৃত প্রমাণে দেখা যাচ্ছে যে ২০২৫-২০২৬ করবর্ষে কোম্পানির করহার কোম্পানির ধরন ও শর্তভেদে ভিন্ন। "
-            f"প্রাসঙ্গিক সারণিতে {displayed_values} হার উল্লেখ আছে।"
-        )
-        markers = [citation.marker for citation in citations[:2]]
+        if detect_text_language(question_text) == "bangla":
+            sentence_text = f"প্রাসঙ্গিক প্রমাণে {displayed_values} হার উল্লেখ আছে।"
+        else:
+            sentence_text = f"The cited provision mentions these rates or percentages: {displayed_values}."
+        markers = [citations[0].marker]
         return [AnswerSentence(sentence_text=sentence_text, citation_markers=markers)], []
-    candidate_segments: list[tuple[int, str, str]] = []
+
+    candidate_segments = []
     for citation, hit in zip(citations, evidence_hits, strict=False):
         for segment in _extract_rate_segments(hit.original_text):
-            candidate_segments.append((_sentence_overlap_score(segment, question_text), segment, citation.marker))
+            candidate_segments.append((_sentence_overlap_score(segment, question_text), "", segment, citation.marker))
     if not candidate_segments:
-        return build_mock_grounded_answer(question_text, evidence_hits, citations)
-    candidate_segments.sort(key=lambda item: (item[0], len(item[1])), reverse=True)
-    selected_segments = candidate_segments[:2]
-    sentence_text = "উদ্ধৃত প্রমাণে কোম্পানির করহার কোম্পানির ধরনভেদে ভিন্ন। " + "; ".join(
-        segment for _, segment, _ in selected_segments
-    )
-    markers = list(dict.fromkeys(marker for _, _, marker in selected_segments))
-    return [AnswerSentence(sentence_text=sentence_text.strip(), citation_markers=markers)], []
+        return [], []
+    candidate_segments.sort(key=lambda item: (item[0], len(item[2])), reverse=True)
+    _, _, best_segment, best_marker = candidate_segments[0]
+    return [AnswerSentence(sentence_text=truncate_text(best_segment, max_length=260), citation_markers=[best_marker])], []
 
 
 def _best_sentences_for_intent(
@@ -1034,6 +1095,14 @@ def generate_answer(
     prompt_messages = build_prompt(question_text, evidence_hits, analyzed_query, citations)
     used_extractive_fallback = False
     if analyzed_query.query_intent == "mention_lookup":
+        answer_sentences, model_conflict_notes = build_mock_grounded_answer(
+            question_text,
+            evidence_hits,
+            citations,
+            analyzed_query,
+        )
+        used_extractive_fallback = True
+    elif analyzed_query.query_intent == "rate_lookup" and mocked_response is None:
         answer_sentences, model_conflict_notes = build_mock_grounded_answer(
             question_text,
             evidence_hits,

@@ -5,7 +5,15 @@ from app.reasoning.agent_graph import (
     ReasoningGraphDependencies,
     build_agent_graph,
 )
+from app.reasoning.answer_policy import AnswerPolicyDecision, GuardrailedAnswerPolicy, apply_answer_policy
 from app.reasoning.evidence_builder import AgentEvidenceBuildResult, AgentEvidenceBuilder, apply_evidence_build_result, build_agent_evidence
+from app.reasoning.nli_guardrail import (
+    REFUSAL_TEXT,
+    DeterministicNliGuardrail,
+    GuardrailClaimResult,
+    GuardrailVerificationResult,
+    verify_draft_answer,
+)
 from app.reasoning.nodes_compose import run_compose_node
 from app.reasoning.nodes_planner import run_planner_node
 from app.reasoning.nodes_reason import run_reason_node
@@ -19,13 +27,20 @@ __all__ = [
     "AgentEvidenceBuildResult",
     "AgentEvidenceBuilder",
     "AgenticReasoningGraph",
+    "AnswerPolicyDecision",
+    "DeterministicNliGuardrail",
+    "GuardrailClaimResult",
+    "GuardrailVerificationResult",
+    "GuardrailedAnswerPolicy",
     "LANGGRAPH_AVAILABLE",
     "QueryPlanStep",
+    "REFUSAL_TEXT",
     "ReasoningGraphConfig",
     "ReasoningGraphDependencies",
     "RetrievalAttempt",
     "RouterDecision",
     "VerificationFailure",
+    "apply_answer_policy",
     "apply_evidence_build_result",
     "build_agent_evidence",
     "build_agent_graph",
@@ -36,4 +51,5 @@ __all__ = [
     "run_retrieve_node",
     "run_router_node",
     "run_verify_node",
+    "verify_draft_answer",
 ]

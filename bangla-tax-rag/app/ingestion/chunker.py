@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from itertools import count
 from typing import Any, Literal
 
@@ -512,6 +514,19 @@ def _next_chunk_id(document_id: str, scope: str, counter: count[int]) -> str:
 
 def estimate_token_count(text: str) -> int:
     return len(TOKEN_PATTERN.findall(text))
+
+
+def load_legal_chunks(jsonl_path: str | Path) -> list[LegalChunk]:
+    path = Path(jsonl_path)
+    chunks: list[LegalChunk] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            payload = json.loads(stripped)
+            chunks.append(LegalChunk.model_validate(payload))
+    return chunks
 
 
 def _unique_preserve_order(values: list[str | None]) -> list[str]:

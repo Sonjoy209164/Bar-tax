@@ -153,6 +153,10 @@ def _coerce_state(
     max_reasoning_steps: int | None,
 ) -> AgentState:
     if isinstance(state_or_question, AgentState):
+        if query_type is not None:
+            canonical_type = canonicalize_query_type(query_type)
+            state_or_question.query_type = canonical_type
+            state_or_question.execution_path = infer_execution_path(canonical_type)
         if max_reasoning_steps is not None:
             state_or_question.max_reasoning_steps = max_reasoning_steps
         return state_or_question

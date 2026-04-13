@@ -287,38 +287,38 @@ This file is meant to be used as our implementation board:
 
 ## Phase 19: Guardrails
 
-- [ ] Create `app/reasoning/nli_guardrail.py`
-- [ ] Create `app/reasoning/answer_policy.py`
-- [ ] Verify every factual claim against evidence.
-- [ ] Remove unsupported claims.
-- [ ] Replace unsupported claims with:
-- [ ] `Information not found in retrieved evidence`
-- [ ] Add deterministic validators for:
-- [ ] section numbers
-- [ ] rates
-- [ ] dates
-- [ ] thresholds
-- [ ] table values
-- [ ] Add guardrail tests.
+- [x] Create `app/reasoning/nli_guardrail.py`
+- [x] Create `app/reasoning/answer_policy.py`
+- [x] Verify every factual claim against evidence.
+- [x] Remove unsupported claims.
+- [x] Replace unsupported claims with:
+- [x] `Information not found in retrieved evidence`
+- [x] Add deterministic validators for:
+- [x] section numbers
+- [x] rates
+- [x] dates
+- [x] thresholds
+- [x] table values
+- [x] Add guardrail tests.
 
 ## Phase 20: Prompts
 
-- [ ] Create `app/core/prompts.py`
-- [ ] Add planner prompt.
-- [ ] Add query-transformer prompt.
-- [ ] Add reasoner prompt.
-- [ ] Add verifier prompt.
-- [ ] Add composer prompt.
-- [ ] Keep all prompts editable and versionable.
+- [x] Create `app/core/prompts.py`
+- [x] Add planner prompt.
+- [x] Add query-transformer prompt.
+- [x] Add reasoner prompt.
+- [x] Add verifier prompt.
+- [x] Add composer prompt.
+- [x] Keep all prompts editable and versionable.
 
 ## Phase 21: Services
 
-- [ ] Create `app/services/ingest_service.py`
-- [ ] Create `app/services/query_service.py`
-- [ ] Create `app/services/citation_service.py`
-- [ ] Create `app/services/evaluation_service.py`
-- [ ] Move orchestration out of routes and into services.
-- [ ] Add service-layer tests.
+- [x] Create `app/services/ingest_service.py`
+- [x] Create `app/services/query_service.py`
+- [x] Create `app/services/citation_service.py`
+- [x] Create `app/services/evaluation_service.py`
+- [x] Move orchestration out of routes and into services.
+- [x] Add service-layer tests.
 
 ## Phase 22: API
 

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 from app.domain import CitationRelation, EvidenceItem, QueryType, canonicalize_query_type
 from app.ingestion.chunker import ChunkingArtifacts, LegalChunk
 from app.ingestion.parent_child_linker import LinkedLegalDocument
-from app.reasoning import QueryPlanStep
+from app.reasoning.state import QueryPlanStep
 from app.retrieval.bm25_index import BM25Index, BM25SearchRequest, build_bm25_index
 from app.retrieval.embedder import TextEmbedder
 from app.retrieval.graph_expander import GraphExpander, GraphExpansionConfig

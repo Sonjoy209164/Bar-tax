@@ -265,25 +265,25 @@ This file is meant to be used as our implementation board:
 
 ## Phase 18: Reasoning Graph
 
-- [ ] Create `app/reasoning/agent_graph.py`
-- [ ] Create `app/reasoning/nodes_router.py`
-- [ ] Create `app/reasoning/nodes_planner.py`
-- [ ] Create `app/reasoning/nodes_retrieve.py`
-- [ ] Create `app/reasoning/nodes_reason.py`
-- [ ] Create `app/reasoning/nodes_verify.py`
-- [ ] Create `app/reasoning/nodes_compose.py`
-- [ ] Create `app/reasoning/evidence_builder.py`
-- [ ] Create a bounded LangGraph loop:
-- [ ] Router
-- [ ] Planner
-- [ ] Retrieve
-- [ ] Reason
-- [ ] Gap-check
-- [ ] Retrieve-again if needed
-- [ ] Verify
-- [ ] Compose
-- [ ] Enforce max reasoning steps.
-- [ ] Add reasoning-flow tests.
+- [x] Create `app/reasoning/agent_graph.py`
+- [x] Create `app/reasoning/nodes_router.py`
+- [x] Create `app/reasoning/nodes_planner.py`
+- [x] Create `app/reasoning/nodes_retrieve.py`
+- [x] Create `app/reasoning/nodes_reason.py`
+- [x] Create `app/reasoning/nodes_verify.py`
+- [x] Create `app/reasoning/nodes_compose.py`
+- [x] Create `app/reasoning/evidence_builder.py`
+- [x] Create a bounded LangGraph loop:
+- [x] Router
+- [x] Planner
+- [x] Retrieve
+- [x] Reason
+- [x] Gap-check
+- [x] Retrieve-again if needed
+- [x] Verify
+- [x] Compose
+- [x] Enforce max reasoning steps.
+- [x] Add reasoning-flow tests.
 
 ## Phase 19: Guardrails
 

@@ -14,7 +14,7 @@ from app.core.utils import (
     rewrite_query,
 )
 from app.domain import QueryExecutionPath, QueryType, build_query_taxonomy_decision, canonicalize_query_type
-from app.reasoning import QueryPlanStep
+from app.reasoning.state import QueryPlanStep
 
 SCENARIO_MARKERS = (
     " if ",

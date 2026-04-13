@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
@@ -74,6 +74,12 @@ class AgentState(BaseModel):
     verification_failures: list[VerificationFailure] = Field(default_factory=list)
     reasoning_summary: list[str] = Field(default_factory=list)
     citations: list[LegalCitation] = Field(default_factory=list)
+    latest_evidence_pack_type: str | None = None
+    latest_missing_coverage: list[str] = Field(default_factory=list)
+    latest_candidate_chunk_ids: list[str] = Field(default_factory=list)
+    latest_selected_evidence_ids: list[str] = Field(default_factory=list)
+    latest_pack_notes: list[str] = Field(default_factory=list)
+    trace_metadata: dict[str, Any] = Field(default_factory=dict)
     completed_nodes: list[str] = Field(default_factory=list)
     needs_more_retrieval: bool = False
     draft_answer: str | None = None

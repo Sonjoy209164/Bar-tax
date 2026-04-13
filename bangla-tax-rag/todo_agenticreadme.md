@@ -206,11 +206,11 @@ This file is meant to be used as our implementation board:
 
 ## Phase 12: BM25 Layer
 
-- [ ] Create `app/retrieval/bm25_index.py`
-- [ ] Build BM25 over child chunks.
-- [ ] Support field-aware lexical retrieval.
-- [ ] Preserve section-aware weighting.
-- [ ] Add BM25 tests.
+- [x] Create `app/retrieval/bm25_index.py`
+- [x] Build BM25 over child chunks.
+- [x] Support field-aware lexical retrieval.
+- [x] Preserve section-aware weighting.
+- [x] Add BM25 tests.
 
 ## Phase 13: Query Transformation
 

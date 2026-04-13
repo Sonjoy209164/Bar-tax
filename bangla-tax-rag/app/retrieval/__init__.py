@@ -1,3 +1,14 @@
+from app.retrieval.bm25_index import (
+    BM25Index,
+    BM25IndexConfig,
+    BM25IndexStats,
+    BM25SearchMatch,
+    BM25SearchRequest,
+    BM25SearchResult,
+    build_bm25_index,
+    load_bm25_index,
+    save_bm25_index,
+)
 from app.retrieval.embedder import (
     DEFAULT_OPENAI_BASE_URL,
     DeterministicTextEmbedder,
@@ -28,6 +39,12 @@ from app.retrieval.vector_store_base import (
 
 __all__ = [
     "DEFAULT_OPENAI_BASE_URL",
+    "BM25Index",
+    "BM25IndexConfig",
+    "BM25IndexStats",
+    "BM25SearchMatch",
+    "BM25SearchRequest",
+    "BM25SearchResult",
     "DeterministicTextEmbedder",
     "EmbedderConfig",
     "EmbeddingBatch",
@@ -37,6 +54,7 @@ __all__ = [
     "TextEmbedder",
     "TransformersTextEmbedder",
     "MilvusVectorStore",
+    "build_bm25_index",
     "VectorRecord",
     "VectorSearchMatch",
     "VectorSearchResult",
@@ -49,5 +67,7 @@ __all__ = [
     "embed_query",
     "embed_texts",
     "embedder_config_from_settings",
+    "load_bm25_index",
+    "save_bm25_index",
     "vector_store_config_from_settings",
 ]

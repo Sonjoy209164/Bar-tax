@@ -1,3 +1,14 @@
+from app.ingestion.document_store import (
+    DocumentStoreManifest,
+    DocumentStoreSnapshot,
+    load_linked_document,
+    load_links_from_jsonl,
+    load_nodes_from_jsonl,
+    load_store_manifest,
+    load_structured_document,
+    persist_linked_document,
+    persist_structured_document,
+)
 from app.ingestion.fallback_parser import FallbackDocumentParser
 from app.ingestion.metadata_tagger import LegalNodeMetadata, tag_legal_metadata, validate_tagged_document
 from app.ingestion.llamaparse_parser import LlamaParseDocumentParser
@@ -18,6 +29,8 @@ from app.ingestion.structure_builder import StructuredLegalDocument, build_legal
 
 __all__ = [
     "DocumentParser",
+    "DocumentStoreManifest",
+    "DocumentStoreSnapshot",
     "FallbackDocumentParser",
     "LegalNodeMetadata",
     "LegalNodeLink",
@@ -29,7 +42,14 @@ __all__ = [
     "build_legal_structure",
     "build_parsed_page_from_text",
     "build_parser",
+    "load_linked_document",
+    "load_links_from_jsonl",
+    "load_nodes_from_jsonl",
+    "load_store_manifest",
+    "load_structured_document",
     "link_parent_child_relationships",
+    "persist_linked_document",
+    "persist_structured_document",
     "tag_legal_metadata",
     "validate_linked_document",
     "validate_tagged_document",

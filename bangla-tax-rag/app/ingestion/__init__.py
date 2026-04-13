@@ -1,3 +1,4 @@
+from app.ingestion.chunker import ChunkingArtifacts, ChunkingConfig, LegalChunk, build_legal_chunks, estimate_token_count
 from app.ingestion.document_store import (
     DocumentStoreManifest,
     DocumentStoreSnapshot,
@@ -28,20 +29,25 @@ from app.ingestion.parser_base import (
 from app.ingestion.structure_builder import StructuredLegalDocument, build_legal_structure
 
 __all__ = [
+    "ChunkingArtifacts",
+    "ChunkingConfig",
     "DocumentParser",
     "DocumentStoreManifest",
     "DocumentStoreSnapshot",
     "FallbackDocumentParser",
     "LegalNodeMetadata",
     "LegalNodeLink",
+    "LegalChunk",
     "LinkedLegalDocument",
     "LlamaParseDocumentParser",
     "ParsedDocument",
     "ParserCapabilities",
     "StructuredLegalDocument",
     "build_legal_structure",
+    "build_legal_chunks",
     "build_parsed_page_from_text",
     "build_parser",
+    "estimate_token_count",
     "load_linked_document",
     "load_links_from_jsonl",
     "load_nodes_from_jsonl",

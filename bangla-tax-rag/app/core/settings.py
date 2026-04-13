@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     verification_enabled: bool = Field(default=True, alias="VERIFICATION_ENABLED")
     embedding_provider: str = Field(default="transformers", alias="EMBEDDING_PROVIDER")
     embedding_model_name: str = Field(default="BAAI/bge-m3", alias="EMBEDDING_MODEL_NAME")
+    embedding_base_url: str | None = Field(default=None, alias="EMBEDDING_BASE_URL")
+    embedding_api_key: str | None = Field(default=None, alias="EMBEDDING_API_KEY")
+    embedding_dimensions: int | None = Field(default=None, alias="EMBEDDING_DIMENSIONS")
+    vector_db: str = Field(default="pinecone", alias="VECTOR_DB")
+    vector_metric: str = Field(default="cosine", alias="VECTOR_METRIC")
+    vector_namespace: str | None = Field(default=None, alias="VECTOR_NAMESPACE")
+    pinecone_api_key: str | None = Field(default=None, alias="PINECONE_API_KEY")
+    pinecone_index_name: str | None = Field(default=None, alias="PINECONE_INDEX_NAME")
+    pinecone_host: str | None = Field(default=None, alias="PINECONE_HOST")
+    milvus_uri: str | None = Field(default=None, alias="MILVUS_URI")
+    milvus_token: str | None = Field(default=None, alias="MILVUS_TOKEN")
+    milvus_collection_name: str | None = Field(default=None, alias="MILVUS_COLLECTION_NAME")
     reranker_provider: str = Field(default="transformers", alias="RERANKER_PROVIDER")
     reranker_model_name: str = Field(default="BAAI/bge-reranker-v2-m3", alias="RERANKER_MODEL_NAME")
 
@@ -71,6 +83,15 @@ class Settings(BaseSettings):
             "verification_enabled": self.verification_enabled,
             "embedding_provider": self.embedding_provider,
             "embedding_model_name": self.embedding_model_name,
+            "embedding_base_url": self.embedding_base_url,
+            "embedding_dimensions": self.embedding_dimensions,
+            "vector_db": self.vector_db,
+            "vector_metric": self.vector_metric,
+            "vector_namespace": self.vector_namespace,
+            "pinecone_index_name": self.pinecone_index_name,
+            "pinecone_host": self.pinecone_host,
+            "milvus_uri": self.milvus_uri,
+            "milvus_collection_name": self.milvus_collection_name,
             "reranker_provider": self.reranker_provider,
             "reranker_model_name": self.reranker_model_name,
         }
@@ -87,6 +108,7 @@ def get_settings() -> Settings:
     paths_config = yaml_config.get("paths", {})
     parser_config = yaml_config.get("parser", {})
     embeddings_config = yaml_config.get("embeddings", {})
+    vector_store_config = yaml_config.get("vector_store", {})
     reranker_config = yaml_config.get("reranker", {})
     if "name" in app_config:
         flat_updates["app_name"] = app_config["name"]
@@ -129,6 +151,24 @@ def get_settings() -> Settings:
         flat_updates["embedding_provider"] = embeddings_config["provider"]
     if "model_name" in embeddings_config:
         flat_updates["embedding_model_name"] = embeddings_config["model_name"]
+    if "base_url" in embeddings_config:
+        flat_updates["embedding_base_url"] = embeddings_config["base_url"]
+    if "dimensions" in embeddings_config:
+        flat_updates["embedding_dimensions"] = embeddings_config["dimensions"]
+    if "provider" in vector_store_config:
+        flat_updates["vector_db"] = vector_store_config["provider"]
+    if "metric" in vector_store_config:
+        flat_updates["vector_metric"] = vector_store_config["metric"]
+    if "namespace" in vector_store_config:
+        flat_updates["vector_namespace"] = vector_store_config["namespace"]
+    if "pinecone_index_name" in vector_store_config:
+        flat_updates["pinecone_index_name"] = vector_store_config["pinecone_index_name"]
+    if "pinecone_host" in vector_store_config:
+        flat_updates["pinecone_host"] = vector_store_config["pinecone_host"]
+    if "milvus_uri" in vector_store_config:
+        flat_updates["milvus_uri"] = vector_store_config["milvus_uri"]
+    if "milvus_collection_name" in vector_store_config:
+        flat_updates["milvus_collection_name"] = vector_store_config["milvus_collection_name"]
     if "provider" in reranker_config:
         flat_updates["reranker_provider"] = reranker_config["provider"]
     if "model_name" in reranker_config:

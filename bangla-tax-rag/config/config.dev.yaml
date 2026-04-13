@@ -28,6 +28,16 @@ generation:
 embeddings:
   provider: transformers
   model_name: BAAI/bge-m3
+  base_url:
+  dimensions:
+vector_store:
+  provider: pinecone
+  metric: cosine
+  namespace:
+  pinecone_index_name:
+  pinecone_host:
+  milvus_uri:
+  milvus_collection_name:
 reranker:
   provider: transformers
   model_name: BAAI/bge-reranker-v2-m3

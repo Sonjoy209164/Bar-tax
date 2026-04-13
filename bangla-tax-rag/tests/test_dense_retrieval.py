@@ -162,3 +162,75 @@ def test_model_reranker_can_reorder_hits(monkeypatch) -> None:
 
     assert reranked_hits[0].chunk_id == "c2"
     assert reranked_hits[0].intermediate_scores["model_reranker_score"] == 0.95
+
+
+def test_model_reranker_falls_back_to_embedding_scores(monkeypatch) -> None:
+    analyzed_query = QuerySignals(
+        original_query="What is the definition of Commissioner?",
+        normalized_query="What is the definition of Commissioner?",
+        query_type="definition",
+        query_intent="definition",
+    )
+    hits = [
+        RetrievalHit(
+            chunk_id="c1",
+            doc_id="doc",
+            doc_title="Doc",
+            page_no=1,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="text",
+            authority_level="national",
+            tax_year=None,
+            original_text="Tax Day means 30 November.",
+            normalized_text="Tax Day means 30 November.",
+            heading_path=["2. Definitions"],
+            content="Tax Day means 30 November.",
+            score=5.0,
+            intermediate_scores={},
+        ),
+        RetrievalHit(
+            chunk_id="c2",
+            doc_id="doc",
+            doc_title="Doc",
+            page_no=2,
+            section_id="2",
+            subsection_id=None,
+            chunk_type="text",
+            authority_level="national",
+            tax_year=None,
+            original_text="Commissioner means Commissioner of Taxes.",
+            normalized_text="Commissioner means Commissioner of Taxes.",
+            heading_path=["2. Definitions"],
+            content="Commissioner means Commissioner of Taxes.",
+            score=4.0,
+            intermediate_scores={},
+        ),
+    ]
+
+    monkeypatch.setattr(
+        reranker,
+        "get_settings",
+        lambda: SimpleNamespace(
+            reranker_provider="transformers",
+            reranker_model_name="demo/reranker",
+            embedding_model_name="demo/bge-m3",
+        ),
+    )
+
+    def fail_cross_encoder(*_, **__):  # type: ignore[no-untyped-def]
+        raise RuntimeError("cross encoder unavailable")
+
+    monkeypatch.setattr(reranker, "_score_pairs_with_transformers", fail_cross_encoder)
+    monkeypatch.setattr(reranker, "_score_pairs_with_embedding_fallback", lambda *_, **__: [0.1, 0.95])
+
+    reranked_hits = reranker.rerank_retrieval_hits(
+        query_text=analyzed_query.original_query,
+        analyzed_query=analyzed_query,
+        hits=hits,
+        top_n=2,
+    )
+
+    assert reranked_hits[0].chunk_id == "c2"
+    assert reranked_hits[0].intermediate_scores["model_reranker_score"] == 0.95
+    assert reranked_hits[0].intermediate_scores["model_reranker_backend"] == "embedding_fallback"

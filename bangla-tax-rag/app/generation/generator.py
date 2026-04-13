@@ -37,6 +37,17 @@ from app.retrieval.filters import authority_value
 
 logger = logging.getLogger(__name__)
 RATE_VALUE_PATTERN = r"(?:\d+(?:\.\d+)?%(?:\s*\([^)]+\))?|\d+(?:\.\d+)?\s*শতাংশ)"
+EXTRACTIVE_INTENTS = {
+    "mention_lookup",
+    "definition",
+    "rate_lookup",
+    "eligibility",
+    "amount_lookup",
+    "count_lookup",
+    "duration_lookup",
+    "date_lookup",
+    "list_lookup",
+}
 
 
 def _clean_evidence_text(text: str) -> str:
@@ -130,7 +141,9 @@ def build_generation_options(
 def get_chat_client(options: GenerationOptions, mocked_response: str | None = None) -> ChatCompletionClient:
     if options.provider == "openai_compatible" and options.base_url:
         return OpenAICompatibleChatClient(base_url=options.base_url, api_key=options.api_key)
-    return MockChatCompletionClient(mocked_response=mocked_response)
+    if options.provider == "mock":
+        return MockChatCompletionClient(mocked_response=mocked_response)
+    raise ValueError(f"Unsupported or misconfigured generator provider: {options.provider}")
 
 
 def build_prompt(
@@ -1094,23 +1107,11 @@ def generate_answer(
     citations = build_citation_records(evidence_hits)
     prompt_messages = build_prompt(question_text, evidence_hits, analyzed_query, citations)
     used_extractive_fallback = False
-    if analyzed_query.query_intent == "mention_lookup":
-        answer_sentences, model_conflict_notes = build_mock_grounded_answer(
-            question_text,
-            evidence_hits,
-            citations,
-            analyzed_query,
-        )
-        used_extractive_fallback = True
-    elif analyzed_query.query_intent == "rate_lookup" and mocked_response is None:
-        answer_sentences, model_conflict_notes = build_mock_grounded_answer(
-            question_text,
-            evidence_hits,
-            citations,
-            analyzed_query,
-        )
-        used_extractive_fallback = True
-    elif generation_options.provider == "mock" and mocked_response is None:
+    should_use_extractive_builder = (
+        analyzed_query.query_intent in EXTRACTIVE_INTENTS
+        or bool(analyzed_query.subsection_id or analyzed_query.section_id)
+    )
+    if should_use_extractive_builder and mocked_response is None:
         answer_sentences, model_conflict_notes = build_mock_grounded_answer(
             question_text,
             evidence_hits,
@@ -1119,8 +1120,8 @@ def generate_answer(
         )
         used_extractive_fallback = True
     else:
-        chat_client = get_chat_client(generation_options, mocked_response=mocked_response)
         try:
+            chat_client = get_chat_client(generation_options, mocked_response=mocked_response)
             raw_output = chat_client.complete(
                 messages=prompt_messages,
                 model_name=generation_options.model_name,

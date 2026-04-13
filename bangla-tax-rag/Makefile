@@ -2,7 +2,7 @@ PYTHON ?= python3
 VENV ?= .venv
 PIP ?= $(VENV)/bin/pip
 
-.PHONY: install run-api run-api-dense run-ui verify-dense test
+.PHONY: install run-api run-api-dense run-ui verify-dense warm-reranker test
 
 install:
 	$(PYTHON) -m venv $(VENV)
@@ -20,6 +20,9 @@ run-ui:
 
 verify-dense:
 	bash ./scripts/verify_real_dense.sh
+
+warm-reranker:
+	$(VENV)/bin/python scripts/warm_reranker_model.py
 
 test:
 	$(VENV)/bin/pytest

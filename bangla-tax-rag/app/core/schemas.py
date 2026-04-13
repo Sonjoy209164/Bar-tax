@@ -152,15 +152,15 @@ class QueryResponse(BaseModel):
 
 
 class GenerationOptions(BaseModel):
-    provider: str = "mock"
-    model_name: str = "mock-grounded-generator"
+    provider: str = "openai_compatible"
+    model_name: str = "deepseek-r1:7b"
     base_url: str | None = None
     api_key: str | None = None
     max_generation_tokens: int = 512
     temperature: float = 0.0
     abstention_score_threshold: float = 0.75
     verification_enabled: bool = True
-    fallback_to_mock: bool = True
+    fallback_to_mock: bool = False
 
 
 class CitationRecord(BaseModel):

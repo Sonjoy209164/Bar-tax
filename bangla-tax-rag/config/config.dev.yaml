@@ -23,8 +23,8 @@ generation:
   abstention_score_threshold: 0.75
   verification_enabled: true
 embeddings:
-  provider: mock
+  provider: transformers
   model_name: BAAI/bge-m3
 reranker:
-  provider: mock
+  provider: transformers
   model_name: BAAI/bge-reranker-v2-m3

@@ -8,5 +8,5 @@ retrieval:
 evaluation:
   enabled: true
 generation:
-  provider: mock
-  model_name: mock-grounded-generator
+  provider: openai_compatible
+  model_name: deepseek-r1:7b

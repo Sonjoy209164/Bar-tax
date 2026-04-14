@@ -7,8 +7,24 @@ from pathlib import Path
 from rank_bm25 import BM25Okapi
 
 from app.core.schemas import ChunkRecord, QuerySignals, RetrievalHit, RetrievalResponse
-from app.core.utils import extract_salient_query_terms, preprocess_query, tokenize_for_bm25
-from app.retrieval.filters import authority_value, chunk_quality_score, filter_chunk_records
+from app.core.utils import (
+    extract_definition_target,
+    extract_informative_query_terms,
+    extract_salient_query_terms,
+    preprocess_query,
+    tokenize_for_bm25,
+)
+from app.retrieval.filters import (
+    authority_value,
+    chunk_quality_score,
+    filter_chunk_records,
+    hit_has_amount_language,
+    hit_supports_comparison,
+    hit_has_date_language,
+    hit_has_duration_language,
+    hit_supports_eligibility,
+    hit_looks_list_like,
+)
 
 logger = logging.getLogger(__name__)
 DEFAULT_INDEX_DIR = Path("indexes/sparse")
@@ -21,6 +37,15 @@ class SparseIndex:
     search_texts: list[str]
     tokenized_corpus: list[list[str]]
     bm25: BM25Okapi
+    body_texts: list[str]
+    heading_texts: list[str]
+    structure_texts: list[str]
+    body_tokenized_corpus: list[list[str]]
+    heading_tokenized_corpus: list[list[str]]
+    structure_tokenized_corpus: list[list[str]]
+    body_bm25: BM25Okapi
+    heading_bm25: BM25Okapi
+    structure_bm25: BM25Okapi
 
 
 def build_weighted_search_text(chunk: ChunkRecord) -> str:
@@ -38,6 +63,74 @@ def build_weighted_search_text(chunk: ChunkRecord) -> str:
     )
 
 
+def build_body_search_text(chunk: ChunkRecord) -> str:
+    return chunk.normalized_text
+
+
+def build_heading_search_text(chunk: ChunkRecord) -> str:
+    return " ".join(chunk.heading_path)
+
+
+def build_structure_search_text(chunk: ChunkRecord) -> str:
+    parts = [
+        chunk.doc_title,
+        chunk.doc_type,
+        chunk.authority_level,
+        chunk.chunk_type,
+    ]
+    if chunk.tax_year:
+        parts.extend([chunk.tax_year, f"tax year {chunk.tax_year}"])
+    if chunk.section_id:
+        parts.extend([chunk.section_id, f"section {chunk.section_id}", f"section_{chunk.section_id}"])
+    if chunk.subsection_id:
+        parts.extend(
+            [
+                chunk.subsection_id,
+                f"subsection {chunk.subsection_id}",
+                f"subsection_{chunk.subsection_id}",
+                f"section {chunk.subsection_id}",
+            ]
+        )
+    if chunk.appendix_id:
+        parts.extend([chunk.appendix_id, f"appendix {chunk.appendix_id}"])
+    if chunk.sro_id:
+        parts.extend(["sro", chunk.sro_id])
+    return " ".join(part for part in parts if part)
+
+
+def _field_score_weights(query_signals: QuerySignals) -> dict[str, float]:
+    if query_signals.query_intent == "definition":
+        return {"body": 0.4, "heading": 0.35, "structure": 0.25}
+    if query_signals.query_intent in {"amount_lookup", "duration_lookup", "date_lookup"}:
+        return {"body": 0.55, "heading": 0.15, "structure": 0.3}
+    if query_signals.query_intent in {"count_lookup", "list_lookup"}:
+        return {"body": 0.4, "heading": 0.25, "structure": 0.35}
+    if query_signals.query_intent == "comparison":
+        return {"body": 0.45, "heading": 0.2, "structure": 0.35}
+    if query_signals.query_intent == "eligibility":
+        return {"body": 0.5, "heading": 0.15, "structure": 0.35}
+    if query_signals.section_reference:
+        return {"body": 0.35, "heading": 0.25, "structure": 0.4}
+    if query_signals.query_intent == "mention_lookup":
+        return {"body": 0.65, "heading": 0.25, "structure": 0.1}
+    return {"body": 0.55, "heading": 0.25, "structure": 0.2}
+
+
+def _normalize_field_scores(scores: list[float]) -> list[float]:
+    positive_scores = [score for score in scores if score > 0]
+    if not positive_scores:
+        return [0.0 for _ in scores]
+    max_score = max(positive_scores)
+    if max_score <= 0:
+        return [0.0 for _ in scores]
+    return [score / max_score if score > 0 else 0.0 for score in scores]
+
+
+def _tokenize_sparse_field(text: str) -> list[str]:
+    tokens = tokenize_for_bm25(text)
+    return tokens if tokens else ["__empty__"]
+
+
 def _has_exact_section_heading_match(chunk: ChunkRecord, section_reference: str) -> bool:
     heading_pattern = re.compile(rf"^{re.escape(section_reference)}(?:[.)]|(?:\s*[—:-]))")
     if heading_pattern.match(chunk.normalized_text):
@@ -47,13 +140,31 @@ def _has_exact_section_heading_match(chunk: ChunkRecord, section_reference: str)
 
 def build_sparse_index(chunk_records: list[ChunkRecord]) -> SparseIndex:
     search_texts = [build_weighted_search_text(chunk) for chunk in chunk_records]
-    tokenized_corpus = [tokenize_for_bm25(text) for text in search_texts]
+    body_texts = [build_body_search_text(chunk) for chunk in chunk_records]
+    heading_texts = [build_heading_search_text(chunk) for chunk in chunk_records]
+    structure_texts = [build_structure_search_text(chunk) for chunk in chunk_records]
+    tokenized_corpus = [_tokenize_sparse_field(text) for text in search_texts]
+    body_tokenized_corpus = [_tokenize_sparse_field(text) for text in body_texts]
+    heading_tokenized_corpus = [_tokenize_sparse_field(text) for text in heading_texts]
+    structure_tokenized_corpus = [_tokenize_sparse_field(text) for text in structure_texts]
     bm25 = BM25Okapi(tokenized_corpus)
+    body_bm25 = BM25Okapi(body_tokenized_corpus)
+    heading_bm25 = BM25Okapi(heading_tokenized_corpus)
+    structure_bm25 = BM25Okapi(structure_tokenized_corpus)
     return SparseIndex(
         chunk_records=chunk_records,
         search_texts=search_texts,
         tokenized_corpus=tokenized_corpus,
         bm25=bm25,
+        body_texts=body_texts,
+        heading_texts=heading_texts,
+        structure_texts=structure_texts,
+        body_tokenized_corpus=body_tokenized_corpus,
+        heading_tokenized_corpus=heading_tokenized_corpus,
+        structure_tokenized_corpus=structure_tokenized_corpus,
+        body_bm25=body_bm25,
+        heading_bm25=heading_bm25,
+        structure_bm25=structure_bm25,
     )
 
 
@@ -65,7 +176,11 @@ def save_sparse_index(index: SparseIndex, output_dir: str | Path = DEFAULT_INDEX
         for chunk in index.chunk_records:
             handle.write(json.dumps(chunk.model_dump(), ensure_ascii=False) + "\n")
     metadata_path = output_path / "metadata.json"
-    metadata = {"chunk_count": len(index.chunk_records)}
+    metadata = {
+        "chunk_count": len(index.chunk_records),
+        "index_type": "field_aware_bm25",
+        "fields": ["body", "heading", "structure"],
+    }
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("Saved sparse index", extra={"output_dir": str(output_path), "chunk_count": len(index.chunk_records)})
     return output_path
@@ -93,6 +208,7 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
     quality_score = chunk_quality_score(chunk.normalized_text)
     boosted_score += quality_score * 1.2
     searchable_text = f"{chunk.doc_title} {' '.join(chunk.heading_path)} {chunk.normalized_text}".lower()
+    exact_heading_match = False
     if query_signals.section_reference:
         exact_heading_match = _has_exact_section_heading_match(chunk, query_signals.section_reference)
         if chunk.subsection_id == query_signals.section_reference:
@@ -119,11 +235,15 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
         boosted_score += 2.0
     query_terms = set(tokenize_for_bm25(query_signals.normalized_query))
     heading_terms = set(tokenize_for_bm25(" ".join(chunk.heading_path)))
+    searchable_terms = set(tokenize_for_bm25(searchable_text))
+    informative_terms = extract_informative_query_terms(query_signals.normalized_query, query_signals.query_intent)
     heading_overlap = len(query_terms & heading_terms)
     boosted_score += min(heading_overlap * 0.3, 1.2)
     salient_heading_overlap = len(extract_salient_query_terms(query_signals.normalized_query) & heading_terms)
     if query_signals.section_reference:
         boosted_score += min(salient_heading_overlap * 1.5, 4.5)
+        if not exact_heading_match and salient_heading_overlap == 0:
+            boosted_score -= 3.0
         if salient_heading_overlap <= 1:
             boosted_score -= 2.5
     boosted_score += authority_value(chunk.authority_level) * 0.15
@@ -144,6 +264,125 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
         phrase not in searchable_text for phrase in ("করহার", "কর হার", "tax rate", "rate of tax", "tax payable")
     ):
         boosted_score -= 1.0
+    informative_overlap = len(informative_terms & searchable_terms)
+    if query_signals.query_intent == "eligibility":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        normalized_query = query_signals.normalized_query.lower()
+        if hit_supports_eligibility(pseudo_hit, query_signals):
+            boosted_score += 1.9
+        else:
+            boosted_score -= 1.4
+        if any(term in normalized_query for term in ("labour", "labor", "worker")):
+            if any(term in searchable_text for term in ("day labourer", "day laborer", "worker")):
+                boosted_score += 2.4
+            elif any(term in searchable_text for term in ("employee", "employment")):
+                boosted_score += 0.8
+            else:
+                boosted_score -= 0.8
+        if any(term in normalized_query for term in ("salary", "salaried", "employee")):
+            if any(term in searchable_text for term in ("salary", "employee", "employment", "income from employment")):
+                boosted_score += 1.2
+            else:
+                boosted_score -= 0.9
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.1, 3.8)
+            if informative_overlap == 0 and all(
+                phrase not in searchable_text
+                for phrase in ("chargeable to tax", "day labourer", "day laborer", "income from employment", "tax exemption")
+            ):
+                boosted_score -= 3.0
+    if query_signals.query_intent == "amount_lookup":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        if hit_has_amount_language(pseudo_hit):
+            boosted_score += 1.9
+        else:
+            boosted_score -= 1.5
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.2, 4.0)
+            if informative_overlap == 0:
+                boosted_score -= 3.5
+    if query_signals.query_intent == "count_lookup":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        if hit_looks_list_like(pseudo_hit) or any(token.isdigit() for token in searchable_terms):
+            boosted_score += 1.6
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.1, 3.5)
+            if informative_overlap == 0:
+                boosted_score -= 3.2
+    if query_signals.query_intent == "duration_lookup":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        if hit_has_duration_language(pseudo_hit):
+            boosted_score += 1.8
+        else:
+            boosted_score -= 1.4
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.2, 4.0)
+            if informative_overlap == 0:
+                boosted_score -= 3.5
+    if query_signals.query_intent == "date_lookup":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        if hit_has_date_language(pseudo_hit):
+            boosted_score += 1.7
+        else:
+            boosted_score -= 1.3
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.1, 3.5)
+            if informative_overlap == 0:
+                boosted_score -= 3.0
+    if query_signals.query_intent == "list_lookup":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        if hit_looks_list_like(pseudo_hit):
+            boosted_score += 1.7
+        else:
+            boosted_score -= 1.0
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.0, 3.0)
+            if informative_overlap == 0:
+                boosted_score -= 2.8
+    if query_signals.query_intent == "comparison":
+        pseudo_hit = _to_retrieval_hit(chunk, boosted_score)
+        if hit_supports_comparison(pseudo_hit, query_signals):
+            boosted_score += 2.4
+        else:
+            boosted_score -= 2.6
+        if informative_terms:
+            boosted_score += min(informative_overlap * 1.1, 3.8)
+            if informative_overlap == 0:
+                boosted_score -= 3.8
+    if query_signals.query_intent == "definition":
+        definition_target = extract_definition_target(query_signals.original_query or query_signals.normalized_query)
+        has_definition_heading = any(
+            keyword in heading.lower()
+            for heading in chunk.heading_path
+            for keyword in ("definition", "definitions", "সংজ্ঞা")
+        )
+        has_definition_language = any(
+            phrase in searchable_text
+            for phrase in (" means ", " means\n", "defined as", "definitions", "definition")
+        )
+        if has_definition_heading:
+            boosted_score += 3.0
+        elif chunk.heading_path:
+            boosted_score -= 0.8
+        if has_definition_language:
+            boosted_score += 2.0
+        else:
+            boosted_score -= 1.2
+        if definition_target:
+            focus_terms = [token.lower() for token in tokenize_for_bm25(definition_target)]
+            if focus_terms and all(term in searchable_text for term in focus_terms):
+                boosted_score += 2.4
+                if any(
+                    phrase in searchable_text
+                    for phrase in (
+                        f"“{definition_target.lower()}” means",
+                        f"\"{definition_target.lower()}\" means",
+                        f"{definition_target.lower()} means",
+                    )
+                ):
+                    boosted_score += 3.0
+            else:
+                boosted_score -= 1.4
     if any(token in query_signals.normalized_query.lower() for token in COMPANY_QUERY_TOKENS):
         if any(token in searchable_text for token in COMPANY_QUERY_TOKENS):
             boosted_score += 1.0
@@ -152,7 +391,19 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
     return boosted_score
 
 
-def _to_retrieval_hit(chunk: ChunkRecord, score: float) -> RetrievalHit:
+def _to_retrieval_hit(
+    chunk: ChunkRecord,
+    score: float,
+    *,
+    intermediate_scores: dict[str, float | int | str | None] | None = None,
+) -> RetrievalHit:
+    merged_intermediate_scores: dict[str, float | int | str | None] = {
+        "sparse_score": round(score, 6),
+        "appendix_id": chunk.appendix_id or "",
+        "sro_id": chunk.sro_id or "",
+    }
+    if intermediate_scores:
+        merged_intermediate_scores.update(intermediate_scores)
     return RetrievalHit(
         chunk_id=chunk.chunk_id,
         doc_id=chunk.doc_id,
@@ -168,11 +419,7 @@ def _to_retrieval_hit(chunk: ChunkRecord, score: float) -> RetrievalHit:
         heading_path=chunk.heading_path,
         content=chunk.original_text,
         score=round(score, 4),
-        intermediate_scores={
-            "sparse_score": round(score, 6),
-            "appendix_id": chunk.appendix_id or "",
-            "sro_id": chunk.sro_id or "",
-        },
+        intermediate_scores=merged_intermediate_scores,
     )
 
 
@@ -203,20 +450,58 @@ def search_sparse_index(
     if not candidate_records:
         logger.info("Sparse retrieval filters removed all results", extra={"query": query})
         return RetrievalResponse(status="success", query=query, signals=query_signals, hits=[])
-    base_scores = index.bm25.get_scores(query_tokens)
+    body_scores = index.body_bm25.get_scores(query_tokens).tolist()
+    heading_scores = index.heading_bm25.get_scores(query_tokens).tolist()
+    structure_scores = index.structure_bm25.get_scores(query_tokens).tolist()
+    normalized_body_scores = _normalize_field_scores(body_scores)
+    normalized_heading_scores = _normalize_field_scores(heading_scores)
+    normalized_structure_scores = _normalize_field_scores(structure_scores)
+    field_weights = _field_score_weights(query_signals)
     scored_hits: list[RetrievalHit] = []
     allowed_chunk_ids = {chunk.chunk_id for chunk in candidate_records}
-    for chunk, base_score in zip(index.chunk_records, base_scores, strict=True):
+    for position, chunk in enumerate(index.chunk_records):
         if chunk.chunk_id not in allowed_chunk_ids:
             continue
+        base_score = 12.0 * (
+            (normalized_body_scores[position] * field_weights["body"])
+            + (normalized_heading_scores[position] * field_weights["heading"])
+            + (normalized_structure_scores[position] * field_weights["structure"])
+        )
         final_score = apply_score_boosts(chunk, query_signals, float(base_score))
         if final_score <= 0:
             continue
         searchable_text = f"{chunk.doc_title} {' '.join(chunk.heading_path)} {chunk.normalized_text}".lower()
-        salient_overlap = len(salient_terms & set(tokenize_for_bm25(searchable_text)))
+        searchable_tokens = set(tokenize_for_bm25(searchable_text))
+        salient_overlap = len(salient_terms & searchable_tokens)
         if salient_terms and query_signals.query_intent in {"rate_lookup", "definition", "mention_lookup"} and salient_overlap == 0:
             continue
-        scored_hits.append(_to_retrieval_hit(chunk, final_score))
+        informative_terms = extract_informative_query_terms(query_signals.normalized_query, query_signals.query_intent)
+        informative_overlap = len(informative_terms & searchable_tokens)
+        if informative_terms and query_signals.query_intent == "eligibility" and informative_overlap == 0:
+            pseudo_hit = _to_retrieval_hit(chunk, final_score)
+            if not hit_supports_eligibility(pseudo_hit, query_signals):
+                continue
+        elif query_signals.query_intent == "comparison":
+            pseudo_hit = _to_retrieval_hit(chunk, final_score)
+            if not hit_supports_comparison(pseudo_hit, query_signals):
+                continue
+        elif informative_terms and query_signals.query_intent in {"amount_lookup", "count_lookup", "duration_lookup", "date_lookup", "list_lookup", "comparison"} and informative_overlap == 0:
+            continue
+        scored_hits.append(
+            _to_retrieval_hit(
+                chunk,
+                final_score,
+                intermediate_scores={
+                    "sparse_base_score": round(base_score, 6),
+                    "field_body_score": round(body_scores[position], 6),
+                    "field_heading_score": round(heading_scores[position], 6),
+                    "field_structure_score": round(structure_scores[position], 6),
+                    "field_body_weight": field_weights["body"],
+                    "field_heading_weight": field_weights["heading"],
+                    "field_structure_weight": field_weights["structure"],
+                },
+            )
+        )
     ranked_hits = sorted(scored_hits, key=lambda hit: hit.score, reverse=True)[:top_k]
     return RetrievalResponse(status="success", query=query, signals=query_signals, hits=ranked_hits)
 

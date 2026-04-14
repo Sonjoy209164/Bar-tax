@@ -15,6 +15,7 @@ from app.retrieval.sparse import load_sparse_index, search_sparse_index
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a demo query against sparse, dense, or hybrid retrieval.")
     parser.add_argument("--index-dir", default="indexes/sparse")
+    parser.add_argument("--dense-index-dir", default=None)
     parser.add_argument("--query", required=True)
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--mode", choices=["sparse", "dense", "hybrid"], default="sparse")
@@ -41,6 +42,9 @@ def _print_hits(label: str, hits: list[object]) -> None:
 def main() -> None:
     configure_logging()
     args = build_argument_parser().parse_args()
+    dense_index_dir = args.dense_index_dir or (
+        args.index_dir.replace("sparse", "dense") if args.index_dir.endswith("sparse") else args.index_dir
+    )
     if args.mode == "sparse":
         index = load_sparse_index(args.index_dir)
         response = search_sparse_index(
@@ -67,7 +71,7 @@ def main() -> None:
                 doc_type=args.doc_type,
                 authority_level_min=args.authority_level_min,
                 chunk_type=args.chunk_type,
-                index_dir=args.index_dir.replace("sparse", "dense") if args.index_dir.endswith("sparse") else args.index_dir,
+                index_dir=dense_index_dir,
             )
         ]
         print("Mode: dense")
@@ -85,6 +89,7 @@ def main() -> None:
         authority_level_min=args.authority_level_min,
         chunk_type=args.chunk_type,
         index_dir=args.index_dir,
+        dense_index_dir=dense_index_dir,
     )
     print("Mode: hybrid")
     print(f"Query: {response.query_text}")

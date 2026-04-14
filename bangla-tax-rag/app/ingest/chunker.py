@@ -20,6 +20,12 @@ STATUTE_SECTION_HEADING_PATTERN = re.compile(r"^\d+[A-Za-z]?(?:\.\d+)?\.\s+[A-Z]
 CLAUSE_START_PATTERN = re.compile(r"^\(\d+[A-Za-z]?\)\s+")
 ALL_CAPS_CONTEXT_PATTERN = re.compile(r"^[A-Z][A-Z\s,&/-]{2,}$")
 ALPHA_CLAUSE_PATTERN = re.compile(r"^\([a-z]\)\s+", re.IGNORECASE)
+ROMAN_CLAUSE_PATTERN = re.compile(r"^\((?:[ivxlcdm]+)\)\s+", re.IGNORECASE)
+ROMAN_NUMERAL_HEADING_PATTERN = re.compile(r"^(?:[ivxlcdm]+)[.)]\s+", re.IGNORECASE)
+AMENDMENT_FOOTNOTE_START_PATTERN = re.compile(
+    r"^\d+\s+(?:The words?|The figures?|The brackets?|The punctuation|The sentence|The paragraph|The expression)\b",
+    re.IGNORECASE,
+)
 
 
 def _is_document_header_line(line: str) -> bool:
@@ -105,7 +111,18 @@ def _clean_chunk_text(text: str) -> str:
         lines.pop(0)
     while lines and PURE_STRUCTURAL_LINE_PATTERN.fullmatch(normalize_text(lines[-1])):
         lines.pop()
+    footnote_start_index = next(
+        (index for index, line in enumerate(lines) if _is_amendment_footnote_start_line(line)),
+        None,
+    )
+    if footnote_start_index is not None:
+        lines = lines[:footnote_start_index]
     return "\n".join(lines).strip()
+
+
+def _is_amendment_footnote_start_line(line: str) -> bool:
+    normalized_line = normalize_text(line)
+    return bool(AMENDMENT_FOOTNOTE_START_PATTERN.match(normalized_line))
 
 
 def _looks_like_structured_table_page(lines: list[str]) -> bool:
@@ -159,16 +176,97 @@ def _split_text_with_overlap(text: str, chunk_size: int, overlap: int = DEFAULT_
     normalized_input = text.strip()
     if not normalized_input:
         return []
+    segments = _segment_text_for_chunking(normalized_input)
+    if len(segments) <= 1:
+        slices: list[str] = []
+        start_index = 0
+        text_length = len(normalized_input)
+        while start_index < text_length:
+            end_index = min(text_length, start_index + chunk_size)
+            slices.append(normalized_input[start_index:end_index].strip())
+            if end_index >= text_length:
+                break
+            start_index = max(end_index - overlap, start_index + 1)
+        return [slice_text for slice_text in slices if slice_text]
+
     slices: list[str] = []
-    start_index = 0
-    text_length = len(normalized_input)
-    while start_index < text_length:
-        end_index = min(text_length, start_index + chunk_size)
-        slices.append(normalized_input[start_index:end_index].strip())
-        if end_index >= text_length:
-            break
-        start_index = max(end_index - overlap, start_index + 1)
+    current_segments: list[str] = []
+    current_length = 0
+    for segment in segments:
+        segment_text = segment.strip()
+        if not segment_text:
+            continue
+        segment_length = len(segment_text)
+        separator_length = 1 if current_segments else 0
+        would_exceed = current_segments and current_length + separator_length + segment_length > chunk_size
+        if would_exceed:
+            slices.append("\n".join(current_segments).strip())
+            current_segments = _overlap_segments(current_segments, overlap)
+            current_length = sum(len(item) for item in current_segments) + max(len(current_segments) - 1, 0)
+        if segment_length > chunk_size and not current_segments:
+            start_index = 0
+            while start_index < segment_length:
+                end_index = min(segment_length, start_index + chunk_size)
+                slices.append(segment_text[start_index:end_index].strip())
+                if end_index >= segment_length:
+                    break
+                start_index = max(end_index - overlap, start_index + 1)
+            current_segments = []
+            current_length = 0
+            continue
+        if current_segments:
+            current_length += 1
+        current_segments.append(segment_text)
+        current_length += segment_length
+    if current_segments:
+        slices.append("\n".join(current_segments).strip())
     return [slice_text for slice_text in slices if slice_text]
+
+
+def _line_starts_new_legal_unit(line: str) -> bool:
+    normalized_line = normalize_text(line)
+    if not normalized_line:
+        return False
+    return bool(
+        _is_statute_section_heading_line(line)
+        or CLAUSE_START_PATTERN.match(normalized_line)
+        or ALPHA_CLAUSE_PATTERN.match(normalized_line)
+        or ROMAN_CLAUSE_PATTERN.match(normalized_line)
+        or ROMAN_NUMERAL_HEADING_PATTERN.match(normalized_line)
+    )
+
+
+def _segment_text_for_chunking(text: str) -> list[str]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return [text.strip()]
+    segments: list[str] = []
+    current_lines: list[str] = []
+    for line in lines:
+        if current_lines and _line_starts_new_legal_unit(line):
+            segments.append("\n".join(current_lines).strip())
+            current_lines = [line]
+            continue
+        current_lines.append(line)
+    if current_lines:
+        segments.append("\n".join(current_lines).strip())
+    return segments
+
+
+def _overlap_segments(segments: list[str], overlap: int) -> list[str]:
+    if overlap <= 0 or not segments:
+        return []
+    retained_segments: list[str] = []
+    retained_length = 0
+    for segment in reversed(segments):
+        projected_length = retained_length + len(segment) + (1 if retained_segments else 0)
+        if retained_segments and projected_length > overlap:
+            break
+        retained_segments.insert(0, segment)
+        retained_length = projected_length
+        if retained_length >= overlap:
+            break
+    return retained_segments
 
 
 def _derive_effective_dates(tax_year: str | None) -> tuple[str | None, str | None]:

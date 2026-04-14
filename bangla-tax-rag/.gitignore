@@ -5,6 +5,7 @@ __pycache__/
 .coverage
 .DS_Store
 .env
+.cache/
 *.pyc
 data/raw/*
 !data/raw/.gitkeep

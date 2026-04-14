@@ -1,0 +1,21 @@
+{
+  "document_id": "demo-tax-act-2026",
+  "act_title": "Demo Tax Act 2026",
+  "parser_provider": "fallback",
+  "source_path": "/tmp/demo_tax_act.pdf",
+  "root_node_id": "demo-tax-act-2026:act",
+  "node_count": 12,
+  "link_count": 15,
+  "store_version": "1",
+  "graph_filename": "legal_graph.json",
+  "manifest_filename": "manifest.json",
+  "nodes_filename": "nodes.jsonl",
+  "parent_nodes_filename": "parent_nodes.jsonl",
+  "retrieval_nodes_filename": "retrieval_nodes.jsonl",
+  "links_filename": "links.jsonl",
+  "metadata": {
+    "parent_node_count": 10,
+    "retrieval_node_count": 9,
+    "has_link_graph": true
+  }
+}

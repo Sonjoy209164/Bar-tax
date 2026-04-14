@@ -6,10 +6,15 @@ app:
 paths:
   raw_data_dir: data/raw
   processed_data_dir: data/processed
+  agentic_store_dir: data/agentic_store
   sparse_index_dir: indexes/sparse
   dense_index_dir: indexes/dense
   results_dir: results
+  trace_dir: results/traces
   ui_backend_base_url: http://127.0.0.1:8000
+parser:
+  provider: fallback
+  result_type: markdown
 retrieval:
   mode: hybrid
   top_k: 5
@@ -23,5 +28,20 @@ generation:
   abstention_score_threshold: 0.75
   verification_enabled: true
 embeddings:
-  provider: mock
-  model_name: mock-dense-overlap
+  provider: transformers
+  model_name: BAAI/bge-m3
+  base_url:
+  dimensions:
+vector_store:
+  provider: local
+  metric: cosine
+  namespace:
+  local_store_path: data/agentic_store/local_vectors.jsonl
+  pinecone_index_name:
+  pinecone_host:
+  milvus_uri:
+  milvus_collection_name:
+reranker:
+  provider: transformers
+  model_name: BAAI/bge-reranker-v2-m3
+  base_url:

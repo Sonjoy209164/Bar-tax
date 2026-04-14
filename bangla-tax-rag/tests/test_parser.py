@@ -79,6 +79,33 @@ def test_parse_document_keeps_statute_definition_pages_out_of_appendix_mode(tmp_
     assert any("2. Definitions" in heading for heading in parsed_pages[0].headings)
 
 
+def test_parse_document_does_not_treat_clause_heavy_statute_pages_as_tables(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "statute_list.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        (
+            "CHAPTER II\n"
+            "INCOME FROM EMPLOYMENT\n"
+            "32. Income from employment.—(1) Subject to the provisions of sub-section (2), income from "
+            "employment shall include the following incomes, namely:\n"
+            "(a) any monetary receipts, salaries and benefits received or receivable from employment;\n"
+            "(b) income earned from employee share schemes;\n"
+            "(c) untaxed arrear salary; or\n"
+            "(2) Income from employment shall not include the following receipts.\n"
+        ),
+    )
+    document.save(pdf_path)
+    document.close()
+
+    parsed_pages = parse_document(str(pdf_path))
+
+    assert len(parsed_pages) == 1
+    assert parsed_pages[0].is_table_like is False
+    assert any("32. Income from employment" in heading for heading in parsed_pages[0].headings)
+
+
 def test_build_ocrmypdf_command_uses_bengali_force_ocr(tmp_path: Path) -> None:
     input_path = tmp_path / "input.pdf"
     output_path = tmp_path / "output.ocr.pdf"

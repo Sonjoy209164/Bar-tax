@@ -2,6 +2,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.domain.query_taxonomy import QueryExecutionPath, QueryType
+
 
 class HealthResponse(BaseModel):
     status: str
@@ -84,6 +86,7 @@ class QueryRequest(BaseModel):
     doc_type: str | None = None
     authority_level_min: str | None = None
     chunk_type: str | None = None
+    generator_model_name: str | None = None
     final_evidence_k: int | None = Field(default=None, ge=1, le=20)
     include_intermediate_hits: bool = False
     generate_answer: bool = True
@@ -102,8 +105,9 @@ class QuerySignals(BaseModel):
     appendix_id: str | None = None
     sro_reference: str | None = None
     sro_id: str | None = None
-    query_type: str = "general"
-    query_intent: str = "general"
+    query_type: QueryType = QueryType.GENERAL
+    query_intent: QueryType = QueryType.GENERAL
+    execution_path: QueryExecutionPath = QueryExecutionPath.FAST_PATH
 
 
 class RetrievalHit(BaseModel):
@@ -151,15 +155,15 @@ class QueryResponse(BaseModel):
 
 
 class GenerationOptions(BaseModel):
-    provider: str = "mock"
-    model_name: str = "mock-grounded-generator"
+    provider: str = "openai_compatible"
+    model_name: str = "deepseek-r1:7b"
     base_url: str | None = None
     api_key: str | None = None
     max_generation_tokens: int = 512
     temperature: float = 0.0
     abstention_score_threshold: float = 0.75
     verification_enabled: bool = True
-    fallback_to_mock: bool = True
+    fallback_to_mock: bool = False
 
 
 class CitationRecord(BaseModel):
@@ -201,6 +205,7 @@ class QueryAPIResponse(BaseModel):
     status: str
     retrieval_mode: Literal["sparse", "dense", "hybrid"]
     analyzed_query: QuerySignals
+    generation_model_name: str | None = None
     final_hits: list[RetrievalHit] = Field(default_factory=list)
     conflict_notes: list[str] = Field(default_factory=list)
     answer: str | None = None
@@ -328,3 +333,5 @@ class ConfigResponse(BaseModel):
     verification_enabled: bool
     embedding_provider: str
     embedding_model_name: str
+    reranker_provider: str
+    reranker_model_name: str

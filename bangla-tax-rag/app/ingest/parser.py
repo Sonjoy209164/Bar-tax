@@ -32,6 +32,7 @@ PART_HEADING_PATTERN = re.compile(r"^PART\s+[IVXLC0-9]+\s*$", re.IGNORECASE)
 CHAPTER_HEADING_PATTERN = re.compile(r"^CHAPTER\s+[IVXLC0-9]+\s*$", re.IGNORECASE)
 STATUTE_SECTION_HEADING_PATTERN = re.compile(r"^\d+[A-Za-z]?(?:\.\d+)?\.\s+[A-Z].+", re.IGNORECASE)
 CLAUSE_START_PATTERN = re.compile(r"^\(\d+[A-Za-z]?\)\s+")
+LETTERED_CLAUSE_START_PATTERN = re.compile(r"^\([a-z]\)\s+", re.IGNORECASE)
 GAZETTE_HEADER_PATTERN = re.compile(r"(?:evsjv|†M‡RU|AwZwi³|A‡±vei)")
 PAGE_NUMBER_PATTERN = re.compile(r"^\d{4,6}$")
 
@@ -47,14 +48,47 @@ def _looks_like_table(text: str) -> bool:
     lines = [line.rstrip() for line in text.splitlines() if line.strip()]
     if len(lines) < 3:
         return False
-    serial_count = sum(1 for line in lines if TABLE_SERIAL_PATTERN.fullmatch(normalize_text(line)))
-    code_count = sum(1 for line in lines if TABLE_CODE_PATTERN.fullmatch(normalize_text(line)))
-    statute_heading_count = sum(
-        1 for line in lines if STATUTE_SECTION_HEADING_PATTERN.match(normalize_text(line))
+    normalized_lines = [normalize_text(line) for line in lines]
+    serial_count = sum(1 for line in normalized_lines if TABLE_SERIAL_PATTERN.fullmatch(line))
+    code_count = sum(1 for line in normalized_lines if TABLE_CODE_PATTERN.fullmatch(line))
+    part_or_chapter_count = sum(
+        1
+        for line in normalized_lines
+        if PART_HEADING_PATTERN.match(line) or CHAPTER_HEADING_PATTERN.match(line)
     )
-    clause_count = sum(1 for line in lines if CLAUSE_START_PATTERN.match(normalize_text(line)))
-    definition_line_count = sum(1 for line in lines if "means" in normalize_text(line).lower())
+    statute_heading_count = sum(
+        1 for line in normalized_lines if STATUTE_SECTION_HEADING_PATTERN.match(line)
+    )
+    numeric_clause_count = sum(1 for line in normalized_lines if CLAUSE_START_PATTERN.match(line))
+    lettered_clause_count = sum(
+        1 for line in normalized_lines if LETTERED_CLAUSE_START_PATTERN.match(line)
+    )
+    clause_count = numeric_clause_count + lettered_clause_count
+    definition_line_count = sum(1 for line in normalized_lines if "means" in line.lower())
     quoted_clause_count = sum(1 for line in lines if "“" in line or '"' in line)
+    legal_list_signal_count = sum(
+        1
+        for line in normalized_lines
+        if (
+            "namely" in line.lower()
+            or "shall include" in line.lower()
+            or "shall not include" in line.lower()
+            or "subject to" in line.lower()
+            or "sub-section" in line.lower()
+            or "section " in line.lower()
+        )
+    )
+    has_strong_row_structure = serial_count >= 2 and code_count >= 2
+    if (
+        (part_or_chapter_count or statute_heading_count)
+        and clause_count >= 2
+        and not has_strong_row_structure
+    ):
+        return False
+    if clause_count >= 4 and code_count == 0 and serial_count == 0:
+        return False
+    if legal_list_signal_count >= 2 and clause_count >= 2 and not has_strong_row_structure:
+        return False
     if statute_heading_count and (clause_count >= 3 or definition_line_count >= 2):
         return False
     if clause_count >= 3 and quoted_clause_count >= 2 and serial_count == 0 and code_count == 0:
@@ -70,11 +104,17 @@ def _looks_like_table(text: str) -> bool:
         re.search(r"\d", line) for line in lines[2:]
     )
     return (
-        (serial_count >= 2 and code_count >= 2)
+        has_strong_row_structure
         or
         repeated_spacing_lines >= max(2, len(lines) // 3)
         or dense_numeric_lines >= max(2, len(lines) // 2)
-        or (tabular_word_lines >= 2 and has_header_and_data)
+        or (
+            tabular_word_lines >= 2
+            and has_header_and_data
+            and clause_count <= 1
+            and statute_heading_count == 0
+            and part_or_chapter_count == 0
+        )
     )
 
 

@@ -50,6 +50,10 @@ class QueryService:
         self.config = config or QueryServiceConfig()
 
     def run(self, request: QueryRequest) -> QueryResponse:
+        response, _ = self.run_with_state(request)
+        return response
+
+    def run_with_state(self, request: QueryRequest) -> tuple[QueryResponse, AgentState]:
         state = AgentState(
             question=request.question,
             query_type=request.query_type or QueryType.GENERAL,
@@ -62,7 +66,7 @@ class QueryService:
             max_reasoning_steps=request.max_reasoning_steps or self.config.default_max_reasoning_steps,
         )
 
-        return QueryResponse(
+        response = QueryResponse(
             answer=final_state.final_answer or final_state.draft_answer or "Information not found in retrieved evidence.",
             citations=self.citation_service.build_payloads(final_state.citations),
             reasoning_summary=list(final_state.reasoning_summary),
@@ -73,3 +77,4 @@ class QueryService:
             query_type=final_state.query_type,
             execution_path=final_state.execution_path.value,
         )
+        return response, final_state

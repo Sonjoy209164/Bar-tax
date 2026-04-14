@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import logging
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -15,6 +16,8 @@ from app.retrieval.graph_expander import GraphExpander, GraphExpansionConfig
 from app.retrieval.query_transformer import QueryPlan, QueryTransformer, build_query_plan
 from app.retrieval.reranker import DocumentReranker, RerankerDocument
 from app.retrieval.vector_store_base import VectorSearchMatch, VectorStore
+
+logger = logging.getLogger(__name__)
 
 
 class HybridRetrieverConfig(BaseModel):
@@ -220,22 +223,26 @@ class HybridRetriever:
             return candidates
 
         rerank_pool = candidates[: max(top_k, self.config.rerank_top_n)]
-        rerank_result = self.reranker.rerank(
-            question,
-            [
-                RerankerDocument(
-                    document_id=candidate["chunk"].chunk_id,
-                    text=_build_reranker_text(candidate["chunk"]),
-                    metadata={
-                        "section_number": candidate["chunk"].section_number,
-                        "chunk_type": candidate["chunk"].chunk_type,
-                        "source_node_type": candidate["chunk"].source_node_type.value,
-                    },
-                )
-                for candidate in rerank_pool
-            ],
-            top_k=len(rerank_pool),
-        )
+        try:
+            rerank_result = self.reranker.rerank(
+                question,
+                [
+                    RerankerDocument(
+                        document_id=candidate["chunk"].chunk_id,
+                        text=_build_reranker_text(candidate["chunk"]),
+                        metadata={
+                            "section_number": candidate["chunk"].section_number,
+                            "chunk_type": candidate["chunk"].chunk_type,
+                            "source_node_type": candidate["chunk"].source_node_type.value,
+                        },
+                    )
+                    for candidate in rerank_pool
+                ],
+                top_k=len(rerank_pool),
+            )
+        except Exception as exc:  # pragma: no cover - graceful runtime fallback
+            logger.warning("Reranker failed; returning fused ranking order.", extra={"error": str(exc)})
+            return candidates
 
         reranked_records: list[dict[str, Any]] = []
         candidate_map = {candidate["chunk"].chunk_id: candidate for candidate in rerank_pool}

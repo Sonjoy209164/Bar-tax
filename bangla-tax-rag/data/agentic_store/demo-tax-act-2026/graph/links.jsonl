@@ -1,0 +1,15 @@
+{"source_node_id":"demo-tax-act-2026:part:part-i","target_node_id":"demo-tax-act-2026:act","relation":"parent_context","metadata":{"link_kind":"structural_parent"}}
+{"source_node_id":"demo-tax-act-2026:chapter:chapter-i","target_node_id":"demo-tax-act-2026:part:part-i","relation":"parent_context","metadata":{"link_kind":"structural_parent"}}
+{"source_node_id":"demo-tax-act-2026:section:1","target_node_id":"demo-tax-act-2026:chapter:chapter-i","relation":"parent_context","metadata":{"link_kind":"structural_parent"}}
+{"source_node_id":"demo-tax-act-2026:subsection:1-1","target_node_id":"demo-tax-act-2026:section:1","relation":"parent_context","metadata":{"link_kind":"structural_parent"}}
+{"source_node_id":"demo-tax-act-2026:subsection:1-2","target_node_id":"demo-tax-act-2026:section:1","relation":"parent_context","metadata":{"link_kind":"structural_parent"}}
+{"source_node_id":"demo-tax-act-2026:section:2","target_node_id":"demo-tax-act-2026:chapter:chapter-i","relation":"parent_context","metadata":{"link_kind":"structural_parent"}}
+{"source_node_id":"demo-tax-act-2026:subsection:2-1","target_node_id":"demo-tax-act-2026:section:2","relation":"parent_context","metadata":{"link_kind":"structural_parent"}}
+{"source_node_id":"demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1","target_node_id":"demo-tax-act-2026:subsection:2-1","relation":"parent_context","metadata":{"link_kind":"structural_parent"}}
+{"source_node_id":"demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1","target_node_id":"demo-tax-act-2026:subsection:2-1","relation":"parent_context","metadata":{"link_kind":"structural_parent"}}
+{"source_node_id":"demo-tax-act-2026:section:3","target_node_id":"demo-tax-act-2026:chapter:chapter-i","relation":"parent_context","metadata":{"link_kind":"structural_parent"}}
+{"source_node_id":"demo-tax-act-2026:subsection:3-1","target_node_id":"demo-tax-act-2026:section:3","relation":"parent_context","metadata":{"link_kind":"structural_parent"}}
+{"source_node_id":"demo-tax-act-2026:subsection:1-1","target_node_id":"demo-tax-act-2026:subsection:1-2","relation":"sibling_context","metadata":{"link_kind":"subsection_sibling"}}
+{"source_node_id":"demo-tax-act-2026:subsection:1-2","target_node_id":"demo-tax-act-2026:subsection:1-1","relation":"sibling_context","metadata":{"link_kind":"subsection_sibling"}}
+{"source_node_id":"demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1","target_node_id":"demo-tax-act-2026:subsection:2-1","relation":"governing_rule","metadata":{"link_kind":"attached_proviso"}}
+{"source_node_id":"demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1","target_node_id":"demo-tax-act-2026:subsection:2-1","relation":"governing_rule","metadata":{"link_kind":"attached_explanation"}}

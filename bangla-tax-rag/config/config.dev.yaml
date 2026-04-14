@@ -6,9 +6,11 @@ app:
 paths:
   raw_data_dir: data/raw
   processed_data_dir: data/processed
+  agentic_store_dir: data/agentic_store
   sparse_index_dir: indexes/sparse
   dense_index_dir: indexes/dense
   results_dir: results
+  trace_dir: results/traces
   ui_backend_base_url: http://127.0.0.1:8000
 parser:
   provider: fallback
@@ -31,9 +33,10 @@ embeddings:
   base_url:
   dimensions:
 vector_store:
-  provider: pinecone
+  provider: local
   metric: cosine
   namespace:
+  local_store_path: data/agentic_store/local_vectors.jsonl
   pinecone_index_name:
   pinecone_host:
   milvus_uri:

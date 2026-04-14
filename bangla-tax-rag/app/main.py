@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes_eval import router as eval_router
+from app.api.routes_agentic import router as agentic_router
 from app.api.routes_health import router as health_router
 from app.api.routes_ingest import router as ingest_router
 from app.api.routes_query import router as query_router
@@ -42,3 +43,4 @@ app.include_router(health_router)
 app.include_router(ingest_router)
 app.include_router(query_router)
 app.include_router(eval_router)
+app.include_router(agentic_router)

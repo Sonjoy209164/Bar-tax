@@ -1,4 +1,5 @@
 from app.retrieval import (
+    LocalVectorStore,
     MilvusVectorStore,
     PineconeVectorStore,
     VectorRecord,
@@ -11,6 +12,14 @@ from app.retrieval.milvus_store import _build_milvus_filter_expression
 
 
 def test_build_vector_store_factory_selects_provider() -> None:
+    local_store = build_vector_store(
+        VectorStoreConfig(
+            provider=VectorStoreProvider.LOCAL,
+            local_store_path="/tmp/local-vectors.jsonl",
+        )
+    )
+    assert isinstance(local_store, LocalVectorStore)
+
     pinecone_store = build_vector_store(
         VectorStoreConfig(
             provider=VectorStoreProvider.PINECONE,
@@ -28,6 +37,49 @@ def test_build_vector_store_factory_selects_provider() -> None:
         )
     )
     assert isinstance(milvus_store, MilvusVectorStore)
+
+
+def test_local_store_persists_queries_and_filters(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    store = LocalVectorStore(
+        VectorStoreConfig(
+            provider=VectorStoreProvider.LOCAL,
+            namespace="tax",
+            local_store_path=str(tmp_path / "vectors.jsonl"),
+        )
+    )
+
+    store.upsert(
+        [
+            VectorRecord(
+                record_id="chunk-1",
+                vector=[1.0, 0.0],
+                metadata={"section_number": "4", "page_start": 12, "chunk_type": "rule"},
+                text="Income tax authorities",
+            ),
+            VectorRecord(
+                record_id="chunk-2",
+                vector=[0.0, 1.0],
+                metadata={"section_number": "2", "page_start": 4, "chunk_type": "definition"},
+                text="Commissioner definition",
+            ),
+        ]
+    )
+    reloaded = LocalVectorStore(
+        VectorStoreConfig(
+            provider=VectorStoreProvider.LOCAL,
+            namespace="tax",
+            local_store_path=str(tmp_path / "vectors.jsonl"),
+        )
+    )
+
+    result = reloaded.query(
+        [1.0, 0.0],
+        top_k=2,
+        filters={"section_number": {"$eq": "4"}, "page_start": {"$gte": 10}},
+    )
+
+    assert [match.record_id for match in result.matches] == ["chunk-1"]
+    assert result.matches[0].text == "Income tax authorities"
 
 
 def test_pinecone_store_translates_upsert_query_and_delete_payloads(monkeypatch) -> None:

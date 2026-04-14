@@ -170,15 +170,41 @@ COMPARISON_BEST_FIRST_QUESTIONS = [
     "Why would an organization fail to qualify as charitable purpose under clause 43 in the services-for-consideration case?",
     "I am a labour, what will be my tax?",
 ]
+UI_PIPELINE_MODES = ["agentic", "legacy"]
+AGENTIC_QUERY_TYPE_OPTIONS = [
+    "auto",
+    "general",
+    "section_lookup",
+    "definition",
+    "table_lookup",
+    "rate_lookup",
+    "amount_lookup",
+    "date_lookup",
+    "duration_lookup",
+    "count_lookup",
+    "list_lookup",
+    "mention_lookup",
+    "comparison",
+    "scenario_reasoning",
+    "cross_section_reasoning",
+    "eligibility",
+    "amendment",
+    "example",
+    "procedure",
+    "calculation",
+    "unsupported_or_underspecified",
+]
 
 
 def initialize_session_state() -> None:
     settings = get_settings()
     defaults: dict[str, Any] = {
+        "ui_pipeline_mode": "agentic",
         "backend_base_url": settings.ui_backend_base_url,
         "last_query_response": None,
         "last_ingest_response": None,
         "last_build_index_response": None,
+        "last_trace_response": None,
         "last_retrieval_inspector_response": None,
         "last_comparison_responses": None,
         "question_preset": GENERATION_TEST_QUESTIONS[0],
@@ -186,6 +212,8 @@ def initialize_session_state() -> None:
         "question_text": "২০২৫-২০২৬ করবর্ষে কোম্পানির করহার কী?",
         "comparison_question_text": COMPARISON_TEST_QUESTIONS[0],
         "retrieval_mode": settings.retrieval_mode,
+        "agentic_query_type": "auto",
+        "agentic_max_reasoning_steps": 6,
         "tax_year": "",
         "top_k": settings.top_k,
         "final_evidence_k": settings.final_evidence_k,
@@ -845,7 +873,32 @@ def api_post(
         return False, None, message
 
 
+def is_agentic_response(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("_ui_pipeline_mode") == "agentic":
+        return True
+    return "trace_id" in payload and "execution_path" in payload
+
+
+def derive_chunk_browser_default_path(last_ingest_response: dict[str, Any] | None) -> str:
+    if not isinstance(last_ingest_response, dict):
+        return "data/processed/income-tax-act-2023.jsonl"
+    if last_ingest_response.get("_ui_pipeline_mode") == "agentic":
+        graph_path = last_ingest_response.get("graph_path")
+        if isinstance(graph_path, str) and graph_path.strip():
+            graph = Path(graph_path)
+            return str(graph.parent.parent / "chunks" / "retrieval_chunks.jsonl")
+    return str(last_ingest_response.get("output_jsonl_path") or "data/processed/income-tax-act-2023.jsonl")
+
+
 def render_api_connection_panel(base_url: str) -> tuple[dict[str, Any] | None, bool]:
+    selected_pipeline = st.sidebar.selectbox(
+        "Workspace Pipeline",
+        options=UI_PIPELINE_MODES,
+        key="ui_pipeline_mode",
+        help="Use agentic for the new graph-based runtime. Legacy keeps the original ingest/build-index/query flow.",
+    )
     st.sidebar.header("API Connection")
     backend_base_url = st.sidebar.text_input(
         "Backend Base URL",
@@ -865,6 +918,16 @@ def render_api_connection_panel(base_url: str) -> tuple[dict[str, Any] | None, b
                 st.sidebar.caption(f"Mode: {config_payload.get('retrieval_mode')} | Top K: {config_payload.get('top_k')}")
             elif config_error:
                 st.sidebar.warning(f"Config unavailable: {config_error}")
+            if selected_pipeline == "agentic":
+                agentic_ok, agentic_payload, agentic_error = api_get(backend_base_url, "/agentic/status")
+                if agentic_ok and agentic_payload is not None:
+                    runtime_status = "ready" if agentic_payload.get("ready") else "empty"
+                    loaded_documents = len(agentic_payload.get("loaded_documents") or [])
+                    st.sidebar.caption(
+                        f"Agentic runtime: {runtime_status} | docs={loaded_documents} | vectors={agentic_payload.get('vector_record_count', 0)}"
+                    )
+                elif check_connection:
+                    st.sidebar.warning(f"Agentic runtime unavailable: {agentic_error}")
         elif check_connection:
             st.sidebar.warning(f"API unreachable: {health_error}")
     return config_payload, api_reachable
@@ -872,6 +935,52 @@ def render_api_connection_panel(base_url: str) -> tuple[dict[str, Any] | None, b
 
 def render_ingestion_panel(base_url: str) -> None:
     st.subheader("PDF Ingestion")
+    if st.session_state.get("ui_pipeline_mode") == "agentic":
+        st.caption("Agentic ingest builds the legal graph, chunk artifacts, BM25 index, and vector store in one step.")
+        with st.form("agentic_ingest_form", clear_on_submit=False):
+            source_path = st.text_input("Source PDF Path", value="/home/sonjoy/Bar tax/Income_tax_act_2023.pdf")
+            document_id = st.text_input("Document ID", value="income-tax-act-2023")
+            act_title = st.text_input("Act Title", value="Income Tax Act 2023")
+            submitted = st.form_submit_button("Ingest Into Agentic Runtime", use_container_width=True)
+
+        if submitted:
+            payload = {
+                "source_path": source_path,
+                "document_id": document_id or None,
+                "act_title": act_title or None,
+            }
+            success, response_payload, error_message = api_post(
+                base_url,
+                "/agentic/ingest",
+                payload,
+                timeout_seconds=INGEST_TIMEOUT_SECONDS,
+            )
+            if success and response_payload is not None:
+                response_payload["_ui_pipeline_mode"] = "agentic"
+                st.session_state["last_ingest_response"] = response_payload
+                st.success("Agentic ingest completed.")
+            else:
+                st.error(f"Agentic ingest failed: {error_message}")
+                st.caption("For the full Act PDF, expect parsing and OCR-related steps to take longer than the small demo files.")
+
+        if st.session_state.get("last_ingest_response"):
+            ingest_response = st.session_state["last_ingest_response"]
+            if ingest_response.get("_ui_pipeline_mode") == "agentic":
+                st.json(
+                    {
+                        "status": ingest_response.get("status"),
+                        "document_id": ingest_response.get("document_id"),
+                        "act_title": ingest_response.get("act_title"),
+                        "parser_provider": ingest_response.get("parser_provider"),
+                        "graph_path": ingest_response.get("graph_path"),
+                        "bm25_index_dir": ingest_response.get("bm25_index_dir"),
+                        "retrieval_chunk_count": ingest_response.get("retrieval_chunk_count"),
+                        "reasoning_chunk_count": ingest_response.get("reasoning_chunk_count"),
+                        "vector_record_count": ingest_response.get("vector_record_count"),
+                    }
+                )
+        return
+
     with st.form("ingest_form", clear_on_submit=False):
         input_pdf_path = st.text_input("Input PDF Path", value="/home/sonjoy/Bar tax/Income_tax_act_2023.pdf")
         doc_id = st.text_input("Document ID", value="income-tax-act-2023")
@@ -916,6 +1025,7 @@ def render_ingestion_panel(base_url: str) -> None:
             timeout_seconds=INGEST_TIMEOUT_SECONDS,
         )
         if success and response_payload is not None:
+            response_payload["_ui_pipeline_mode"] = "legacy"
             st.session_state["last_ingest_response"] = response_payload
             st.success("PDF ingestion completed.")
         else:
@@ -939,6 +1049,21 @@ def render_ingestion_panel(base_url: str) -> None:
 
 def render_index_building_panel(base_url: str) -> None:
     st.subheader("Index Building")
+    if st.session_state.get("ui_pipeline_mode") == "agentic":
+        st.info("Agentic mode builds BM25 and vector artifacts during ingest. No separate /build-index step is required.")
+        last_ingest_response = st.session_state.get("last_ingest_response") or {}
+        if isinstance(last_ingest_response, dict) and last_ingest_response.get("_ui_pipeline_mode") == "agentic":
+            st.json(
+                {
+                    "document_id": last_ingest_response.get("document_id"),
+                    "graph_path": last_ingest_response.get("graph_path"),
+                    "bm25_index_dir": last_ingest_response.get("bm25_index_dir"),
+                    "retrieval_chunk_count": last_ingest_response.get("retrieval_chunk_count"),
+                    "vector_record_count": last_ingest_response.get("vector_record_count"),
+                }
+            )
+        return
+
     with st.form("build_index_form", clear_on_submit=False):
         chunk_jsonl_path = st.text_input("Chunk JSONL Path", value="data/processed/income-tax-act-2023.jsonl")
         build_sparse = st.checkbox("Build Sparse Index", value=True)
@@ -958,6 +1083,7 @@ def render_index_building_panel(base_url: str) -> None:
             timeout_seconds=INDEX_BUILD_TIMEOUT_SECONDS,
         )
         if success and response_payload is not None:
+            response_payload["_ui_pipeline_mode"] = "legacy"
             st.session_state["last_build_index_response"] = response_payload
             st.success("Index build completed.")
         else:
@@ -994,6 +1120,60 @@ def render_query_panel(base_url: str) -> None:
         st.markdown("**Preset List**")
         for question in GENERATION_TEST_QUESTIONS:
             st.code(question, language="text")
+
+    if st.session_state.get("ui_pipeline_mode") == "agentic":
+        with st.form("agentic_query_form", clear_on_submit=False):
+            question_text = st.text_area(
+                "Question Text",
+                key="question_text",
+                height=100,
+                placeholder="Ask in Bangla or English.",
+            )
+            selection_left, selection_right = st.columns(2)
+            with selection_left:
+                st.selectbox(
+                    "Query Type Override",
+                    options=AGENTIC_QUERY_TYPE_OPTIONS,
+                    key="agentic_query_type",
+                    help="Use auto unless you are intentionally forcing a query path for debugging.",
+                )
+            with selection_right:
+                st.number_input(
+                    "Max Reasoning Steps",
+                    min_value=1,
+                    max_value=12,
+                    step=1,
+                    key="agentic_max_reasoning_steps",
+                )
+            submitted = st.form_submit_button("Run Agentic Query", use_container_width=True)
+
+        if submitted:
+            payload = {
+                "question": question_text,
+                "max_reasoning_steps": int(st.session_state.get("agentic_max_reasoning_steps") or 6),
+            }
+            selected_query_type = str(st.session_state.get("agentic_query_type") or "auto").strip()
+            if selected_query_type and selected_query_type != "auto":
+                payload["query_type"] = selected_query_type
+            success, response_payload, error_message = api_post(
+                base_url,
+                "/agentic/query",
+                payload,
+                timeout_seconds=QUERY_TIMEOUT_SECONDS,
+            )
+            if success and response_payload is not None:
+                response_payload["_ui_pipeline_mode"] = "agentic"
+                st.session_state["last_query_response"] = response_payload
+                trace_id = response_payload.get("trace_id")
+                if isinstance(trace_id, str) and trace_id:
+                    trace_ok, trace_payload, _ = api_get(base_url, f"/trace/{trace_id}")
+                    st.session_state["last_trace_response"] = trace_payload if trace_ok else None
+                else:
+                    st.session_state["last_trace_response"] = None
+                st.success("Agentic query completed.")
+            else:
+                st.error(f"Agentic query failed: {error_message}")
+        return
 
     with st.form("query_form", clear_on_submit=False):
         question_text = st.text_area(
@@ -1050,7 +1230,9 @@ def render_query_panel(base_url: str) -> None:
             timeout_seconds=QUERY_TIMEOUT_SECONDS,
         )
         if success and response_payload is not None:
+            response_payload["_ui_pipeline_mode"] = "legacy"
             st.session_state["last_query_response"] = response_payload
+            st.session_state["last_trace_response"] = None
             st.success("Query completed.")
         else:
             st.error(f"Query failed: {error_message}")
@@ -1059,15 +1241,29 @@ def render_query_panel(base_url: str) -> None:
 def render_citations(citations: list[dict[str, Any]]) -> None:
     if not citations:
         return
-    st.markdown("**Sentence-level Citations**")
+    st.markdown("**Citations**")
     for citation in citations:
         with st.container(border=True):
-            st.markdown(f"`{citation.get('marker')}` {citation.get('doc_title')} | page {citation.get('page_no')}")
+            if citation.get("marker"):
+                st.markdown(f"`{citation.get('marker')}` {citation.get('doc_title')} | page {citation.get('page_no')}")
+                st.caption(
+                    f"chunk_id={citation.get('chunk_id')} | section={citation.get('section_id') or '-'} | "
+                    f"subsection={citation.get('subsection_id') or '-'}"
+                )
+                st.write(citation.get("evidence_snippet", ""))
+                continue
+
+            label = citation.get("label") or citation.get("node_id") or "citation"
+            relation = citation.get("relation") or "support"
+            page_start = citation.get("page_start")
+            page_end = citation.get("page_end")
+            page_label = str(page_start) if page_start == page_end else f"{page_start}-{page_end}"
+            st.markdown(f"`{relation}` {label}")
             st.caption(
-                f"chunk_id={citation.get('chunk_id')} | section={citation.get('section_id') or '-'} | "
-                f"subsection={citation.get('subsection_id') or '-'}"
+                f"section={citation.get('section') or '-'} | subsection={citation.get('subsection') or '-'} | "
+                f"clause={citation.get('clause') or '-'} | pages={page_label}"
             )
-            st.write(citation.get("evidence_snippet", ""))
+            st.write(citation.get("snippet", ""))
 
 
 def render_hit_card(
@@ -1194,10 +1390,7 @@ def render_chunk_browser() -> None:
     last_ingest_response = st.session_state.get("last_ingest_response")
     if not isinstance(last_ingest_response, dict):
         last_ingest_response = {}
-    default_chunk_path = (
-        last_ingest_response.get("output_jsonl_path")
-        or "data/processed/income-tax-act-2023.jsonl"
-    )
+    default_chunk_path = derive_chunk_browser_default_path(last_ingest_response)
     browser_left, browser_right = st.columns([3, 1])
     with browser_left:
         chunk_jsonl_path = st.text_input(
@@ -2070,11 +2263,76 @@ def render_method_comparison(base_url: str) -> None:
             render_comparison_result_column(mode_name, payload)
 
 
-def render_results_panel() -> None:
+def render_agentic_results_panel(base_url: str, response_payload: dict[str, Any]) -> None:
+    metric_columns = st.columns(4)
+    metric_columns[0].metric("Query Type", str(response_payload.get("query_type") or "-"))
+    metric_columns[1].metric("Execution Path", str(response_payload.get("execution_path") or "-"))
+    metric_columns[2].metric("Confidence", f"{float(response_payload.get('confidence') or 0.0):.2f}")
+    metric_columns[3].metric("Citations", str(len(response_payload.get("citations") or [])))
+
+    answer_text = response_payload.get("answer")
+    if answer_text:
+        st.markdown("**Answer**")
+        st.write(answer_text)
+    else:
+        st.info("No grounded answer returned.")
+
+    reasoning_summary = response_payload.get("reasoning_summary") or []
+    if reasoning_summary:
+        st.markdown("**Reasoning Summary**")
+        for note in reasoning_summary:
+            st.write(f"- {note}")
+
+    missing_facts = response_payload.get("missing_facts") or []
+    if missing_facts:
+        st.warning("Missing facts detected.")
+        for item in missing_facts:
+            st.write(f"- {item}")
+
+    verification_failures = response_payload.get("verification_failures") or []
+    if verification_failures:
+        st.warning("Verification flagged unsupported or incomplete claims.")
+        for failure in verification_failures:
+            st.write(f"- {failure}")
+
+    trace_id = response_payload.get("trace_id")
+    if trace_id:
+        st.caption(f"Trace ID: {trace_id}")
+    render_citations(response_payload.get("citations") or [])
+
+    trace_payload = st.session_state.get("last_trace_response")
+    if (
+        not isinstance(trace_payload, dict)
+        and isinstance(trace_id, str)
+        and trace_id
+    ):
+        trace_ok, fetched_trace, _ = api_get(base_url, f"/trace/{trace_id}")
+        trace_payload = fetched_trace if trace_ok else None
+        st.session_state["last_trace_response"] = trace_payload
+
+    if isinstance(trace_payload, dict):
+        trace_state = trace_payload.get("state") or {}
+        st.markdown("**Trace Summary**")
+        trace_columns = st.columns(4)
+        trace_columns[0].metric("Completed Nodes", str(len(trace_state.get("completed_nodes") or [])))
+        trace_columns[1].metric("Evidence Items", str(len(trace_state.get("retrieved_evidence") or [])))
+        trace_columns[2].metric("Pack Type", str(trace_state.get("latest_evidence_pack_type") or "-"))
+        trace_columns[3].metric("Retrieval Attempts", str(len(trace_state.get("retrieval_attempts") or [])))
+        if trace_state.get("completed_nodes"):
+            st.caption(" -> ".join(trace_state.get("completed_nodes") or []))
+        with st.expander("Trace Payload", expanded=False):
+            st.json(trace_payload)
+
+
+def render_results_panel(base_url: str) -> None:
     st.subheader("Results")
     response_payload = st.session_state.get("last_query_response")
     if not response_payload:
         st.info("Run a query to view analyzed query signals, grounded answers, and evidence hits.")
+        return
+
+    if is_agentic_response(response_payload):
+        render_agentic_results_panel(base_url, response_payload)
         return
 
     analyzed_query = response_payload.get("analyzed_query", {})
@@ -2196,7 +2454,7 @@ def main() -> None:
 
     render_chunk_browser()
     render_query_panel(st.session_state["backend_base_url"])
-    render_results_panel()
+    render_results_panel(st.session_state["backend_base_url"])
 
 
 if __name__ == "__main__":

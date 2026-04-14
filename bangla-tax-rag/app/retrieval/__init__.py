@@ -50,6 +50,7 @@ from app.retrieval.hybrid_retriever import (
     HybridRetrievalResult,
     HybridSearchRequest,
 )
+from app.retrieval.local_store import LocalVectorStore
 from app.retrieval.milvus_store import MilvusVectorStore
 from app.retrieval.pinecone_store import PineconeVectorStore
 from app.retrieval.query_transformer import (
@@ -108,6 +109,7 @@ __all__ = [
     "HybridRetrieverConfig",
     "HybridRetrievalResult",
     "HybridSearchRequest",
+    "LocalVectorStore",
     "OpenAITextEmbedder",
     "PineconeVectorStore",
     "QueryPlan",

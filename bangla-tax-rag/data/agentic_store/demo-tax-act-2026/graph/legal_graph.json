@@ -1,0 +1,1321 @@
+{
+  "document_id": "demo-tax-act-2026",
+  "act_title": "Demo Tax Act 2026",
+  "source_path": "/tmp/demo_tax_act.pdf",
+  "parser_provider": "fallback",
+  "root_node_id": "demo-tax-act-2026:act",
+  "nodes": [
+    {
+      "node_id": "demo-tax-act-2026:act",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "act",
+      "text": "Demo Tax Act 2026\nDEMO TAX ACT 2026",
+      "normalized_text": "Demo Tax Act 2026\nDEMO TAX ACT 2026",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": null,
+      "child_ids": [
+        "demo-tax-act-2026:part:part-i"
+      ],
+      "path_ids": [
+        "demo-tax-act-2026:act"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026"
+      ],
+      "label": "Demo Tax Act 2026",
+      "title": "Demo Tax Act 2026",
+      "part_number": null,
+      "part_title": null,
+      "chapter_number": null,
+      "chapter_title": null,
+      "section_number": null,
+      "subsection_number": null,
+      "clause_number": null,
+      "proviso_number": null,
+      "explanation_number": null,
+      "page_anchor_text": null,
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:act",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "act",
+        "chunk_type": "act",
+        "parent_id": null,
+        "child_ids": [
+          "demo-tax-act-2026:part:part-i"
+        ],
+        "sibling_ids": [],
+        "path_ids": [
+          "demo-tax-act-2026:act"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026"
+        ],
+        "part_number": null,
+        "part_title": null,
+        "chapter_number": null,
+        "chapter_title": null,
+        "section_number": null,
+        "subsection_number": null,
+        "clause_number": null,
+        "proviso_number": null,
+        "explanation_number": null,
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Demo Tax Act 2026",
+        "label": "Demo Tax Act 2026",
+        "title": "Demo Tax Act 2026",
+        "governing_node_id": null,
+        "governing_section_number": null,
+        "governing_subsection_number": null,
+        "governing_clause_number": null,
+        "is_leaf": false,
+        "cross_references": [],
+        "structural_parent_id": null,
+        "reasoning_parent_id": "demo-tax-act-2026:act",
+        "governing_rule_id": "demo-tax-act-2026:act",
+        "governing_section_id": null,
+        "attached_proviso_ids": [],
+        "attached_explanation_ids": [],
+        "attached_table_ids": [],
+        "expand_to_node_ids": []
+      },
+      "citability_label": "Demo Tax Act 2026",
+      "is_leaf": false
+    },
+    {
+      "node_id": "demo-tax-act-2026:part:part-i",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "part",
+      "text": "PART I\nPRELIMINARY",
+      "normalized_text": "PART I\nPRELIMINARY",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": "demo-tax-act-2026:act",
+      "child_ids": [
+        "demo-tax-act-2026:chapter:chapter-i"
+      ],
+      "path_ids": [
+        "demo-tax-act-2026:act",
+        "demo-tax-act-2026:part:part-i"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026",
+        "Part I"
+      ],
+      "label": "Part I",
+      "title": "PRELIMINARY",
+      "part_number": "I",
+      "part_title": "PRELIMINARY",
+      "chapter_number": null,
+      "chapter_title": null,
+      "section_number": null,
+      "subsection_number": null,
+      "clause_number": null,
+      "proviso_number": null,
+      "explanation_number": null,
+      "page_anchor_text": null,
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:part:part-i",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "part",
+        "chunk_type": "part",
+        "parent_id": "demo-tax-act-2026:act",
+        "child_ids": [
+          "demo-tax-act-2026:chapter:chapter-i"
+        ],
+        "sibling_ids": [],
+        "path_ids": [
+          "demo-tax-act-2026:act",
+          "demo-tax-act-2026:part:part-i"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026",
+          "Part I"
+        ],
+        "part_number": "I",
+        "part_title": "PRELIMINARY",
+        "chapter_number": null,
+        "chapter_title": null,
+        "section_number": null,
+        "subsection_number": null,
+        "clause_number": null,
+        "proviso_number": null,
+        "explanation_number": null,
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Part I",
+        "label": "Part I",
+        "title": "PRELIMINARY",
+        "governing_node_id": null,
+        "governing_section_number": null,
+        "governing_subsection_number": null,
+        "governing_clause_number": null,
+        "is_leaf": false,
+        "cross_references": [],
+        "structural_parent_id": "demo-tax-act-2026:act",
+        "reasoning_parent_id": "demo-tax-act-2026:act",
+        "governing_rule_id": "demo-tax-act-2026:act",
+        "governing_section_id": null,
+        "attached_proviso_ids": [],
+        "attached_explanation_ids": [],
+        "attached_table_ids": [],
+        "expand_to_node_ids": [
+          "demo-tax-act-2026:act"
+        ]
+      },
+      "citability_label": "Part I",
+      "is_leaf": false
+    },
+    {
+      "node_id": "demo-tax-act-2026:chapter:chapter-i",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "chapter",
+      "text": "CHAPTER I\nGENERAL PROVISIONS",
+      "normalized_text": "CHAPTER I\nGENERAL PROVISIONS",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": "demo-tax-act-2026:part:part-i",
+      "child_ids": [
+        "demo-tax-act-2026:section:1",
+        "demo-tax-act-2026:section:2",
+        "demo-tax-act-2026:section:3"
+      ],
+      "path_ids": [
+        "demo-tax-act-2026:act",
+        "demo-tax-act-2026:part:part-i",
+        "demo-tax-act-2026:chapter:chapter-i"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026",
+        "Part I",
+        "Chapter I"
+      ],
+      "label": "Chapter I",
+      "title": "GENERAL PROVISIONS",
+      "part_number": "I",
+      "part_title": "PRELIMINARY",
+      "chapter_number": "I",
+      "chapter_title": "GENERAL PROVISIONS",
+      "section_number": null,
+      "subsection_number": null,
+      "clause_number": null,
+      "proviso_number": null,
+      "explanation_number": null,
+      "page_anchor_text": null,
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:chapter:chapter-i",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "chapter",
+        "chunk_type": "chapter",
+        "parent_id": "demo-tax-act-2026:part:part-i",
+        "child_ids": [
+          "demo-tax-act-2026:section:1",
+          "demo-tax-act-2026:section:2",
+          "demo-tax-act-2026:section:3"
+        ],
+        "sibling_ids": [],
+        "path_ids": [
+          "demo-tax-act-2026:act",
+          "demo-tax-act-2026:part:part-i",
+          "demo-tax-act-2026:chapter:chapter-i"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026",
+          "Part I",
+          "Chapter I"
+        ],
+        "part_number": "I",
+        "part_title": "PRELIMINARY",
+        "chapter_number": "I",
+        "chapter_title": "GENERAL PROVISIONS",
+        "section_number": null,
+        "subsection_number": null,
+        "clause_number": null,
+        "proviso_number": null,
+        "explanation_number": null,
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Part I > Chapter I",
+        "label": "Chapter I",
+        "title": "GENERAL PROVISIONS",
+        "governing_node_id": null,
+        "governing_section_number": null,
+        "governing_subsection_number": null,
+        "governing_clause_number": null,
+        "is_leaf": false,
+        "cross_references": [],
+        "structural_parent_id": "demo-tax-act-2026:part:part-i",
+        "reasoning_parent_id": "demo-tax-act-2026:part:part-i",
+        "governing_rule_id": "demo-tax-act-2026:part:part-i",
+        "governing_section_id": null,
+        "attached_proviso_ids": [],
+        "attached_explanation_ids": [],
+        "attached_table_ids": [],
+        "expand_to_node_ids": [
+          "demo-tax-act-2026:part:part-i"
+        ]
+      },
+      "citability_label": "Part I > Chapter I",
+      "is_leaf": false
+    },
+    {
+      "node_id": "demo-tax-act-2026:section:1",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "section",
+      "text": "1. Short title and commencement\n(1) This Act may be called the Demo Tax Act 2026.\n(2) It shall come into force at once.",
+      "normalized_text": "1. Short title and commencement\n(1) This Act may be called the Demo Tax Act 2026.\n(2) It shall come into force at once.",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": "demo-tax-act-2026:chapter:chapter-i",
+      "child_ids": [
+        "demo-tax-act-2026:subsection:1-1",
+        "demo-tax-act-2026:subsection:1-2"
+      ],
+      "path_ids": [
+        "demo-tax-act-2026:act",
+        "demo-tax-act-2026:part:part-i",
+        "demo-tax-act-2026:chapter:chapter-i",
+        "demo-tax-act-2026:section:1"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026",
+        "Part I",
+        "Chapter I",
+        "Section 1"
+      ],
+      "label": "Section 1",
+      "title": "Short title and commencement",
+      "part_number": "I",
+      "part_title": "PRELIMINARY",
+      "chapter_number": "I",
+      "chapter_title": "GENERAL PROVISIONS",
+      "section_number": "1",
+      "subsection_number": null,
+      "clause_number": null,
+      "proviso_number": null,
+      "explanation_number": null,
+      "page_anchor_text": "1. Short title and commencement",
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:section:1",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "section",
+        "chunk_type": "rule",
+        "parent_id": "demo-tax-act-2026:chapter:chapter-i",
+        "child_ids": [
+          "demo-tax-act-2026:subsection:1-1",
+          "demo-tax-act-2026:subsection:1-2"
+        ],
+        "sibling_ids": [],
+        "path_ids": [
+          "demo-tax-act-2026:act",
+          "demo-tax-act-2026:part:part-i",
+          "demo-tax-act-2026:chapter:chapter-i",
+          "demo-tax-act-2026:section:1"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026",
+          "Part I",
+          "Chapter I",
+          "Section 1"
+        ],
+        "part_number": "I",
+        "part_title": "PRELIMINARY",
+        "chapter_number": "I",
+        "chapter_title": "GENERAL PROVISIONS",
+        "section_number": "1",
+        "subsection_number": null,
+        "clause_number": null,
+        "proviso_number": null,
+        "explanation_number": null,
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Part I > Chapter I > Section 1",
+        "label": "Section 1",
+        "title": "Short title and commencement",
+        "governing_node_id": null,
+        "governing_section_number": "1",
+        "governing_subsection_number": null,
+        "governing_clause_number": null,
+        "is_leaf": false,
+        "cross_references": [],
+        "structural_parent_id": "demo-tax-act-2026:chapter:chapter-i",
+        "reasoning_parent_id": "demo-tax-act-2026:section:1",
+        "governing_rule_id": "demo-tax-act-2026:section:1",
+        "governing_section_id": null,
+        "attached_proviso_ids": [],
+        "attached_explanation_ids": [],
+        "attached_table_ids": [],
+        "expand_to_node_ids": []
+      },
+      "citability_label": "Part I > Chapter I > Section 1",
+      "is_leaf": false
+    },
+    {
+      "node_id": "demo-tax-act-2026:subsection:1-1",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "subsection",
+      "text": "(1) This Act may be called the Demo Tax Act 2026.",
+      "normalized_text": "(1) This Act may be called the Demo Tax Act 2026.",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": "demo-tax-act-2026:section:1",
+      "child_ids": [],
+      "path_ids": [
+        "demo-tax-act-2026:act",
+        "demo-tax-act-2026:part:part-i",
+        "demo-tax-act-2026:chapter:chapter-i",
+        "demo-tax-act-2026:section:1",
+        "demo-tax-act-2026:subsection:1-1"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026",
+        "Part I",
+        "Chapter I",
+        "Section 1",
+        "Subsection 1"
+      ],
+      "label": "Subsection 1",
+      "title": "This Act may be called the Demo Tax Act 2026.",
+      "part_number": "I",
+      "part_title": "PRELIMINARY",
+      "chapter_number": "I",
+      "chapter_title": "GENERAL PROVISIONS",
+      "section_number": "1",
+      "subsection_number": "1",
+      "clause_number": null,
+      "proviso_number": null,
+      "explanation_number": null,
+      "page_anchor_text": "(1) This Act may be called the Demo Tax Act 2026.",
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:subsection:1-1",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "subsection",
+        "chunk_type": "rule",
+        "parent_id": "demo-tax-act-2026:section:1",
+        "child_ids": [],
+        "sibling_ids": [
+          "demo-tax-act-2026:subsection:1-2"
+        ],
+        "path_ids": [
+          "demo-tax-act-2026:act",
+          "demo-tax-act-2026:part:part-i",
+          "demo-tax-act-2026:chapter:chapter-i",
+          "demo-tax-act-2026:section:1",
+          "demo-tax-act-2026:subsection:1-1"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026",
+          "Part I",
+          "Chapter I",
+          "Section 1",
+          "Subsection 1"
+        ],
+        "part_number": "I",
+        "part_title": "PRELIMINARY",
+        "chapter_number": "I",
+        "chapter_title": "GENERAL PROVISIONS",
+        "section_number": "1",
+        "subsection_number": "1",
+        "clause_number": null,
+        "proviso_number": null,
+        "explanation_number": null,
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Part I > Chapter I > Section 1 > Subsection 1",
+        "label": "Subsection 1",
+        "title": "This Act may be called the Demo Tax Act 2026.",
+        "governing_node_id": null,
+        "governing_section_number": "1",
+        "governing_subsection_number": "1",
+        "governing_clause_number": null,
+        "is_leaf": true,
+        "cross_references": [],
+        "structural_parent_id": "demo-tax-act-2026:section:1",
+        "reasoning_parent_id": "demo-tax-act-2026:section:1",
+        "governing_rule_id": "demo-tax-act-2026:section:1",
+        "governing_section_id": "demo-tax-act-2026:section:1",
+        "attached_proviso_ids": [],
+        "attached_explanation_ids": [],
+        "attached_table_ids": [],
+        "expand_to_node_ids": [
+          "demo-tax-act-2026:subsection:1-2",
+          "demo-tax-act-2026:section:1"
+        ]
+      },
+      "citability_label": "Part I > Chapter I > Section 1 > Subsection 1",
+      "is_leaf": true
+    },
+    {
+      "node_id": "demo-tax-act-2026:subsection:1-2",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "subsection",
+      "text": "(2) It shall come into force at once.",
+      "normalized_text": "(2) It shall come into force at once.",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": "demo-tax-act-2026:section:1",
+      "child_ids": [],
+      "path_ids": [
+        "demo-tax-act-2026:act",
+        "demo-tax-act-2026:part:part-i",
+        "demo-tax-act-2026:chapter:chapter-i",
+        "demo-tax-act-2026:section:1",
+        "demo-tax-act-2026:subsection:1-2"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026",
+        "Part I",
+        "Chapter I",
+        "Section 1",
+        "Subsection 2"
+      ],
+      "label": "Subsection 2",
+      "title": "It shall come into force at once.",
+      "part_number": "I",
+      "part_title": "PRELIMINARY",
+      "chapter_number": "I",
+      "chapter_title": "GENERAL PROVISIONS",
+      "section_number": "1",
+      "subsection_number": "2",
+      "clause_number": null,
+      "proviso_number": null,
+      "explanation_number": null,
+      "page_anchor_text": "(2) It shall come into force at once.",
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:subsection:1-2",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "subsection",
+        "chunk_type": "rule",
+        "parent_id": "demo-tax-act-2026:section:1",
+        "child_ids": [],
+        "sibling_ids": [
+          "demo-tax-act-2026:subsection:1-1"
+        ],
+        "path_ids": [
+          "demo-tax-act-2026:act",
+          "demo-tax-act-2026:part:part-i",
+          "demo-tax-act-2026:chapter:chapter-i",
+          "demo-tax-act-2026:section:1",
+          "demo-tax-act-2026:subsection:1-2"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026",
+          "Part I",
+          "Chapter I",
+          "Section 1",
+          "Subsection 2"
+        ],
+        "part_number": "I",
+        "part_title": "PRELIMINARY",
+        "chapter_number": "I",
+        "chapter_title": "GENERAL PROVISIONS",
+        "section_number": "1",
+        "subsection_number": "2",
+        "clause_number": null,
+        "proviso_number": null,
+        "explanation_number": null,
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Part I > Chapter I > Section 1 > Subsection 2",
+        "label": "Subsection 2",
+        "title": "It shall come into force at once.",
+        "governing_node_id": null,
+        "governing_section_number": "1",
+        "governing_subsection_number": "2",
+        "governing_clause_number": null,
+        "is_leaf": true,
+        "cross_references": [],
+        "structural_parent_id": "demo-tax-act-2026:section:1",
+        "reasoning_parent_id": "demo-tax-act-2026:section:1",
+        "governing_rule_id": "demo-tax-act-2026:section:1",
+        "governing_section_id": "demo-tax-act-2026:section:1",
+        "attached_proviso_ids": [],
+        "attached_explanation_ids": [],
+        "attached_table_ids": [],
+        "expand_to_node_ids": [
+          "demo-tax-act-2026:subsection:1-1",
+          "demo-tax-act-2026:section:1"
+        ]
+      },
+      "citability_label": "Part I > Chapter I > Section 1 > Subsection 2",
+      "is_leaf": true
+    },
+    {
+      "node_id": "demo-tax-act-2026:section:2",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "section",
+      "text": "2. Definition of Commissioner\n(1) In this Act, \"Commissioner\" means the Commissioner of Taxes appointed by the Board.\nProvided that the Board may assign jurisdiction to another tax authority.\nExplanation 1. Commissioner includes an officer authorized in writing by the Board.",
+      "normalized_text": "2. Definition of Commissioner\n(1) In this Act, \"Commissioner\" means the Commissioner of Taxes appointed by the Board.\nProvided that the Board may assign jurisdiction to another tax authority.\nExplanation 1. Commissioner includes an officer authorized in writing by the Board.",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": "demo-tax-act-2026:chapter:chapter-i",
+      "child_ids": [
+        "demo-tax-act-2026:subsection:2-1"
+      ],
+      "path_ids": [
+        "demo-tax-act-2026:act",
+        "demo-tax-act-2026:part:part-i",
+        "demo-tax-act-2026:chapter:chapter-i",
+        "demo-tax-act-2026:section:2"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026",
+        "Part I",
+        "Chapter I",
+        "Section 2"
+      ],
+      "label": "Section 2",
+      "title": "Definition of Commissioner",
+      "part_number": "I",
+      "part_title": "PRELIMINARY",
+      "chapter_number": "I",
+      "chapter_title": "GENERAL PROVISIONS",
+      "section_number": "2",
+      "subsection_number": null,
+      "clause_number": null,
+      "proviso_number": null,
+      "explanation_number": null,
+      "page_anchor_text": "2. Definition of Commissioner",
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:section:2",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "section",
+        "chunk_type": "definition",
+        "parent_id": "demo-tax-act-2026:chapter:chapter-i",
+        "child_ids": [
+          "demo-tax-act-2026:subsection:2-1"
+        ],
+        "sibling_ids": [],
+        "path_ids": [
+          "demo-tax-act-2026:act",
+          "demo-tax-act-2026:part:part-i",
+          "demo-tax-act-2026:chapter:chapter-i",
+          "demo-tax-act-2026:section:2"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026",
+          "Part I",
+          "Chapter I",
+          "Section 2"
+        ],
+        "part_number": "I",
+        "part_title": "PRELIMINARY",
+        "chapter_number": "I",
+        "chapter_title": "GENERAL PROVISIONS",
+        "section_number": "2",
+        "subsection_number": null,
+        "clause_number": null,
+        "proviso_number": null,
+        "explanation_number": null,
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Part I > Chapter I > Section 2",
+        "label": "Section 2",
+        "title": "Definition of Commissioner",
+        "governing_node_id": null,
+        "governing_section_number": "2",
+        "governing_subsection_number": null,
+        "governing_clause_number": null,
+        "is_leaf": false,
+        "cross_references": [],
+        "structural_parent_id": "demo-tax-act-2026:chapter:chapter-i",
+        "reasoning_parent_id": "demo-tax-act-2026:section:2",
+        "governing_rule_id": "demo-tax-act-2026:section:2",
+        "governing_section_id": null,
+        "attached_proviso_ids": [],
+        "attached_explanation_ids": [],
+        "attached_table_ids": [],
+        "expand_to_node_ids": []
+      },
+      "citability_label": "Part I > Chapter I > Section 2",
+      "is_leaf": false
+    },
+    {
+      "node_id": "demo-tax-act-2026:subsection:2-1",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "subsection",
+      "text": "(1) In this Act, \"Commissioner\" means the Commissioner of Taxes appointed by the Board.\nProvided that the Board may assign jurisdiction to another tax authority.\nExplanation 1. Commissioner includes an officer authorized in writing by the Board.",
+      "normalized_text": "(1) In this Act, \"Commissioner\" means the Commissioner of Taxes appointed by the Board.\nProvided that the Board may assign jurisdiction to another tax authority.\nExplanation 1. Commissioner includes an officer authorized in writing by the Board.",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": "demo-tax-act-2026:section:2",
+      "child_ids": [
+        "demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1",
+        "demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1"
+      ],
+      "path_ids": [
+        "demo-tax-act-2026:act",
+        "demo-tax-act-2026:part:part-i",
+        "demo-tax-act-2026:chapter:chapter-i",
+        "demo-tax-act-2026:section:2",
+        "demo-tax-act-2026:subsection:2-1"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026",
+        "Part I",
+        "Chapter I",
+        "Section 2",
+        "Subsection 1"
+      ],
+      "label": "Subsection 1",
+      "title": "In this Act, \"Commissioner\" means the Commissioner of Taxes appointed by the Board.",
+      "part_number": "I",
+      "part_title": "PRELIMINARY",
+      "chapter_number": "I",
+      "chapter_title": "GENERAL PROVISIONS",
+      "section_number": "2",
+      "subsection_number": "1",
+      "clause_number": null,
+      "proviso_number": null,
+      "explanation_number": null,
+      "page_anchor_text": "(1) In this Act, \"Commissioner\" means the Commissioner of Taxes appointed by the Board.",
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:subsection:2-1",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "subsection",
+        "chunk_type": "definition",
+        "parent_id": "demo-tax-act-2026:section:2",
+        "child_ids": [
+          "demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1",
+          "demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1"
+        ],
+        "sibling_ids": [],
+        "path_ids": [
+          "demo-tax-act-2026:act",
+          "demo-tax-act-2026:part:part-i",
+          "demo-tax-act-2026:chapter:chapter-i",
+          "demo-tax-act-2026:section:2",
+          "demo-tax-act-2026:subsection:2-1"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026",
+          "Part I",
+          "Chapter I",
+          "Section 2",
+          "Subsection 1"
+        ],
+        "part_number": "I",
+        "part_title": "PRELIMINARY",
+        "chapter_number": "I",
+        "chapter_title": "GENERAL PROVISIONS",
+        "section_number": "2",
+        "subsection_number": "1",
+        "clause_number": null,
+        "proviso_number": null,
+        "explanation_number": null,
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Part I > Chapter I > Section 2 > Subsection 1",
+        "label": "Subsection 1",
+        "title": "In this Act, \"Commissioner\" means the Commissioner of Taxes appointed by the Board.",
+        "governing_node_id": null,
+        "governing_section_number": "2",
+        "governing_subsection_number": "1",
+        "governing_clause_number": null,
+        "is_leaf": false,
+        "cross_references": [],
+        "structural_parent_id": "demo-tax-act-2026:section:2",
+        "reasoning_parent_id": "demo-tax-act-2026:section:2",
+        "governing_rule_id": "demo-tax-act-2026:section:2",
+        "governing_section_id": "demo-tax-act-2026:section:2",
+        "attached_proviso_ids": [
+          "demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1"
+        ],
+        "attached_explanation_ids": [
+          "demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1"
+        ],
+        "attached_table_ids": [],
+        "expand_to_node_ids": [
+          "demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1",
+          "demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1",
+          "demo-tax-act-2026:section:2"
+        ]
+      },
+      "citability_label": "Part I > Chapter I > Section 2 > Subsection 1",
+      "is_leaf": false
+    },
+    {
+      "node_id": "demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "proviso",
+      "text": "Provided that the Board may assign jurisdiction to another tax authority.\nExplanation 1. Commissioner includes an officer authorized in writing by the Board.",
+      "normalized_text": "Provided that the Board may assign jurisdiction to another tax authority.\nExplanation 1. Commissioner includes an officer authorized in writing by the Board.",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": "demo-tax-act-2026:subsection:2-1",
+      "child_ids": [],
+      "path_ids": [
+        "demo-tax-act-2026:act",
+        "demo-tax-act-2026:part:part-i",
+        "demo-tax-act-2026:chapter:chapter-i",
+        "demo-tax-act-2026:section:2",
+        "demo-tax-act-2026:subsection:2-1",
+        "demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026",
+        "Part I",
+        "Chapter I",
+        "Section 2",
+        "Subsection 1",
+        "Proviso 1"
+      ],
+      "label": "Proviso 1",
+      "title": null,
+      "part_number": "I",
+      "part_title": "PRELIMINARY",
+      "chapter_number": "I",
+      "chapter_title": "GENERAL PROVISIONS",
+      "section_number": "2",
+      "subsection_number": "1",
+      "clause_number": null,
+      "proviso_number": "1",
+      "explanation_number": null,
+      "page_anchor_text": "Provided that the Board may assign jurisdiction to another tax authority.",
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "proviso",
+        "chunk_type": "proviso",
+        "parent_id": "demo-tax-act-2026:subsection:2-1",
+        "child_ids": [],
+        "sibling_ids": [],
+        "path_ids": [
+          "demo-tax-act-2026:act",
+          "demo-tax-act-2026:part:part-i",
+          "demo-tax-act-2026:chapter:chapter-i",
+          "demo-tax-act-2026:section:2",
+          "demo-tax-act-2026:subsection:2-1",
+          "demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026",
+          "Part I",
+          "Chapter I",
+          "Section 2",
+          "Subsection 1",
+          "Proviso 1"
+        ],
+        "part_number": "I",
+        "part_title": "PRELIMINARY",
+        "chapter_number": "I",
+        "chapter_title": "GENERAL PROVISIONS",
+        "section_number": "2",
+        "subsection_number": "1",
+        "clause_number": null,
+        "proviso_number": "1",
+        "explanation_number": null,
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Part I > Chapter I > Section 2 > Subsection 1 > Proviso 1",
+        "label": "Proviso 1",
+        "title": null,
+        "governing_node_id": "demo-tax-act-2026:subsection:2-1",
+        "governing_section_number": "2",
+        "governing_subsection_number": "1",
+        "governing_clause_number": null,
+        "is_leaf": true,
+        "cross_references": [],
+        "structural_parent_id": "demo-tax-act-2026:subsection:2-1",
+        "reasoning_parent_id": "demo-tax-act-2026:subsection:2-1",
+        "governing_rule_id": "demo-tax-act-2026:subsection:2-1",
+        "governing_section_id": "demo-tax-act-2026:section:2",
+        "attached_proviso_ids": [],
+        "attached_explanation_ids": [],
+        "attached_table_ids": [],
+        "expand_to_node_ids": [
+          "demo-tax-act-2026:subsection:2-1",
+          "demo-tax-act-2026:section:2"
+        ]
+      },
+      "citability_label": "Part I > Chapter I > Section 2 > Subsection 1 > Proviso 1",
+      "is_leaf": true
+    },
+    {
+      "node_id": "demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "explanation",
+      "text": "Explanation 1. Commissioner includes an officer authorized in writing by the Board.",
+      "normalized_text": "Explanation 1. Commissioner includes an officer authorized in writing by the Board.",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": "demo-tax-act-2026:subsection:2-1",
+      "child_ids": [],
+      "path_ids": [
+        "demo-tax-act-2026:act",
+        "demo-tax-act-2026:part:part-i",
+        "demo-tax-act-2026:chapter:chapter-i",
+        "demo-tax-act-2026:section:2",
+        "demo-tax-act-2026:subsection:2-1",
+        "demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026",
+        "Part I",
+        "Chapter I",
+        "Section 2",
+        "Subsection 1",
+        "Explanation 1"
+      ],
+      "label": "Explanation 1",
+      "title": null,
+      "part_number": "I",
+      "part_title": "PRELIMINARY",
+      "chapter_number": "I",
+      "chapter_title": "GENERAL PROVISIONS",
+      "section_number": "2",
+      "subsection_number": "1",
+      "clause_number": null,
+      "proviso_number": null,
+      "explanation_number": "1",
+      "page_anchor_text": "Explanation 1. Commissioner includes an officer authorized in writing by the Board.",
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "explanation",
+        "chunk_type": "explanation",
+        "parent_id": "demo-tax-act-2026:subsection:2-1",
+        "child_ids": [],
+        "sibling_ids": [],
+        "path_ids": [
+          "demo-tax-act-2026:act",
+          "demo-tax-act-2026:part:part-i",
+          "demo-tax-act-2026:chapter:chapter-i",
+          "demo-tax-act-2026:section:2",
+          "demo-tax-act-2026:subsection:2-1",
+          "demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026",
+          "Part I",
+          "Chapter I",
+          "Section 2",
+          "Subsection 1",
+          "Explanation 1"
+        ],
+        "part_number": "I",
+        "part_title": "PRELIMINARY",
+        "chapter_number": "I",
+        "chapter_title": "GENERAL PROVISIONS",
+        "section_number": "2",
+        "subsection_number": "1",
+        "clause_number": null,
+        "proviso_number": null,
+        "explanation_number": "1",
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Part I > Chapter I > Section 2 > Subsection 1 > Explanation 1",
+        "label": "Explanation 1",
+        "title": null,
+        "governing_node_id": "demo-tax-act-2026:subsection:2-1",
+        "governing_section_number": "2",
+        "governing_subsection_number": "1",
+        "governing_clause_number": null,
+        "is_leaf": true,
+        "cross_references": [],
+        "structural_parent_id": "demo-tax-act-2026:subsection:2-1",
+        "reasoning_parent_id": "demo-tax-act-2026:subsection:2-1",
+        "governing_rule_id": "demo-tax-act-2026:subsection:2-1",
+        "governing_section_id": "demo-tax-act-2026:section:2",
+        "attached_proviso_ids": [],
+        "attached_explanation_ids": [],
+        "attached_table_ids": [],
+        "expand_to_node_ids": [
+          "demo-tax-act-2026:subsection:2-1",
+          "demo-tax-act-2026:section:2"
+        ]
+      },
+      "citability_label": "Part I > Chapter I > Section 2 > Subsection 1 > Explanation 1",
+      "is_leaf": true
+    },
+    {
+      "node_id": "demo-tax-act-2026:section:3",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "section",
+      "text": "3. Tax rate for a small company\n(1) The rate of tax shall be 15 percent of taxable income.",
+      "normalized_text": "3. Tax rate for a small company\n(1) The rate of tax shall be 15 percent of taxable income.",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": "demo-tax-act-2026:chapter:chapter-i",
+      "child_ids": [
+        "demo-tax-act-2026:subsection:3-1"
+      ],
+      "path_ids": [
+        "demo-tax-act-2026:act",
+        "demo-tax-act-2026:part:part-i",
+        "demo-tax-act-2026:chapter:chapter-i",
+        "demo-tax-act-2026:section:3"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026",
+        "Part I",
+        "Chapter I",
+        "Section 3"
+      ],
+      "label": "Section 3",
+      "title": "Tax rate for a small company",
+      "part_number": "I",
+      "part_title": "PRELIMINARY",
+      "chapter_number": "I",
+      "chapter_title": "GENERAL PROVISIONS",
+      "section_number": "3",
+      "subsection_number": null,
+      "clause_number": null,
+      "proviso_number": null,
+      "explanation_number": null,
+      "page_anchor_text": "3. Tax rate for a small company",
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:section:3",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "section",
+        "chunk_type": "rule",
+        "parent_id": "demo-tax-act-2026:chapter:chapter-i",
+        "child_ids": [
+          "demo-tax-act-2026:subsection:3-1"
+        ],
+        "sibling_ids": [],
+        "path_ids": [
+          "demo-tax-act-2026:act",
+          "demo-tax-act-2026:part:part-i",
+          "demo-tax-act-2026:chapter:chapter-i",
+          "demo-tax-act-2026:section:3"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026",
+          "Part I",
+          "Chapter I",
+          "Section 3"
+        ],
+        "part_number": "I",
+        "part_title": "PRELIMINARY",
+        "chapter_number": "I",
+        "chapter_title": "GENERAL PROVISIONS",
+        "section_number": "3",
+        "subsection_number": null,
+        "clause_number": null,
+        "proviso_number": null,
+        "explanation_number": null,
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Part I > Chapter I > Section 3",
+        "label": "Section 3",
+        "title": "Tax rate for a small company",
+        "governing_node_id": null,
+        "governing_section_number": "3",
+        "governing_subsection_number": null,
+        "governing_clause_number": null,
+        "is_leaf": false,
+        "cross_references": [],
+        "structural_parent_id": "demo-tax-act-2026:chapter:chapter-i",
+        "reasoning_parent_id": "demo-tax-act-2026:section:3",
+        "governing_rule_id": "demo-tax-act-2026:section:3",
+        "governing_section_id": null,
+        "attached_proviso_ids": [],
+        "attached_explanation_ids": [],
+        "attached_table_ids": [],
+        "expand_to_node_ids": []
+      },
+      "citability_label": "Part I > Chapter I > Section 3",
+      "is_leaf": false
+    },
+    {
+      "node_id": "demo-tax-act-2026:subsection:3-1",
+      "document_id": "demo-tax-act-2026",
+      "act_title": "Demo Tax Act 2026",
+      "node_type": "subsection",
+      "text": "(1) The rate of tax shall be 15 percent of taxable income.",
+      "normalized_text": "(1) The rate of tax shall be 15 percent of taxable income.",
+      "page_start": 1,
+      "page_end": 1,
+      "parent_id": "demo-tax-act-2026:section:3",
+      "child_ids": [],
+      "path_ids": [
+        "demo-tax-act-2026:act",
+        "demo-tax-act-2026:part:part-i",
+        "demo-tax-act-2026:chapter:chapter-i",
+        "demo-tax-act-2026:section:3",
+        "demo-tax-act-2026:subsection:3-1"
+      ],
+      "path_labels": [
+        "Demo Tax Act 2026",
+        "Part I",
+        "Chapter I",
+        "Section 3",
+        "Subsection 1"
+      ],
+      "label": "Subsection 1",
+      "title": "The rate of tax shall be 15 percent of taxable income.",
+      "part_number": "I",
+      "part_title": "PRELIMINARY",
+      "chapter_number": "I",
+      "chapter_title": "GENERAL PROVISIONS",
+      "section_number": "3",
+      "subsection_number": "1",
+      "clause_number": null,
+      "proviso_number": null,
+      "explanation_number": null,
+      "page_anchor_text": "(1) The rate of tax shall be 15 percent of taxable income.",
+      "cross_references": [],
+      "metadata": {
+        "node_id": "demo-tax-act-2026:subsection:3-1",
+        "document_id": "demo-tax-act-2026",
+        "act_title": "Demo Tax Act 2026",
+        "node_type": "subsection",
+        "chunk_type": "rule",
+        "parent_id": "demo-tax-act-2026:section:3",
+        "child_ids": [],
+        "sibling_ids": [],
+        "path_ids": [
+          "demo-tax-act-2026:act",
+          "demo-tax-act-2026:part:part-i",
+          "demo-tax-act-2026:chapter:chapter-i",
+          "demo-tax-act-2026:section:3",
+          "demo-tax-act-2026:subsection:3-1"
+        ],
+        "path_labels": [
+          "Demo Tax Act 2026",
+          "Part I",
+          "Chapter I",
+          "Section 3",
+          "Subsection 1"
+        ],
+        "part_number": "I",
+        "part_title": "PRELIMINARY",
+        "chapter_number": "I",
+        "chapter_title": "GENERAL PROVISIONS",
+        "section_number": "3",
+        "subsection_number": "1",
+        "clause_number": null,
+        "proviso_number": null,
+        "explanation_number": null,
+        "page_number": 1,
+        "page_start": 1,
+        "page_end": 1,
+        "page_numbers": [
+          1
+        ],
+        "citability_label": "Part I > Chapter I > Section 3 > Subsection 1",
+        "label": "Subsection 1",
+        "title": "The rate of tax shall be 15 percent of taxable income.",
+        "governing_node_id": null,
+        "governing_section_number": "3",
+        "governing_subsection_number": "1",
+        "governing_clause_number": null,
+        "is_leaf": true,
+        "cross_references": [],
+        "structural_parent_id": "demo-tax-act-2026:section:3",
+        "reasoning_parent_id": "demo-tax-act-2026:section:3",
+        "governing_rule_id": "demo-tax-act-2026:section:3",
+        "governing_section_id": "demo-tax-act-2026:section:3",
+        "attached_proviso_ids": [],
+        "attached_explanation_ids": [],
+        "attached_table_ids": [],
+        "expand_to_node_ids": [
+          "demo-tax-act-2026:section:3"
+        ]
+      },
+      "citability_label": "Part I > Chapter I > Section 3 > Subsection 1",
+      "is_leaf": true
+    }
+  ],
+  "links": [
+    {
+      "source_node_id": "demo-tax-act-2026:part:part-i",
+      "target_node_id": "demo-tax-act-2026:act",
+      "relation": "parent_context",
+      "metadata": {
+        "link_kind": "structural_parent"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:chapter:chapter-i",
+      "target_node_id": "demo-tax-act-2026:part:part-i",
+      "relation": "parent_context",
+      "metadata": {
+        "link_kind": "structural_parent"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:section:1",
+      "target_node_id": "demo-tax-act-2026:chapter:chapter-i",
+      "relation": "parent_context",
+      "metadata": {
+        "link_kind": "structural_parent"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:subsection:1-1",
+      "target_node_id": "demo-tax-act-2026:section:1",
+      "relation": "parent_context",
+      "metadata": {
+        "link_kind": "structural_parent"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:subsection:1-2",
+      "target_node_id": "demo-tax-act-2026:section:1",
+      "relation": "parent_context",
+      "metadata": {
+        "link_kind": "structural_parent"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:section:2",
+      "target_node_id": "demo-tax-act-2026:chapter:chapter-i",
+      "relation": "parent_context",
+      "metadata": {
+        "link_kind": "structural_parent"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:subsection:2-1",
+      "target_node_id": "demo-tax-act-2026:section:2",
+      "relation": "parent_context",
+      "metadata": {
+        "link_kind": "structural_parent"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1",
+      "target_node_id": "demo-tax-act-2026:subsection:2-1",
+      "relation": "parent_context",
+      "metadata": {
+        "link_kind": "structural_parent"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1",
+      "target_node_id": "demo-tax-act-2026:subsection:2-1",
+      "relation": "parent_context",
+      "metadata": {
+        "link_kind": "structural_parent"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:section:3",
+      "target_node_id": "demo-tax-act-2026:chapter:chapter-i",
+      "relation": "parent_context",
+      "metadata": {
+        "link_kind": "structural_parent"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:subsection:3-1",
+      "target_node_id": "demo-tax-act-2026:section:3",
+      "relation": "parent_context",
+      "metadata": {
+        "link_kind": "structural_parent"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:subsection:1-1",
+      "target_node_id": "demo-tax-act-2026:subsection:1-2",
+      "relation": "sibling_context",
+      "metadata": {
+        "link_kind": "subsection_sibling"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:subsection:1-2",
+      "target_node_id": "demo-tax-act-2026:subsection:1-1",
+      "relation": "sibling_context",
+      "metadata": {
+        "link_kind": "subsection_sibling"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:proviso:demo-tax-act-2026-subsection-2-1-1",
+      "target_node_id": "demo-tax-act-2026:subsection:2-1",
+      "relation": "governing_rule",
+      "metadata": {
+        "link_kind": "attached_proviso"
+      }
+    },
+    {
+      "source_node_id": "demo-tax-act-2026:explanation:demo-tax-act-2026-subsection-2-1-1",
+      "target_node_id": "demo-tax-act-2026:subsection:2-1",
+      "relation": "governing_rule",
+      "metadata": {
+        "link_kind": "attached_explanation"
+      }
+    }
+  ]
+}

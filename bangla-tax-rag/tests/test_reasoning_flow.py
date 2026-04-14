@@ -93,6 +93,8 @@ def test_reasoning_graph_definition_flow_produces_grounded_answer() -> None:
 
     assert state.final_answer
     assert "Under the retrieved definition" in state.final_answer
+    assert "commissioner" in state.final_answer.lower()
+    assert "Under the retrieved definition, 2." not in state.final_answer
     assert state.citations
     assert state.completed_nodes == ["router", "planner", "retrieve", "reason", "verify", "compose"]
     assert state.confidence is not None and state.confidence > 0.5

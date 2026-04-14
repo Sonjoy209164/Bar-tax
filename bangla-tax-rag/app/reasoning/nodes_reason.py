@@ -78,10 +78,22 @@ def _build_draft_answer(state: AgentState, evidence_items: list) -> str:
 
 
 def _lead_sentence(text: str) -> str:
-    sentence = re.split(r"(?<=[.!?;:])\s+", text.strip(), maxsplit=1)[0].strip()
-    if not sentence.endswith("."):
-        sentence += "."
-    return sentence
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) > 1 and re.match(r"^\d+[A-Za-z]?(?:\.\d+)?\.\s+.+$", lines[0]):
+        lines = lines[1:]
+    normalized = " ".join(lines).strip() or text.strip()
+    normalized = re.sub(r"^\((\d+[A-Za-z]?)\)\s*", "", normalized)
+    sentences = [sentence.strip() for sentence in re.split(r"(?<=[.!?;:])\s+", normalized) if sentence.strip()]
+    for sentence in sentences:
+        if re.fullmatch(r"\d+[A-Za-z]?\.", sentence):
+            continue
+        if not sentence.endswith("."):
+            sentence += "."
+        return sentence
+    fallback = normalized or text.strip()
+    if fallback and not fallback.endswith("."):
+        fallback += "."
+    return fallback
 
 
 def _infer_missing_facts(state: AgentState) -> list[str]:

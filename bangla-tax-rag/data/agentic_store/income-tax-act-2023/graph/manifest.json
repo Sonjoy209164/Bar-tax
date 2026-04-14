@@ -1,0 +1,21 @@
+{
+  "document_id": "income-tax-act-2023",
+  "act_title": "Income Tax Act 2023",
+  "parser_provider": "fallback",
+  "source_path": "/home/sonjoy/Bar tax/Income_tax_act_2023.pdf",
+  "root_node_id": "income-tax-act-2023:act",
+  "node_count": 2641,
+  "link_count": 18876,
+  "store_version": "1",
+  "graph_filename": "legal_graph.json",
+  "manifest_filename": "manifest.json",
+  "nodes_filename": "nodes.jsonl",
+  "parent_nodes_filename": "parent_nodes.jsonl",
+  "retrieval_nodes_filename": "retrieval_nodes.jsonl",
+  "links_filename": "links.jsonl",
+  "metadata": {
+    "parent_node_count": 1537,
+    "retrieval_node_count": 2568,
+    "has_link_graph": true
+  }
+}

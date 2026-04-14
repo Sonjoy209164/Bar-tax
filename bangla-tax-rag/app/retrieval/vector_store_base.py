@@ -10,6 +10,7 @@ from app.core.settings import get_settings
 
 
 class VectorStoreProvider(StrEnum):
+    LOCAL = "local"
     PINECONE = "pinecone"
     MILVUS = "milvus"
 
@@ -19,6 +20,7 @@ class VectorStoreConfig(BaseModel):
     metric: str = "cosine"
     namespace: str | None = None
     dimensions: int | None = Field(default=None, ge=1)
+    local_store_path: str | None = None
     pinecone_api_key: str | None = None
     pinecone_index_name: str | None = None
     pinecone_host: str | None = None
@@ -97,6 +99,10 @@ class VectorStore(ABC):
 
 def build_vector_store(config: VectorStoreConfig | None = None) -> VectorStore:
     resolved_config = config or vector_store_config_from_settings()
+    if resolved_config.provider is VectorStoreProvider.LOCAL:
+        from app.retrieval.local_store import LocalVectorStore
+
+        return LocalVectorStore(resolved_config)
     if resolved_config.provider is VectorStoreProvider.PINECONE:
         from app.retrieval.pinecone_store import PineconeVectorStore
 
@@ -115,6 +121,7 @@ def vector_store_config_from_settings() -> VectorStoreConfig:
         metric=settings.vector_metric,
         namespace=settings.vector_namespace,
         dimensions=settings.embedding_dimensions,
+        local_store_path=getattr(settings, "local_vector_store_path", None),
         pinecone_api_key=settings.pinecone_api_key,
         pinecone_index_name=settings.pinecone_index_name,
         pinecone_host=settings.pinecone_host,

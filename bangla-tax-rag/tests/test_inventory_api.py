@@ -65,6 +65,7 @@ def _build_inventory_service(tmp_path) -> InventoryService:  # type: ignore[no-u
             catalog_path=str(tmp_path / "inventory_catalog.jsonl"),
             namespace="inventory-test",
             low_stock_threshold=10,
+            agentic_trace_dir=str(tmp_path / "inventory_agentic_traces"),
         ),
     )
 
@@ -174,9 +175,12 @@ async def test_inventory_api_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     assert ask_response.status_code == 200
     ask_payload = ask_response.json()
+    assert ask_payload["assistant_mode"] == "support"
+    assert ask_payload["reply_style"] == "short"
     assert ask_payload["total_hits"] == 1
-    assert "low-stock item" in ask_payload["answer"].lower()
+    assert "most urgent low-stock match" in ask_payload["answer"].lower()
     assert "Wireless Earbuds Lite" in ask_payload["answer"]
+    assert ask_payload["recommended_product_ids"] == []
 
     assert delete_response.status_code == 200
     assert delete_response.json()["deleted_count"] == 1
@@ -240,6 +244,583 @@ async def test_inventory_ask_applies_price_heuristics(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.anyio
+async def test_inventory_sales_mode_recommends_grounded_product(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-headphones-lite",
+                        "sku": "WHP-010",
+                        "name": "Wireless Headphones Lite",
+                        "category": "Audio",
+                        "brand": "AudioTech",
+                        "short_description": "Affordable wireless headphones for everyday listening",
+                        "price": 149.99,
+                        "currency": "USD",
+                        "stock": 18,
+                        "status": "Active",
+                        "tags": ["wireless", "audio"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-headphones-pro",
+                        "sku": "WHP-900",
+                        "name": "Wireless Headphones Pro Max",
+                        "category": "Audio",
+                        "brand": "AudioTech",
+                        "short_description": "Premium wireless headphones with noise cancellation",
+                        "price": 399.99,
+                        "currency": "USD",
+                        "stock": 11,
+                        "status": "Active",
+                        "tags": ["wireless", "audio", "premium"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-watch-lowquality",
+                        "sku": "WW",
+                        "name": "watch",
+                        "category": "ww",
+                        "brand": "ww",
+                        "short_description": "zsdfvzv",
+                        "price": 12.44,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": [],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        ask_response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "Recommend the best premium wireless headphones for a customer",
+                "top_k": 5,
+                "assistant_mode": "sales",
+                "reply_style": "detailed",
+            },
+        )
+
+    assert ask_response.status_code == 200
+    payload = ask_response.json()
+    assert payload["assistant_mode"] == "sales"
+    assert payload["reply_style"] == "detailed"
+    assert payload["recommended_product_ids"][0] == "prod-headphones-pro"
+    assert "start with Wireless Headphones Pro Max as the premium option" in payload["answer"]
+    assert "Wireless Headphones Lite ready as the fallback" in payload["answer"]
+    assert "watch ready as the fallback" not in payload["answer"]
+    assert "grounded in the current catalog only" in payload["answer"]
+
+
+@pytest.mark.anyio
+async def test_inventory_support_mode_handles_small_talk_without_searching(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/inventory/ask", json={"question": "how are you", "assistant_mode": "support"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_hits"] == 0
+    assert payload["recommended_product_ids"] == []
+    assert payload["reply_style"] == "short"
+    assert "ready to help with product questions" in payload["answer"].lower()
+
+
+@pytest.mark.anyio
+async def test_inventory_route_prefers_normal_rag_for_direct_catalog_question(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/inventory/route",
+            json={
+                "question": "show me some watches",
+                "assistant_mode": "support",
+                "reply_style": "short",
+                "available_data_domains": ["catalog"],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recommended_path"] == "normal_rag"
+    assert payload["normal_rag_contract"]["implementation_status"] == "implemented"
+    assert payload["agentic_contract"]["implementation_status"] == "implemented"
+    assert payload["agentic_contract"]["endpoint"] == "/inventory/agentic/ask"
+    assert payload["signals"]["simple_catalog_lookup"] is True
+    assert "catalog/support question" in payload["reason_summary"].lower()
+
+
+@pytest.mark.anyio
+async def test_inventory_route_escalates_complex_internal_question_to_agentic(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/inventory/route",
+            json={
+                "question": "Why are audio sales dropping this month and what should we restock first across categories?",
+                "audience": "manager",
+                "prefer_fast_response": False,
+                "available_data_domains": ["catalog", "inventory_snapshots", "sales", "orders"],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recommended_path"] == "agentic"
+    assert payload["signals"]["needs_historical_data"] is True
+    assert payload["signals"]["needs_cross_system_data"] is True
+    assert payload["signals"]["needs_root_cause_reasoning"] is True
+    assert payload["signals"]["needs_workflow_action"] is True
+    assert payload["agentic_contract"]["endpoint"] == "/inventory/agentic/ask"
+    assert payload["missing_data_domains"] == []
+
+
+@pytest.mark.anyio
+async def test_inventory_agentic_endpoint_returns_traceable_response(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-watch-low",
+                        "sku": "ACC-WAT-002",
+                        "name": "TrailMark Essential Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Entry smart watch with lightweight notifications and health basics",
+                        "price": 129.0,
+                        "currency": "USD",
+                        "stock": 4,
+                        "status": "Low Stock",
+                        "tags": ["watch", "wearable"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        agentic_response = await client.post(
+            "/inventory/agentic/ask",
+            json={
+                "question": "show me some watches",
+                "assistant_mode": "support",
+                "reply_style": "short",
+                "max_reasoning_steps": 3,
+            },
+        )
+
+    assert agentic_response.status_code == 200
+    payload = agentic_response.json()
+    assert payload["execution_path"] == "inventory_agentic"
+    assert payload["retrieval_steps_used"] >= 1
+    assert payload["trace_id"]
+    assert all(hit["product_id"] in {"prod-watch", "prod-watch-low"} for hit in payload["hits"])
+    assert "Watch" in payload["answer"]
+    assert payload["reasoning_summary"]
+
+
+@pytest.mark.anyio
+async def test_inventory_agentic_trace_and_status_endpoints(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-mic",
+                        "sku": "AUD-MIC-004",
+                        "name": "VoxCast USB Podcast Microphone",
+                        "category": "Audio",
+                        "brand": "VoxCast",
+                        "short_description": "Cardioid USB microphone for podcasts and webinars",
+                        "price": 159.0,
+                        "currency": "USD",
+                        "stock": 11,
+                        "status": "Active",
+                        "tags": ["audio", "microphone"],
+                        "include_in_rag": True,
+                    }
+                ]
+            },
+        )
+        ask_response = await client.post(
+            "/inventory/agentic/ask",
+            json={
+                "question": "tell me about VoxCast USB Podcast Microphone",
+                "assistant_mode": "support",
+                "reply_style": "detailed",
+            },
+        )
+        trace_id = ask_response.json()["trace_id"]
+        trace_response = await client.get(f"/inventory/agentic/trace/{trace_id}")
+        status_response = await client.get("/inventory/agentic/status")
+
+    assert trace_response.status_code == 200
+    trace_payload = trace_response.json()
+    assert trace_payload["trace_id"] == trace_id
+    assert trace_payload["execution_path"] == "inventory_agentic"
+    assert trace_payload["retrieval_steps"]
+    assert "VoxCast USB Podcast Microphone" in trace_payload["final_answer"]
+
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["ready"] is True
+    assert status_payload["trace_dir"].endswith("inventory_agentic_traces")
+
+
+@pytest.mark.anyio
+async def test_inventory_support_mode_summarizes_matches_naturally(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-mic",
+                        "sku": "AUD-MIC-004",
+                        "name": "VoxCast USB Podcast Microphone",
+                        "category": "Audio",
+                        "brand": "VoxCast",
+                        "short_description": "Cardioid USB microphone for podcasts and webinars",
+                        "price": 159.00,
+                        "currency": "USD",
+                        "stock": 11,
+                        "status": "Active",
+                        "tags": ["audio", "microphone"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-headphone",
+                        "sku": "AUD-HP-001",
+                        "name": "Auralite Flex ANC Headphones",
+                        "category": "Audio",
+                        "brand": "Auralite",
+                        "short_description": "Wireless noise-cancelling headphones under 300 for focused office work",
+                        "price": 249.00,
+                        "currency": "USD",
+                        "stock": 18,
+                        "status": "Active",
+                        "tags": ["audio", "headphones"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-chair",
+                        "sku": "OFF-CHR-004",
+                        "name": "ErgoMesh Pro Chair",
+                        "category": "Office",
+                        "brand": "ErgoMesh",
+                        "short_description": "Premium ergonomic office chair with lumbar tuning",
+                        "price": 549.00,
+                        "currency": "USD",
+                        "stock": 3,
+                        "status": "Low Stock",
+                        "tags": ["office", "chair", "premium"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={"question": "show premium office products", "assistant_mode": "support", "top_k": 5},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_hits"] >= 1
+    assert "strongest matches are" in payload["answer"].lower()
+    assert "ErgoMesh Pro Chair" in payload["answer"]
+
+
+@pytest.mark.anyio
+async def test_inventory_support_mode_anchors_explicit_product_terms(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-headphone",
+                        "sku": "AUD-HP-001",
+                        "name": "Auralite Flex ANC Headphones",
+                        "category": "Audio",
+                        "brand": "Auralite",
+                        "short_description": "Wireless noise-cancelling headphones under 300 for focused office work",
+                        "price": 249.0,
+                        "currency": "USD",
+                        "stock": 18,
+                        "status": "Active",
+                        "tags": ["audio", "headphones"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={"question": "show me some watches", "assistant_mode": "support", "top_k": 5},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["hits"][0]["product_id"] == "prod-watch"
+    assert all(hit["product_id"] == "prod-watch" for hit in payload["hits"])
+    assert "TrailMark Smart Watch" in payload["answer"]
+
+
+@pytest.mark.anyio
+async def test_inventory_support_mode_handles_direct_product_detail_requests(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-monitor",
+                        "sku": "AUD-MON-005",
+                        "name": "Auralite Pro Monitor Pair",
+                        "category": "Audio",
+                        "brand": "Auralite",
+                        "short_description": "Reference monitor speakers for editing suites and premium content desks",
+                        "price": 399.0,
+                        "currency": "USD",
+                        "stock": 7,
+                        "status": "Active",
+                        "tags": ["audio", "monitors"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-headphone",
+                        "sku": "AUD-HP-001",
+                        "name": "Auralite Flex ANC Headphones",
+                        "category": "Audio",
+                        "brand": "Auralite",
+                        "short_description": "Wireless noise-cancelling headphones under 300 for focused office work",
+                        "price": 249.0,
+                        "currency": "USD",
+                        "stock": 18,
+                        "status": "Active",
+                        "tags": ["audio", "headphones"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "tell me about Auralite Pro Monitor Pair",
+                "assistant_mode": "support",
+                "reply_style": "detailed",
+                "top_k": 5,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["hits"][0]["product_id"] == "prod-monitor"
+    assert payload["answer"].startswith("Auralite Pro Monitor Pair is")
+    assert "The current price is USD 399.00." in payload["answer"]
+    assert "There are 7 unit(s) in stock right now." in payload["answer"]
+    assert payload["follow_up_question"] is not None
+
+
+@pytest.mark.anyio
+async def test_inventory_sales_mode_asks_for_clarification_on_ambiguous_request(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-audio",
+                        "sku": "AUD-100",
+                        "name": "Studio Headphones",
+                        "category": "Audio",
+                        "brand": "Signal",
+                        "short_description": "Closed-back headphones for focused listening",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 14,
+                        "status": "Active",
+                        "tags": ["audio", "headphones"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-office",
+                        "sku": "OFF-100",
+                        "name": "Standing Desk Converter",
+                        "category": "Office",
+                        "brand": "WorkRise",
+                        "short_description": "Compact standing desk converter",
+                        "price": 259.0,
+                        "currency": "USD",
+                        "stock": 8,
+                        "status": "Low Stock",
+                        "tags": ["office", "desk"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "recommend something",
+                "assistant_mode": "sales",
+                "reply_style": "detailed",
+                "top_k": 5,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["follow_up_question"] is not None
+    assert "i need one more detail" in payload["answer"].lower()
+    assert "budget, premium feel, or immediate availability" in payload["follow_up_question"].lower()
+
+
+@pytest.mark.anyio
+async def test_inventory_sales_mode_handles_price_objection(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-premium-laptop",
+                        "sku": "CMP-900",
+                        "name": "Nimbus 14 Business Ultrabook",
+                        "category": "Computing",
+                        "brand": "Nimbus",
+                        "short_description": "Lightweight 14 inch laptop for managers and analysts",
+                        "price": 1199.0,
+                        "currency": "USD",
+                        "stock": 8,
+                        "status": "Low Stock",
+                        "tags": ["computing", "laptop", "business", "premium"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-value-laptop",
+                        "sku": "CMP-500",
+                        "name": "Nimbus 13 Essential Laptop",
+                        "category": "Computing",
+                        "brand": "Nimbus",
+                        "short_description": "Lower-cost business laptop for everyday work",
+                        "price": 799.0,
+                        "currency": "USD",
+                        "stock": 16,
+                        "status": "Active",
+                        "tags": ["computing", "laptop", "business"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "This is too expensive, what should I say to the customer?",
+                "assistant_mode": "sales",
+                "reply_style": "detailed",
+                "top_k": 5,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recommended_product_ids"][0] == "prod-value-laptop"
+    assert "too expensive" in payload["answer"].lower()
+    assert "Nimbus 13 Essential Laptop" in payload["answer"]
+    assert payload["follow_up_question"] is not None
+
+
+@pytest.mark.anyio
 async def test_inventory_routes_are_present_in_openapi(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     from app.api import routes_inventory
 
@@ -252,6 +833,9 @@ async def test_inventory_routes_are_present_in_openapi(monkeypatch: pytest.Monke
     assert response.status_code == 200
     paths = response.json()["paths"]
     assert "/inventory/status" in paths
+    assert "/inventory/agentic/status" in paths
+    assert "/inventory/agentic/ask" in paths
     assert "/inventory/items/upsert" in paths
     assert "/inventory/search" in paths
+    assert "/inventory/route" in paths
     assert "/inventory/ask" in paths

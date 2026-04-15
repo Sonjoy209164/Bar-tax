@@ -47,6 +47,18 @@ _HELP_PHRASES = ["help", "what can you do", "how can you help", "can you help"]
 _IDENTITY_PHRASES = ["who are you", "what are you", "what is your role", "what do you do"]
 _CLOSING_PHRASES = ["bye", "goodbye", "see you", "talk later"]
 _DETAIL_REQUEST_PHRASES = ["tell me about", "details on", "detail on", "more about", "what about"]
+_EXACT_LOOKUP_PHRASES = [
+    "do you have",
+    "have any",
+    "show me",
+    "find me",
+    "find",
+    "looking for",
+    "i need",
+    "need a",
+    "need an",
+    "need some",
+]
 _AMBIGUOUS_REQUEST_PHRASES = [
     "recommend something",
     "show something",
@@ -173,19 +185,34 @@ _QUERY_STOPWORDS = {
     "an",
     "about",
     "any",
+    "are",
+    "can",
+    "could",
     "customer",
     "detail",
     "details",
+    "did",
+    "do",
+    "does",
     "find",
     "for",
+    "got",
+    "had",
+    "has",
+    "have",
+    "how",
     "i",
     "item",
     "items",
     "list",
+    "look",
+    "looking",
     "me",
     "more",
+    "my",
     "need",
     "of",
+    "one",
     "please",
     "product",
     "products",
@@ -197,8 +224,14 @@ _QUERY_STOPWORDS = {
     "tell",
     "that",
     "the",
+    "there",
     "this",
+    "under",
+    "want",
     "what",
+    "would",
+    "you",
+    "your",
 }
 
 
@@ -629,8 +662,14 @@ class InventoryService:
         query_terms = self._extract_query_terms(query_text)
         subject_phrase = self._extract_subject_phrase(query_text)
         detail_request = self._is_detail_request(query_text)
+        exact_lookup = self._should_require_exact_lookup(
+            query_text=query_text,
+            query_terms=query_terms,
+            subject_phrase=subject_phrase,
+            detail_request=detail_request,
+        )
 
-        candidates: list[tuple[InventorySearchHit, float, float]] = []
+        candidates: list[tuple[InventorySearchHit, float, float, int]] = []
         for item in catalog.values():
             if not self._item_matches_filters(item, filters):
                 continue
@@ -639,16 +678,28 @@ class InventoryService:
                 query_terms=query_terms,
                 subject_phrase=subject_phrase,
             )
+            coverage = self._query_term_coverage(item=item, query_terms=query_terms)
             vector_score = vector_scores.get(item.product_id, 0.0)
             if lexical_score <= 0 and item.product_id not in vector_scores:
                 continue
             confidence_score = max(vector_score, min(1.0, lexical_score / 12.0))
-            candidates.append((self._build_search_hit(item=item, score=confidence_score), lexical_score, vector_score))
+            candidates.append((self._build_search_hit(item=item, score=confidence_score), lexical_score, vector_score, coverage))
 
         if not candidates:
             return []
 
-        best_lexical_score = max(lexical_score for _, lexical_score, _ in candidates)
+        if exact_lookup:
+            max_coverage = max(coverage for _, _, _, coverage in candidates)
+            if max_coverage <= 0:
+                return []
+            coverage_threshold = len(query_terms) if len(query_terms) <= 2 else max(1, len(query_terms) - 1)
+            exact_candidates = [candidate for candidate in candidates if candidate[3] >= coverage_threshold]
+            if exact_candidates:
+                candidates = exact_candidates
+            else:
+                return []
+
+        best_lexical_score = max(lexical_score for _, lexical_score, _, _ in candidates)
         anchor_to_lexical = self._should_anchor_to_lexical(
             query_terms=query_terms,
             subject_phrase=subject_phrase,
@@ -666,6 +717,7 @@ class InventoryService:
         ranked_candidates = sorted(
             candidates,
             key=lambda candidate: (
+                -candidate[3],
                 -candidate[1],
                 -candidate[2],
                 self._is_out_of_stock(candidate[0]),
@@ -674,7 +726,7 @@ class InventoryService:
                 candidate[0].name.casefold(),
             ),
         )
-        return [hit for hit, _, _ in ranked_candidates[:top_k]]
+        return [hit for hit, _, _, _ in ranked_candidates[:top_k]]
 
     def _browse_items(
         self,
@@ -1299,7 +1351,8 @@ class InventoryService:
                 hits=hits,
                 filters=filters,
             )
-            answer = "I could not find a solid catalog match for that yet."
+            exact_no_match = self._build_exact_no_match_answer(question=question)
+            answer = exact_no_match or "I could not find a solid catalog match for that yet."
             if reply_style == "detailed" and follow_up_question:
                 answer += f" {follow_up_question}"
             else:
@@ -2444,6 +2497,23 @@ class InventoryService:
         normalized = self._normalize_conversation_text(text)
         return self._has_any_phrase(normalized, _DETAIL_REQUEST_PHRASES)
 
+    def _should_require_exact_lookup(
+        self,
+        *,
+        query_text: str,
+        query_terms: list[str],
+        subject_phrase: str | None,
+        detail_request: bool,
+    ) -> bool:
+        if detail_request or subject_phrase:
+            return True
+        if not query_terms or len(query_terms) > 2:
+            return False
+        normalized = self._normalize_conversation_text(query_text)
+        if self._has_any_phrase(normalized, ["recommend", "suggest", "alternative", "similar"]):
+            return False
+        return self._has_any_phrase(normalized, _EXACT_LOOKUP_PHRASES)
+
     @staticmethod
     def _normalize_query_token(token: str) -> str:
         if token.endswith("ies") and len(token) > 4:
@@ -2527,6 +2597,41 @@ class InventoryService:
         if query_terms and all(term in field_tokens["name"] for term in query_terms):
             score += 4.0
         return score
+
+    def _query_term_coverage(
+        self,
+        *,
+        item: InventoryItemRecord,
+        query_terms: list[str],
+    ) -> int:
+        if not query_terms:
+            return 0
+        searchable_tokens = (
+            self._tokenize_search_text(item.name)
+            | self._tokenize_search_text(item.sku)
+            | self._tokenize_search_text(item.category)
+            | self._tokenize_search_text(item.brand)
+            | self._tokenize_search_text(item.status)
+            | self._tokenize_search_text(" ".join(item.tags))
+            | self._tokenize_search_text(item.short_description)
+            | self._tokenize_search_text(item.full_description)
+        )
+        return sum(1 for term in query_terms if term in searchable_tokens)
+
+    def _build_exact_no_match_answer(self, *, question: str) -> str | None:
+        query_terms = self._extract_query_terms(question)
+        subject_phrase = self._extract_subject_phrase(question)
+        if not self._should_require_exact_lookup(
+            query_text=question,
+            query_terms=query_terms,
+            subject_phrase=subject_phrase,
+            detail_request=self._is_detail_request(question),
+        ):
+            return None
+        target = subject_phrase or " ".join(query_terms[:3])
+        if not target:
+            return "I could not find an exact catalog match for that request."
+        return f"I could not find an exact catalog match for {target} in the current inventory."
 
     def _should_anchor_to_lexical(
         self,

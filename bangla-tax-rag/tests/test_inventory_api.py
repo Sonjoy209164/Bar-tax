@@ -638,6 +638,61 @@ async def test_inventory_support_mode_anchors_explicit_product_terms(monkeypatch
 
 
 @pytest.mark.anyio
+async def test_inventory_support_mode_rejects_unmatched_exact_lookup_queries(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-dock",
+                        "sku": "CMP-DK-004",
+                        "name": "DockHub 4K Triple Display Station",
+                        "category": "Computing",
+                        "brand": "DockHub",
+                        "short_description": "USB-C docking station for laptop fleets and multi-monitor office desks",
+                        "price": 229.0,
+                        "currency": "USD",
+                        "stock": 5,
+                        "status": "Low Stock",
+                        "tags": ["computing", "dock", "usb-c", "workstation"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={"question": "do you have any bike?", "assistant_mode": "support", "top_k": 5},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_hits"] == 0
+    assert payload["hits"] == []
+    assert "exact catalog match for bike" in payload["answer"].lower()
+
+
+@pytest.mark.anyio
 async def test_inventory_support_mode_handles_direct_product_detail_requests(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     from app.api import routes_inventory
 

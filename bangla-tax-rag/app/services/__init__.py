@@ -6,6 +6,7 @@ from app.services.evaluation_service import (
     EvaluationSummary,
 )
 from app.services.ingest_service import IngestService, IngestServiceConfig, IngestServiceResult
+from app.services.inventory_service import InventoryService, InventoryServiceConfig, get_inventory_service
 from app.services.query_service import QueryRequest, QueryResponse, QueryService, QueryServiceConfig
 from app.services.runtime_service import AgenticRuntime, AgenticRuntimeStatus, TraceRecord, get_agentic_runtime
 
@@ -19,6 +20,8 @@ __all__ = [
     "IngestService",
     "IngestServiceConfig",
     "IngestServiceResult",
+    "InventoryService",
+    "InventoryServiceConfig",
     "QueryRequest",
     "QueryResponse",
     "QueryService",
@@ -28,4 +31,5 @@ __all__ = [
     "TraceRecord",
     "build_citation_payloads",
     "get_agentic_runtime",
+    "get_inventory_service",
 ]

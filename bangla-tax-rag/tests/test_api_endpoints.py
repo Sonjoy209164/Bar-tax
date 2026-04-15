@@ -4,6 +4,14 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 
 
+def _configure_api_key(monkeypatch: pytest.MonkeyPatch, api_key: str = "test-api-key") -> str:
+    from app.core.settings import get_settings
+
+    monkeypatch.setenv("API_ACCESS_KEY", api_key)
+    get_settings.cache_clear()
+    return api_key
+
+
 @pytest.mark.anyio
 async def test_health_endpoint() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -149,3 +157,40 @@ async def test_build_index_request_validation() -> None:
         )
 
     assert response.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_protected_routes_require_api_key_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.settings import get_settings
+
+    api_key = _configure_api_key(monkeypatch)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        config_forbidden = await client.get("/config")
+        query_forbidden = await client.post("/query", json={"question_text": "করহার কী?"})
+        config_allowed = await client.get("/config", headers={"X-API-Key": api_key})
+
+    assert config_forbidden.status_code == 403
+    assert query_forbidden.status_code == 403
+    assert config_allowed.status_code == 200
+
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_docs_and_openapi_stay_visible_when_api_key_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.settings import get_settings
+
+    _configure_api_key(monkeypatch)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        docs_response = await client.get("/docs")
+        openapi_response = await client.get("/openapi.json")
+
+    assert docs_response.status_code == 200
+    assert "Swagger UI" in docs_response.text
+    assert openapi_response.status_code == 200
+    spec = openapi_response.json()
+    assert "/inventory/status" in spec["paths"]
+    assert spec["components"]["securitySchemes"]["ApiKeyAuth"]["name"] == "X-API-Key"
+    assert spec["paths"]["/inventory/status"]["get"]["security"] == [{"ApiKeyAuth": []}]
+
+    get_settings.cache_clear()

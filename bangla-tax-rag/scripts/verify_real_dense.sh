@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 echo "=== Runtime /config ==="
-curl -s http://127.0.0.1:8000/config | .venv/bin/python -m json.tool
+curl -s http://127.0.0.1:4893/config | .venv/bin/python -m json.tool
 
 echo
 echo "=== Dense metadata ==="

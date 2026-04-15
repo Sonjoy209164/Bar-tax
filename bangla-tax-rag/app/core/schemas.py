@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.domain.query_taxonomy import QueryExecutionPath, QueryType
 
@@ -335,3 +335,214 @@ class ConfigResponse(BaseModel):
     embedding_model_name: str
     reranker_provider: str
     reranker_model_name: str
+
+
+class InventoryItemRecord(BaseModel):
+    product_id: str = Field(..., description="Stable product identifier from the inventory system.")
+    sku: str = Field(..., description="Human-readable stock keeping unit.")
+    name: str = Field(..., description="Primary product name.")
+    category: str | None = Field(default=None, description="High-level product category.")
+    brand: str | None = Field(default=None, description="Brand or manufacturer name.")
+    short_description: str | None = Field(default=None, description="Short description for list views.")
+    full_description: str | None = Field(default=None, description="Long-form description for retrieval.")
+    price: float | None = Field(default=None, ge=0, description="Current unit price.")
+    currency: str = Field(default="USD", description="Display currency.")
+    stock: int = Field(default=0, ge=0, description="Current stock quantity.")
+    status: str | None = Field(default=None, description="Operational stock status.")
+    tags: list[str] = Field(default_factory=list, description="Free-form tags used for search and filtering.")
+    attributes: dict[str, str] = Field(default_factory=dict, description="Structured product attributes.")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional opaque metadata from the inventory system.")
+    include_in_rag: bool = Field(default=True, description="Whether the product should be indexed for semantic retrieval.")
+    updated_at: str | None = Field(default=None, description="Last updated timestamp from the source system.")
+
+    @field_validator("product_id", "sku", "name")
+    @classmethod
+    def validate_required_text_fields(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Required inventory text fields must not be empty.")
+        return stripped
+
+    @field_validator("category", "brand", "short_description", "full_description", "status", "updated_at")
+    @classmethod
+    def normalize_optional_text_fields(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("currency must not be empty")
+        return stripped.upper()
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, value: list[str]) -> list[str]:
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for tag in value:
+            normalized = tag.strip()
+            if not normalized:
+                continue
+            lowered = normalized.casefold()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            deduped.append(normalized)
+        return deduped
+
+
+class InventoryCatalogResponse(BaseModel):
+    status: str
+    total_items: int
+    items: list[InventoryItemRecord] = Field(default_factory=list)
+
+
+class InventoryStatusResponse(BaseModel):
+    status: str
+    ready: bool
+    total_items: int
+    rag_enabled_items: int
+    vector_record_count: int
+    namespace: str
+    catalog_path: str
+    vector_backend: str
+    vector_store_path: str | None = None
+
+
+class InventoryUpsertRequest(BaseModel):
+    items: list[InventoryItemRecord] = Field(default_factory=list, min_length=1)
+
+
+class InventoryUpsertResponse(BaseModel):
+    status: str
+    upserted_count: int
+    rag_enabled_count: int
+    total_items: int
+    namespace: str
+    catalog_path: str
+
+
+class InventoryDeleteRequest(BaseModel):
+    product_ids: list[str] = Field(default_factory=list, min_length=1)
+
+    @field_validator("product_ids")
+    @classmethod
+    def normalize_product_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for product_id in value:
+            stripped = product_id.strip()
+            if not stripped:
+                continue
+            if stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        if not normalized:
+            raise ValueError("At least one product_id is required.")
+        return normalized
+
+
+class InventoryDeleteResponse(BaseModel):
+    status: str
+    deleted_count: int
+    total_items: int
+    namespace: str
+    catalog_path: str
+
+
+class InventorySearchFilters(BaseModel):
+    product_ids: list[str] = Field(default_factory=list)
+    categories: list[str] = Field(default_factory=list)
+    brands: list[str] = Field(default_factory=list)
+    statuses: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    min_stock: int | None = Field(default=None, ge=0)
+    max_stock: int | None = Field(default=None, ge=0)
+    min_price: float | None = Field(default=None, ge=0)
+    max_price: float | None = Field(default=None, ge=0)
+    rag_only: bool = Field(default=True, description="Restrict results to products that are indexed for semantic retrieval.")
+
+    @field_validator("product_ids", "categories", "brands", "statuses", "tags")
+    @classmethod
+    def normalize_string_lists(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            stripped = item.strip()
+            if not stripped:
+                continue
+            lowered = stripped.casefold()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(stripped)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> "InventorySearchFilters":
+        if self.min_stock is not None and self.max_stock is not None and self.min_stock > self.max_stock:
+            raise ValueError("min_stock must be less than or equal to max_stock")
+        if self.min_price is not None and self.max_price is not None and self.min_price > self.max_price:
+            raise ValueError("min_price must be less than or equal to max_price")
+        return self
+
+
+class InventorySearchRequest(BaseModel):
+    query_text: str | None = Field(default=None, description="Semantic query over indexed inventory items.")
+    top_k: int = Field(default=5, ge=1, le=50)
+    filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+
+
+class InventorySearchHit(BaseModel):
+    product_id: str
+    sku: str
+    name: str
+    category: str | None = None
+    brand: str | None = None
+    status: str | None = None
+    price: float | None = None
+    currency: str | None = None
+    stock: int | None = None
+    tags: list[str] = Field(default_factory=list)
+    updated_at: str | None = None
+    snippet: str | None = None
+    score: float
+
+
+class InventorySearchResponse(BaseModel):
+    status: str
+    query_text: str | None = None
+    total_hits: int
+    applied_filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    hits: list[InventorySearchHit] = Field(default_factory=list)
+
+
+class InventoryAskRequest(BaseModel):
+    question: str = Field(..., description="Natural-language inventory question.")
+    top_k: int = Field(default=5, ge=1, le=50)
+    filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    low_stock_threshold: int = Field(default=10, ge=0, le=10000)
+
+    @field_validator("question")
+    @classmethod
+    def validate_question(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("question must not be empty")
+        return stripped
+
+
+class InventoryAskResponse(BaseModel):
+    status: str
+    question: str
+    answer: str
+    confidence_score: float
+    total_hits: int
+    applied_filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    hits: list[InventorySearchHit] = Field(default_factory=list)

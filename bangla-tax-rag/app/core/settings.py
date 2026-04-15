@@ -10,12 +10,15 @@ class Settings(BaseSettings):
     app_name: str = Field(default="bangla-tax-rag", alias="APP_NAME")
     app_env: str = Field(default="development", alias="APP_ENV")
     app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
-    app_port: int = Field(default=8000, alias="APP_PORT")
+    app_port: int = Field(default=4893, alias="APP_PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    api_access_key: str | None = Field(default=None, alias="API_ACCESS_KEY")
     config_path: str = Field(default="config/config.dev.yaml", alias="CONFIG_PATH")
     raw_data_dir: str = Field(default="data/raw", alias="RAW_DATA_DIR")
     processed_data_dir: str = Field(default="data/processed", alias="PROCESSED_DATA_DIR")
     agentic_store_dir: str = Field(default="data/agentic_store", alias="AGENTIC_STORE_DIR")
+    inventory_catalog_path: str = Field(default="data/inventory/catalog.jsonl", alias="INVENTORY_CATALOG_PATH")
+    inventory_vector_namespace: str = Field(default="inventory", alias="INVENTORY_VECTOR_NAMESPACE")
     sparse_index_dir: str = Field(default="indexes/sparse", alias="SPARSE_INDEX_DIR")
     dense_index_dir: str = Field(default="indexes/dense", alias="DENSE_INDEX_DIR")
     results_dir: str = Field(default="results", alias="RESULTS_DIR")
@@ -23,7 +26,7 @@ class Settings(BaseSettings):
     parser_provider: str = Field(default="fallback", alias="PARSER_PROVIDER")
     llama_parse_result_type: str = Field(default="markdown", alias="LLAMAPARSE_RESULT_TYPE")
     llama_cloud_api_key: str | None = Field(default=None, alias="LLAMA_CLOUD_API_KEY")
-    ui_backend_base_url: str = Field(default="http://127.0.0.1:8000", alias="UI_BACKEND_BASE_URL")
+    ui_backend_base_url: str = Field(default="http://127.0.0.1:4893", alias="UI_BACKEND_BASE_URL")
     retrieval_mode: str = Field(default="hybrid", alias="RETRIEVAL_MODE")
     top_k: int = Field(default=5, alias="TOP_K")
     final_evidence_k: int = Field(default=5, alias="FINAL_EVIDENCE_K")
@@ -71,6 +74,8 @@ class Settings(BaseSettings):
             "raw_data_dir": self.raw_data_dir,
             "processed_data_dir": self.processed_data_dir,
             "agentic_store_dir": self.agentic_store_dir,
+            "inventory_catalog_path": self.inventory_catalog_path,
+            "inventory_vector_namespace": self.inventory_vector_namespace,
             "sparse_index_dir": self.sparse_index_dir,
             "dense_index_dir": self.dense_index_dir,
             "results_dir": self.results_dir,
@@ -154,7 +159,16 @@ def get_settings() -> Settings:
         apply_yaml_override("abstention_score_threshold", generation_config["abstention_score_threshold"])
     if "verification_enabled" in generation_config:
         apply_yaml_override("verification_enabled", generation_config["verification_enabled"])
-    for key in ("raw_data_dir", "processed_data_dir", "agentic_store_dir", "sparse_index_dir", "dense_index_dir", "results_dir", "trace_dir"):
+    for key in (
+        "raw_data_dir",
+        "processed_data_dir",
+        "agentic_store_dir",
+        "inventory_catalog_path",
+        "sparse_index_dir",
+        "dense_index_dir",
+        "results_dir",
+        "trace_dir",
+    ):
         if key in paths_config:
             apply_yaml_override(key, paths_config[key])
     if "provider" in parser_config:
@@ -177,6 +191,8 @@ def get_settings() -> Settings:
         apply_yaml_override("vector_metric", vector_store_config["metric"])
     if "namespace" in vector_store_config:
         apply_yaml_override("vector_namespace", vector_store_config["namespace"])
+    if "inventory_namespace" in vector_store_config:
+        apply_yaml_override("inventory_vector_namespace", vector_store_config["inventory_namespace"])
     if "local_store_path" in vector_store_config:
         apply_yaml_override("local_vector_store_path", vector_store_config["local_store_path"])
     if "pinecone_index_name" in vector_store_config:

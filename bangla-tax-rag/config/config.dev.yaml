@@ -2,7 +2,7 @@ app:
   name: bangla-tax-rag
   environment: development
   host: 0.0.0.0
-  port: 8000
+  port: 4893
 paths:
   raw_data_dir: data/raw
   processed_data_dir: data/processed
@@ -11,7 +11,7 @@ paths:
   dense_index_dir: indexes/dense
   results_dir: results
   trace_dir: results/traces
-  ui_backend_base_url: http://127.0.0.1:8000
+  ui_backend_base_url: http://127.0.0.1:4893
 parser:
   provider: fallback
   result_type: markdown

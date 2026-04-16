@@ -337,13 +337,13 @@ The LLM receives a decision plan, not a pile of products.
 
 Implement tradeoff templates:
 
-- [ ] premium vs budget
-- [ ] price vs feature strength
-- [ ] stock urgency vs best fit
-- [ ] exact product type vs nearby category
-- [ ] over-ear headphones vs earbuds
-- [ ] in-stock alternative vs out-of-stock premium option
-- [ ] direct substitute vs cross-sell add-on
+- [x] premium vs budget
+- [x] price vs feature strength
+- [x] stock urgency vs best fit
+- [x] exact product type vs nearby category
+- [x] over-ear headphones vs earbuds
+- [x] in-stock alternative vs out-of-stock premium option
+- [x] direct substitute vs cross-sell add-on
 
 Example:
 
@@ -578,7 +578,7 @@ Recommended implementation sequence:
 4. [x] Product ontology
 5. [x] Ecommerce reranker
 6. [x] Rich answer plan
-7. [ ] Tradeoff reasoning
+7. [x] Tradeoff reasoning
 8. [ ] Final answer verifier
 9. [ ] Better natural prompt
 10. [ ] Conversation memory contract

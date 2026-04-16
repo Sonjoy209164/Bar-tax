@@ -6,6 +6,7 @@ from app.core.schemas import InventoryAnswerPlan, InventorySearchHit
 from app.inventory.intent import InventoryIntentResult
 from app.inventory.ontology import ProductOntology
 from app.inventory.preferences import InventoryPreferenceProfile
+from app.inventory.tradeoffs import InventoryTradeoffReasoner
 
 
 class InventoryAnswerPlanner:
@@ -13,6 +14,7 @@ class InventoryAnswerPlanner:
 
     def __init__(self, ontology: ProductOntology | None = None) -> None:
         self.ontology = ontology or ProductOntology()
+        self.tradeoff_reasoner = InventoryTradeoffReasoner(self.ontology)
 
     def enrich_plan(
         self,
@@ -48,7 +50,12 @@ class InventoryAnswerPlanner:
         primary_reason = self._build_primary_reason(primary, preferences)
         alternative_reason = self._build_alternative_reason(primary, alternatives)
         cross_sell_reason = self._build_cross_sell_reason(primary, cross_sells)
-        tradeoffs = self._build_tradeoffs(primary=primary, alternatives=alternatives, cross_sells=cross_sells)
+        tradeoffs = self._build_tradeoffs(
+            primary=primary,
+            alternatives=alternatives,
+            cross_sells=cross_sells,
+            preferences=preferences,
+        )
         risk_notes = self._build_risk_notes(
             answer_plan=answer_plan,
             primary=primary,
@@ -139,30 +146,14 @@ class InventoryAnswerPlanner:
         primary: InventorySearchHit | None,
         alternatives: list[InventorySearchHit],
         cross_sells: list[InventorySearchHit],
+        preferences: InventoryPreferenceProfile,
     ) -> list[str]:
-        if primary is None:
-            return []
-        tradeoffs: list[str] = []
-        if alternatives:
-            alternative = alternatives[0]
-            price_note = self._price_relationship(primary, alternative)
-            if price_note:
-                tradeoffs.append(f"{alternative.name} is the fallback: {price_note}")
-            primary_type = self.ontology.detect_product_type(product=primary)
-            alternative_type = self.ontology.detect_product_type(product=alternative)
-            if primary_type and alternative_type and primary_type != alternative_type:
-                tradeoffs.append(
-                    f"{alternative.name} is a related {alternative_type}, not an exact {primary_type} substitute."
-                )
-        if cross_sells:
-            tradeoffs.append(
-                f"{cross_sells[0].name} should be positioned as an add-on, not as a replacement for {primary.name}."
-            )
-        if primary.stock is not None and primary.stock <= 0:
-            tradeoffs.append(f"{primary.name} is not sellable right now because current stock is 0.")
-        elif primary.stock is not None and primary.stock <= 5:
-            tradeoffs.append(f"{primary.name} has limited stock, so availability should be mentioned honestly.")
-        return tradeoffs[:5]
+        return self.tradeoff_reasoner.build_tradeoffs(
+            primary=primary,
+            alternatives=alternatives,
+            cross_sells=cross_sells,
+            preferences=preferences,
+        )
 
     def _build_risk_notes(
         self,

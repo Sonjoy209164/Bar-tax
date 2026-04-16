@@ -3,6 +3,7 @@ from app.inventory.ontology import ProductOntology
 from app.inventory.planner import InventoryAnswerPlanner
 from app.inventory.preferences import InventoryPreferenceExtractor, InventoryPreferenceProfile
 from app.inventory.reranker import EcommerceReranker, ProductEvidenceScore
+from app.inventory.tradeoffs import InventoryTradeoffReasoner
 
 __all__ = [
     "EcommerceReranker",
@@ -11,6 +12,7 @@ __all__ = [
     "InventoryIntentResult",
     "InventoryPreferenceExtractor",
     "InventoryPreferenceProfile",
+    "InventoryTradeoffReasoner",
     "ProductEvidenceScore",
     "ProductOntology",
 ]

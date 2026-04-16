@@ -6,6 +6,7 @@ from app.inventory import (
     InventoryAnswerPlanner,
     InventoryIntentClassifier,
     InventoryPreferenceExtractor,
+    InventoryTradeoffReasoner,
     ProductOntology,
 )
 
@@ -261,3 +262,67 @@ def test_inventory_answer_planner_builds_rich_decision_metadata() -> None:
     assert rich_plan.tradeoffs
     assert rich_plan.next_best_question is not None
     assert rich_plan.confidence_breakdown["primary"]["final_score"] == 0.82
+
+
+def test_inventory_tradeoff_reasoner_distinguishes_fallbacks_and_cross_sells() -> None:
+    ontology = ProductOntology()
+    preferences = InventoryPreferenceExtractor(ontology).extract(
+        "Need premium wireless headphones under 300 for office calls"
+    )
+    reasoner = InventoryTradeoffReasoner(ontology)
+    primary = InventorySearchHit(
+        product_id="prod-headphones",
+        sku="AUD-HP-001",
+        name="Auralite Flex ANC Headphones",
+        category="Audio",
+        brand="Auralite",
+        price=249.0,
+        currency="USD",
+        stock=4,
+        status="Low Stock",
+        tags=["audio", "wireless", "headphones", "premium"],
+        snippet="Wireless noise-cancelling headphones under 300 for focused office work",
+        score=0.82,
+    )
+    earbuds = InventorySearchHit(
+        product_id="prod-earbuds",
+        sku="AUD-EB-002",
+        name="EchoWave Studio Earbuds",
+        category="Audio",
+        brand="EchoWave",
+        price=129.0,
+        currency="USD",
+        stock=12,
+        status="Active",
+        tags=["audio", "wireless", "earbuds"],
+        snippet="Compact wireless earbuds for calls",
+        score=0.58,
+    )
+    microphone = InventorySearchHit(
+        product_id="prod-mic",
+        sku="AUD-MIC-003",
+        name="VoxCast USB Podcast Microphone",
+        category="Audio",
+        brand="VoxCast",
+        price=159.0,
+        currency="USD",
+        stock=8,
+        status="Active",
+        tags=["audio", "microphone"],
+        snippet="USB microphone for meetings and webinars",
+        score=0.5,
+    )
+
+    tradeoffs = reasoner.build_tradeoffs(
+        primary=primary,
+        alternatives=[earbuds],
+        cross_sells=[microphone],
+        preferences=preferences,
+    )
+
+    joined = " ".join(tradeoffs).lower()
+    assert "not an equivalent over-ear headphone substitute" in joined
+    assert "premium lead" in joined
+    assert "limited stock" in joined or "safer availability" in joined
+    assert "cross-sell add-on" in joined
+    assert "not a substitute" in joined

@@ -25,6 +25,7 @@ from app.core.schemas import (
     InventoryDeleteResponse,
     InventoryExecutionContract,
     InventoryItemRecord,
+    InventoryMemoryResolution,
     InventoryRouteRequest,
     InventoryRouteResponse,
     InventoryRouteSignals,
@@ -43,6 +44,7 @@ from app.inventory import (
     InventoryFinalAnswerVerifier,
     InventoryIntentClassifier,
     InventoryIntentResult,
+    InventoryMemoryResolver,
     InventoryPreferenceExtractor,
     InventoryPreferenceProfile,
     ProductOntology,
@@ -353,6 +355,7 @@ class InventoryService:
         self.ecommerce_reranker = EcommerceReranker(self.product_ontology)
         self.answer_planner = InventoryAnswerPlanner(self.product_ontology)
         self.final_answer_verifier = InventoryFinalAnswerVerifier(self.product_ontology)
+        self.memory_resolver = InventoryMemoryResolver(self.product_ontology)
 
     def status(self) -> InventoryStatusResponse:
         items = self._load_catalog()
@@ -455,6 +458,7 @@ class InventoryService:
         )
 
     def ask(self, request: InventoryAskRequest) -> InventoryAskResponse:
+        memory_resolution = InventoryMemoryResolution()
         conversational_reply = self._build_conversational_reply(
             question=request.question,
             assistant_mode=request.assistant_mode,
@@ -487,11 +491,20 @@ class InventoryService:
                 follow_up_question=reply.follow_up_question,
                 answer_plan=reply.answer_plan,
                 verification=reply.verification,
+                memory_resolution=memory_resolution,
             )
 
+        resolved_memory = self.memory_resolver.resolve(
+            question=request.question,
+            filters=request.filters.model_copy(deep=True),
+            focused_product_ids=request.focused_product_ids,
+            active_filters=request.active_filters,
+            last_answer_plan=request.last_answer_plan,
+        )
+        memory_resolution = resolved_memory.resolution
         effective_filters = self._merge_question_filters(
             question=request.question,
-            filters=request.filters,
+            filters=resolved_memory.filters,
             low_stock_threshold=request.low_stock_threshold,
         )
         search_response = self.search(
@@ -533,6 +546,7 @@ class InventoryService:
             conversation_summary=request.conversation_summary,
             abstention_reason=abstention_reason,
             execution_path="inventory_ask",
+            memory_resolution=memory_resolution,
         )
         return InventoryAskResponse(
             status="success",
@@ -552,6 +566,7 @@ class InventoryService:
             follow_up_question=reply.follow_up_question,
             answer_plan=reply.answer_plan,
             verification=reply.verification,
+            memory_resolution=memory_resolution,
         )
 
     def route(self, request: InventoryRouteRequest) -> InventoryRouteResponse:
@@ -597,11 +612,20 @@ class InventoryService:
     def agentic_ask(self, request: InventoryAgenticRequest) -> InventoryAgenticResponse:
         reasoning_summary: list[str] = []
         missing_facts: list[str] = []
+        resolved_memory = self.memory_resolver.resolve(
+            question=request.question,
+            filters=request.filters.model_copy(deep=True),
+            focused_product_ids=request.focused_product_ids,
+            active_filters=request.active_filters,
+            last_answer_plan=request.last_answer_plan,
+        )
+        if resolved_memory.resolution.used_memory and resolved_memory.resolution.reason:
+            reasoning_summary.append(resolved_memory.resolution.reason)
         route_request = InventoryRouteRequest(
             question=request.question,
             assistant_mode=request.assistant_mode,
             reply_style=request.reply_style,
-            filters=request.filters.model_copy(deep=True),
+            filters=resolved_memory.filters.model_copy(deep=True),
             audience=request.audience,
             prefer_fast_response=False,
             allow_agentic=True,
@@ -617,7 +641,7 @@ class InventoryService:
 
         effective_filters = self._merge_question_filters(
             question=request.question,
-            filters=request.filters.model_copy(deep=True),
+            filters=resolved_memory.filters.model_copy(deep=True),
             low_stock_threshold=request.low_stock_threshold,
         )
         search_requests = self._build_agentic_search_requests(
@@ -720,6 +744,7 @@ class InventoryService:
             execution_path="inventory_agentic",
             reasoning_summary=reasoning_summary,
             missing_facts=missing_facts,
+            memory_resolution=resolved_memory.resolution,
         )
         answer = composed_reply.answer
 
@@ -760,6 +785,7 @@ class InventoryService:
             follow_up_question=composed_reply.follow_up_question,
             answer_plan=composed_reply.answer_plan,
             verification=composed_reply.verification,
+            memory_resolution=resolved_memory.resolution,
         )
 
     def get_agentic_trace(self, trace_id: str) -> InventoryAgenticTraceResponse | None:
@@ -800,6 +826,8 @@ class InventoryService:
             subject_phrase=subject_phrase,
             detail_request=detail_request,
         )
+        if filters.product_ids:
+            exact_lookup = False
         preference_profile = self.preference_extractor.extract(
             query_text,
             filters=filters,
@@ -1448,6 +1476,7 @@ class InventoryService:
         execution_path: str,
         reasoning_summary: list[str] | None = None,
         missing_facts: list[str] | None = None,
+        memory_resolution: InventoryMemoryResolution | None = None,
     ) -> tuple[InventoryReply, str, bool, str | None]:
         abstained = abstention_reason is not None
         answer_engine = self._resolve_inventory_answer_engine(
@@ -1479,6 +1508,7 @@ class InventoryService:
             execution_path=execution_path,
             reasoning_summary=reasoning_summary or [],
             missing_facts=missing_facts or [],
+            memory_resolution=memory_resolution,
         )
         if synthesized_reply is None or synthesized_reply.abstained or not synthesized_reply.answer.strip():
             verified_base_reply = self._with_final_answer_verification(reply=base_reply, hits=hits)
@@ -1610,6 +1640,7 @@ class InventoryService:
         execution_path: str,
         reasoning_summary: list[str],
         missing_facts: list[str],
+        memory_resolution: InventoryMemoryResolution | None,
     ) -> InventoryNaturalAnswer | None:
         try:
             raw_output = self._run_inventory_answer_model(
@@ -1624,6 +1655,7 @@ class InventoryService:
                 execution_path=execution_path,
                 reasoning_summary=reasoning_summary,
                 missing_facts=missing_facts,
+                memory_resolution=memory_resolution,
             )
             return self._parse_inventory_answer_model_output(raw_output)
         except Exception:
@@ -1644,6 +1676,7 @@ class InventoryService:
         execution_path: str,
         reasoning_summary: list[str],
         missing_facts: list[str],
+        memory_resolution: InventoryMemoryResolution | None,
     ) -> list[ChatMessage]:
         answer_plan_payload = base_reply.answer_plan.model_dump(mode="json")
         verification_payload = base_reply.verification.model_dump(mode="json")
@@ -1662,6 +1695,7 @@ class InventoryService:
                 turn.model_dump(mode="json")
                 for turn in self._trim_conversation_history(conversation_history)
             ],
+            "memory_resolution": (memory_resolution or InventoryMemoryResolution()).model_dump(mode="json"),
             "draft_reply": {
                 "answer": base_reply.answer,
                 "follow_up_question": base_reply.follow_up_question,
@@ -1788,6 +1822,7 @@ class InventoryService:
         execution_path: str,
         reasoning_summary: list[str],
         missing_facts: list[str],
+        memory_resolution: InventoryMemoryResolution | None,
     ) -> str:
         options = build_generation_options(
             model_name=self.config.natural_answer_model_name or None,
@@ -1809,6 +1844,7 @@ class InventoryService:
             execution_path=execution_path,
             reasoning_summary=reasoning_summary,
             missing_facts=missing_facts,
+            memory_resolution=memory_resolution,
         )
         client = get_chat_client(options)
         return client.complete(

@@ -1,4 +1,5 @@
 from app.inventory.intent import InventoryIntentClassifier, InventoryIntentResult
+from app.inventory.memory import InventoryMemoryResolver, InventoryResolvedMemory
 from app.inventory.ontology import ProductOntology
 from app.inventory.planner import InventoryAnswerPlanner
 from app.inventory.preferences import InventoryPreferenceExtractor, InventoryPreferenceProfile
@@ -12,8 +13,10 @@ __all__ = [
     "InventoryFinalAnswerVerifier",
     "InventoryIntentClassifier",
     "InventoryIntentResult",
+    "InventoryMemoryResolver",
     "InventoryPreferenceExtractor",
     "InventoryPreferenceProfile",
+    "InventoryResolvedMemory",
     "InventoryTradeoffReasoner",
     "ProductEvidenceScore",
     "ProductOntology",

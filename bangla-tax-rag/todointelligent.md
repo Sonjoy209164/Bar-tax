@@ -420,18 +420,18 @@ Express should own memory.
 
 RAG sidecar should accept:
 
-- [ ] `conversation_summary`
-- [ ] `conversation_history`
-- [ ] `focused_product_ids`
-- [ ] `active_filters`
-- [ ] `last_answer_plan`
+- [x] `conversation_summary`
+- [x] `conversation_history`
+- [x] `focused_product_ids`
+- [x] `active_filters`
+- [x] `last_answer_plan`
 
 Implementation tasks:
 
-- [ ] Define request schema for memory context.
-- [ ] Use selected product IDs for "this", "it", "that one".
-- [ ] Use summary for buyer preferences.
-- [ ] Do not store customer session truth in RAG sidecar by default.
+- [x] Define request schema for memory context.
+- [x] Use selected product IDs for "this", "it", "that one".
+- [x] Use summary for buyer preferences.
+- [x] Do not store customer session truth in RAG sidecar by default.
 
 Success criteria:
 
@@ -581,7 +581,7 @@ Recommended implementation sequence:
 7. [x] Tradeoff reasoning
 8. [x] Final answer verifier
 9. [x] Better natural prompt
-10. [ ] Conversation memory contract
+10. [x] Conversation memory contract
 11. [ ] Sync validation
 12. [ ] Observability
 13. [ ] Agentic business tools

@@ -6,6 +6,7 @@ from app.inventory import (
     InventoryAnswerPlanner,
     InventoryFinalAnswerVerifier,
     InventoryIntentClassifier,
+    InventoryMemoryResolver,
     InventoryPreferenceExtractor,
     InventoryTradeoffReasoner,
     ProductOntology,
@@ -400,3 +401,37 @@ def test_inventory_final_answer_verifier_catches_cross_sell_as_substitute() -> N
 
     assert verification.passed is False
     assert any("cross-sell" in issue.lower() and "substitute" in issue.lower() for issue in verification.final_answer_issues)
+
+
+def test_inventory_memory_resolver_uses_reference_but_ignores_new_explicit_request() -> None:
+    resolver = InventoryMemoryResolver()
+    last_plan = InventoryAnswerPlan(
+        primary_product_id="prod-watch",
+        alternative_product_ids=["prod-watch-value"],
+    )
+
+    resolved = resolver.resolve(
+        question="Tell me more about the first one",
+        filters=InventorySearchFilters(),
+        focused_product_ids=["prod-watch", "prod-watch-value"],
+        active_filters=InventorySearchFilters(categories=["Wearables"]),
+        last_answer_plan=last_plan,
+    )
+
+    assert resolved.resolution.used_memory is True
+    assert resolved.resolution.resolved_product_ids == ["prod-watch"]
+    assert resolved.filters.product_ids == ["prod-watch"]
+    assert resolved.filters.categories == ["Wearables"]
+
+    ignored = resolver.resolve(
+        question="Show me laptops",
+        filters=InventorySearchFilters(),
+        focused_product_ids=["prod-watch"],
+        active_filters=InventorySearchFilters(categories=["Wearables"]),
+        last_answer_plan=last_plan,
+    )
+
+    assert ignored.resolution.used_memory is False
+    assert ignored.filters.product_ids == []
+    assert ignored.filters.categories == []
+    assert ignored.resolution.ignored_memory_reason is not None

@@ -583,6 +583,14 @@ class InventoryConversationTurn(BaseModel):
         return stripped
 
 
+class InventoryMemoryResolution(BaseModel):
+    used_memory: bool = False
+    reason: str | None = None
+    resolved_product_ids: list[str] = Field(default_factory=list)
+    applied_context_filters: bool = False
+    ignored_memory_reason: str | None = None
+
+
 class InventoryAskRequest(BaseModel):
     question: str = Field(..., description="Natural-language inventory question.")
     top_k: int = Field(default=5, ge=1, le=50)
@@ -604,6 +612,18 @@ class InventoryAskRequest(BaseModel):
     conversation_summary: str | None = Field(
         default=None,
         description="Optional server-built summary of the recent chat state so follow-up answers remain grounded.",
+    )
+    focused_product_ids: list[str] = Field(
+        default_factory=list,
+        description="Product IDs from the current UI/chat focus. Used only for clear follow-up references like 'it' or 'the first one'.",
+    )
+    active_filters: InventorySearchFilters | None = Field(
+        default=None,
+        description="Optional filters from the current chat/search context. Current request filters override these.",
+    )
+    last_answer_plan: InventoryAnswerPlan | None = Field(
+        default=None,
+        description="Previous answer plan from the main backend. Used for safe reference resolution only.",
     )
 
     @field_validator("question")
@@ -646,6 +666,19 @@ class InventoryAskRequest(BaseModel):
         stripped = value.strip()
         return stripped or None
 
+    @field_validator("focused_product_ids")
+    @classmethod
+    def normalize_focused_product_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for product_id in value:
+            stripped = product_id.strip()
+            if not stripped or stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return normalized
+
 
 class InventoryAskResponse(BaseModel):
     status: str
@@ -665,6 +698,7 @@ class InventoryAskResponse(BaseModel):
     follow_up_question: str | None = None
     answer_plan: InventoryAnswerPlan = Field(default_factory=InventoryAnswerPlan)
     verification: InventoryAnswerVerification = Field(default_factory=InventoryAnswerVerification)
+    memory_resolution: InventoryMemoryResolution = Field(default_factory=InventoryMemoryResolution)
 
 
 class InventoryRouteRequest(BaseModel):
@@ -782,6 +816,9 @@ class InventoryAgenticRequest(BaseModel):
     answer_engine: str = Field(default="auto")
     conversation_history: list[InventoryConversationTurn] = Field(default_factory=list)
     conversation_summary: str | None = None
+    focused_product_ids: list[str] = Field(default_factory=list)
+    active_filters: InventorySearchFilters | None = None
+    last_answer_plan: InventoryAnswerPlan | None = None
     max_reasoning_steps: int = Field(default=4, ge=1, le=8)
     audience: str = Field(default="customer")
     available_data_domains: list[str] = Field(default_factory=lambda: ["catalog"])
@@ -833,6 +870,19 @@ class InventoryAgenticRequest(BaseModel):
             return None
         stripped = value.strip()
         return stripped or None
+
+    @field_validator("focused_product_ids")
+    @classmethod
+    def normalize_agentic_focused_product_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for product_id in value:
+            stripped = product_id.strip()
+            if not stripped or stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return normalized
 
     @field_validator("available_data_domains")
     @classmethod
@@ -893,6 +943,7 @@ class InventoryAgenticResponse(BaseModel):
     follow_up_question: str | None = None
     answer_plan: InventoryAnswerPlan = Field(default_factory=InventoryAnswerPlan)
     verification: InventoryAnswerVerification = Field(default_factory=InventoryAnswerVerification)
+    memory_resolution: InventoryMemoryResolution = Field(default_factory=InventoryMemoryResolution)
 
 
 class InventoryAgenticTraceResponse(BaseModel):

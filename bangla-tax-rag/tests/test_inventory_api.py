@@ -117,6 +117,7 @@ def test_inventory_natural_prompt_uses_writer_contract_and_plan_fields(tmp_path)
         execution_path="inventory_ask",
         reasoning_summary=[],
         missing_facts=[],
+        memory_resolution=None,
     )
 
     system_prompt = messages[0].content
@@ -1240,3 +1241,138 @@ async def test_inventory_ask_falls_back_when_natural_answer_fails_final_verifica
     assert "USD 999.00" not in payload["answer"]
     assert payload["verification"]["checked_final_answer"] is True
     assert payload["verification"]["passed"] is True
+
+
+@pytest.mark.anyio
+async def test_inventory_ask_resolves_follow_up_reference_from_memory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-laptop",
+                        "sku": "CMP-LAP-001",
+                        "name": "Nimbus 14 Business Ultrabook",
+                        "category": "Computing",
+                        "brand": "Nimbus",
+                        "short_description": "Lightweight 14 inch laptop for managers",
+                        "price": 1199.0,
+                        "currency": "USD",
+                        "stock": 8,
+                        "status": "Active",
+                        "tags": ["computing", "laptop"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "tell me more about the first one",
+                "assistant_mode": "support",
+                "reply_style": "detailed",
+                "focused_product_ids": ["prod-watch"],
+                "active_filters": {"categories": ["Wearables"]},
+                "last_answer_plan": {
+                    "primary_product_id": "prod-watch",
+                    "alternative_product_ids": [],
+                    "cross_sell_product_ids": [],
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["memory_resolution"]["used_memory"] is True
+    assert payload["memory_resolution"]["resolved_product_ids"] == ["prod-watch"]
+    assert payload["applied_filters"]["product_ids"] == ["prod-watch"]
+    assert payload["hits"][0]["product_id"] == "prod-watch"
+    assert "TrailMark Smart Watch" in payload["answer"]
+
+
+@pytest.mark.anyio
+async def test_inventory_ask_ignores_memory_for_new_explicit_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-laptop",
+                        "sku": "CMP-LAP-001",
+                        "name": "Nimbus 14 Business Ultrabook",
+                        "category": "Computing",
+                        "brand": "Nimbus",
+                        "short_description": "Lightweight 14 inch laptop for managers",
+                        "price": 1199.0,
+                        "currency": "USD",
+                        "stock": 8,
+                        "status": "Active",
+                        "tags": ["computing", "laptop"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "show me laptops",
+                "assistant_mode": "support",
+                "focused_product_ids": ["prod-watch"],
+                "active_filters": {"categories": ["Wearables"]},
+                "last_answer_plan": {"primary_product_id": "prod-watch"},
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["memory_resolution"]["used_memory"] is False
+    assert payload["applied_filters"]["product_ids"] == []
+    assert payload["hits"][0]["product_id"] == "prod-laptop"

@@ -1060,7 +1060,157 @@ async def test_inventory_routes_are_present_in_openapi(monkeypatch: pytest.Monke
     assert "/inventory/items/upsert" in paths
     assert "/inventory/search" in paths
     assert "/inventory/route" in paths
+    assert "/inventory/sync/status" in paths
+    assert "/inventory/sync/validate" in paths
     assert "/inventory/ask" in paths
+
+
+@pytest.mark.anyio
+async def test_inventory_sync_status_and_validate_endpoints(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                        "updated_at": "2026-04-15T10:00:00Z",
+                    },
+                    {
+                        "product_id": "prod-internal",
+                        "sku": "INT-001",
+                        "name": "Internal Only Item",
+                        "category": "Internal",
+                        "brand": "Ops",
+                        "short_description": "Internal item not included in RAG",
+                        "price": 10.0,
+                        "currency": "USD",
+                        "stock": 1,
+                        "status": "Active",
+                        "tags": ["internal"],
+                        "include_in_rag": False,
+                        "updated_at": "2026-04-15T10:00:00Z",
+                    },
+                ]
+            },
+        )
+        status_response = await client.get("/inventory/sync/status")
+        valid_response = await client.post(
+            "/inventory/sync/validate",
+            json={"source_product_ids": ["prod-watch", "prod-internal"]},
+        )
+        missing_response = await client.post(
+            "/inventory/sync/validate",
+            json={"source_product_ids": ["prod-watch", "prod-internal", "prod-missing"]},
+        )
+        stale_response = await client.post(
+            "/inventory/sync/validate",
+            json={
+                "source_items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 189.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                        "updated_at": "2026-04-15T10:00:00Z",
+                    }
+                ]
+            },
+        )
+
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["catalog_count"] == 2
+    assert status_payload["rag_enabled_count"] == 1
+    assert status_payload["vector_ids_available"] is True
+    assert status_payload["vector_synced"] is True
+    assert status_payload["missing_vector_ids"] == []
+
+    assert valid_response.status_code == 200
+    valid_payload = valid_response.json()
+    assert valid_payload["valid"] is True
+    assert valid_payload["missing_in_catalog"] == []
+    assert valid_payload["extra_in_catalog"] == []
+    assert valid_payload["missing_vector_ids"] == []
+
+    assert missing_response.status_code == 200
+    missing_payload = missing_response.json()
+    assert missing_payload["valid"] is False
+    assert missing_payload["missing_in_catalog"] == ["prod-missing"]
+    assert any(issue["code"] == "missing_in_catalog" for issue in missing_payload["issues"])
+
+    assert stale_response.status_code == 200
+    stale_payload = stale_response.json()
+    assert stale_payload["valid"] is False
+    assert stale_payload["stale_catalog_product_ids"] == ["prod-watch"]
+    assert stale_payload["extra_in_catalog"] == ["prod-internal"]
+
+
+@pytest.mark.anyio
+async def test_inventory_sync_status_reports_catalog_quality_issues(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-mystery",
+                        "sku": "MYS-001",
+                        "name": "Mystery Bundle",
+                        "currency": "USD",
+                        "stock": 5,
+                        "status": "Active",
+                        "metadata": {"": "missing key"},
+                        "include_in_rag": True,
+                    }
+                ]
+            },
+        )
+        response = await client.get("/inventory/sync/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    issue_codes = {issue["code"] for issue in payload["issues"]}
+    assert payload["ready"] is True
+    assert payload["invalid_catalog_product_ids"] == ["prod-mystery"]
+    assert "missing_category" in issue_codes
+    assert "missing_price" in issue_codes
+    assert "invalid_metadata" in issue_codes
+    assert "empty_description" in issue_codes
+    assert "missing_product_type" in issue_codes
+    assert "weak_rag_text" in issue_codes
 
 
 @pytest.mark.anyio

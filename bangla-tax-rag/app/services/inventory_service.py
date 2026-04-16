@@ -34,6 +34,10 @@ from app.core.schemas import (
     InventorySearchRequest,
     InventorySearchResponse,
     InventoryStatusResponse,
+    InventorySyncIssue,
+    InventorySyncStatusResponse,
+    InventorySyncValidateRequest,
+    InventorySyncValidateResponse,
     InventoryUpsertResponse,
 )
 from app.core.settings import get_settings
@@ -387,6 +391,170 @@ class InventoryService:
             trace_dir=str(Path(self.config.agentic_trace_dir)),
             vector_backend=self.vector_store.provider.value,
             vector_store_path=getattr(self.vector_store.config, "local_store_path", None),
+        )
+
+    def sync_status(self) -> InventorySyncStatusResponse:
+        catalog = self._load_catalog()
+        rag_enabled_ids = {product_id for product_id, item in catalog.items() if item.include_in_rag}
+        vector_ids = self._vector_record_ids()
+        vector_stats = self.vector_store.describe(namespace=self.config.namespace)
+        invalid_catalog_issues = self._catalog_quality_issues(catalog)
+        issues: list[InventorySyncIssue] = []
+
+        if vector_ids is None:
+            issues.append(
+                InventorySyncIssue(
+                    severity="warning",
+                    code="vector_ids_unavailable",
+                    message="Vector backend does not expose record IDs; only vector counts can be checked.",
+                )
+            )
+            missing_vector_ids: list[str] = []
+            stale_vector_ids: list[str] = []
+            vector_synced: bool | None = None
+        else:
+            missing_vector_ids = sorted(rag_enabled_ids - vector_ids)
+            stale_vector_ids = sorted(vector_ids - rag_enabled_ids)
+            vector_synced = not missing_vector_ids and not stale_vector_ids
+            issues.extend(
+                InventorySyncIssue(
+                    severity="error",
+                    code="missing_vector",
+                    product_id=product_id,
+                    message=f"RAG-enabled product {product_id} is missing from the vector index.",
+                )
+                for product_id in missing_vector_ids
+            )
+            issues.extend(
+                InventorySyncIssue(
+                    severity="warning",
+                    code="stale_vector",
+                    product_id=product_id,
+                    message=f"Vector index contains stale product {product_id} that is not RAG-enabled in the catalog.",
+                )
+                for product_id in stale_vector_ids
+            )
+
+        issues.extend(invalid_catalog_issues)
+        has_error = any(issue.severity == "error" for issue in issues)
+        return InventorySyncStatusResponse(
+            status="success",
+            ready=not has_error,
+            catalog_count=len(catalog),
+            rag_enabled_count=len(rag_enabled_ids),
+            vector_record_count=vector_stats.total_vector_count or 0,
+            vector_ids_available=vector_ids is not None,
+            vector_synced=vector_synced,
+            missing_vector_ids=missing_vector_ids,
+            stale_vector_ids=stale_vector_ids,
+            invalid_catalog_product_ids=sorted({issue.product_id for issue in invalid_catalog_issues if issue.product_id}),
+            issues=issues,
+        )
+
+    def sync_validate(self, request: InventorySyncValidateRequest) -> InventorySyncValidateResponse:
+        catalog = self._load_catalog()
+        source_items_by_id = {item.product_id: item for item in request.source_items}
+        source_ids = set(request.source_product_ids).union(source_items_by_id)
+        catalog_ids = set(catalog)
+        rag_enabled_ids = {product_id for product_id, item in catalog.items() if item.include_in_rag}
+        vector_ids = self._vector_record_ids()
+        vector_stats = self.vector_store.describe(namespace=self.config.namespace)
+        invalid_catalog_issues = self._catalog_quality_issues(catalog)
+        issues: list[InventorySyncIssue] = []
+
+        missing_in_catalog = sorted(source_ids - catalog_ids) if source_ids else []
+        extra_in_catalog = sorted(catalog_ids - source_ids) if source_ids else []
+        stale_catalog_product_ids = self._stale_catalog_product_ids(
+            catalog=catalog,
+            source_items_by_id=source_items_by_id,
+        )
+
+        issues.extend(
+            InventorySyncIssue(
+                severity="error",
+                code="missing_in_catalog",
+                product_id=product_id,
+                message=f"Source product {product_id} is missing from the RAG catalog mirror.",
+            )
+            for product_id in missing_in_catalog
+        )
+        issues.extend(
+            InventorySyncIssue(
+                severity="warning",
+                code="extra_in_catalog",
+                product_id=product_id,
+                message=f"Catalog mirror contains product {product_id} that was not present in the source product list.",
+            )
+            for product_id in extra_in_catalog
+        )
+        issues.extend(
+            InventorySyncIssue(
+                severity="error",
+                code="stale_catalog_item",
+                product_id=product_id,
+                message=f"Catalog mirror product {product_id} differs from the provided source item.",
+            )
+            for product_id in stale_catalog_product_ids
+        )
+
+        if vector_ids is None:
+            missing_vector_ids: list[str] = []
+            stale_vector_ids: list[str] = []
+            issues.append(
+                InventorySyncIssue(
+                    severity="warning",
+                    code="vector_ids_unavailable",
+                    message="Vector backend does not expose record IDs; vector drift was not fully validated.",
+                )
+            )
+        else:
+            expected_vector_ids = (
+                {
+                    product_id
+                    for product_id in source_ids
+                    if product_id in catalog and catalog[product_id].include_in_rag
+                }
+                if source_ids
+                else rag_enabled_ids
+            )
+            missing_vector_ids = sorted(expected_vector_ids - vector_ids)
+            stale_vector_ids = sorted(vector_ids - rag_enabled_ids)
+            issues.extend(
+                InventorySyncIssue(
+                    severity="error",
+                    code="missing_vector",
+                    product_id=product_id,
+                    message=f"Expected RAG vector for product {product_id}, but it was not found.",
+                )
+                for product_id in missing_vector_ids
+            )
+            issues.extend(
+                InventorySyncIssue(
+                    severity="warning",
+                    code="stale_vector",
+                    product_id=product_id,
+                    message=f"Vector index contains stale product {product_id}.",
+                )
+                for product_id in stale_vector_ids
+            )
+
+        issues.extend(invalid_catalog_issues)
+        has_error = any(issue.severity == "error" for issue in issues)
+        return InventorySyncValidateResponse(
+            status="success",
+            valid=not has_error,
+            source_count=len(source_ids),
+            catalog_count=len(catalog),
+            rag_enabled_count=len(rag_enabled_ids),
+            vector_record_count=vector_stats.total_vector_count or 0,
+            vector_ids_available=vector_ids is not None,
+            missing_in_catalog=missing_in_catalog,
+            extra_in_catalog=extra_in_catalog,
+            stale_catalog_product_ids=stale_catalog_product_ids,
+            missing_vector_ids=missing_vector_ids,
+            stale_vector_ids=stale_vector_ids,
+            invalid_catalog_product_ids=sorted({issue.product_id for issue in invalid_catalog_issues if issue.product_id}),
+            issues=issues,
         )
 
     def list_items(self) -> InventoryCatalogResponse:
@@ -2757,6 +2925,111 @@ class InventoryService:
             metadata_text,
         ]
         return " ".join(value.strip() for value in fields if isinstance(value, str) and value.strip())
+
+    def _vector_record_ids(self) -> set[str] | None:
+        record_ids = getattr(self.vector_store, "record_ids", None)
+        if not callable(record_ids):
+            return None
+        try:
+            return set(record_ids(namespace=self.config.namespace))
+        except TypeError:
+            return set(record_ids())
+
+    def _catalog_quality_issues(self, catalog: dict[str, InventoryItemRecord]) -> list[InventorySyncIssue]:
+        issues: list[InventorySyncIssue] = []
+        for item in catalog.values():
+            if not item.category:
+                issues.append(
+                    InventorySyncIssue(
+                        severity="warning",
+                        code="missing_category",
+                        product_id=item.product_id,
+                        message=f"Product {item.product_id} is missing category metadata.",
+                    )
+                )
+            if item.price is None:
+                issues.append(
+                    InventorySyncIssue(
+                        severity="warning",
+                        code="missing_price",
+                        product_id=item.product_id,
+                        message=f"Product {item.product_id} is missing price metadata.",
+                    )
+                )
+            if self._has_invalid_metadata_keys(item):
+                issues.append(
+                    InventorySyncIssue(
+                        severity="warning",
+                        code="invalid_metadata",
+                        product_id=item.product_id,
+                        message=f"Product {item.product_id} has blank metadata or attribute keys.",
+                    )
+                )
+            if item.include_in_rag and not item.short_description and not item.full_description:
+                issues.append(
+                    InventorySyncIssue(
+                        severity="warning",
+                        code="empty_description",
+                        product_id=item.product_id,
+                        message=f"RAG-enabled product {item.product_id} has no short or full description.",
+                    )
+                )
+            if item.include_in_rag and self.product_ontology.detect_product_type(product=item) is None:
+                issues.append(
+                    InventorySyncIssue(
+                        severity="warning",
+                        code="missing_product_type",
+                        product_id=item.product_id,
+                        message=f"RAG-enabled product {item.product_id} does not map to a known product type.",
+                    )
+                )
+            if item.include_in_rag and not any((item.short_description, item.full_description, item.tags, item.attributes)):
+                issues.append(
+                    InventorySyncIssue(
+                        severity="warning",
+                        code="weak_rag_text",
+                        product_id=item.product_id,
+                        message=f"RAG-enabled product {item.product_id} has weak descriptive text for retrieval.",
+                    )
+                )
+        return issues
+
+    @staticmethod
+    def _has_invalid_metadata_keys(item: InventoryItemRecord) -> bool:
+        return any(not key.strip() for key in item.attributes) or any(not str(key).strip() for key in item.metadata)
+
+    def _stale_catalog_product_ids(
+        self,
+        *,
+        catalog: dict[str, InventoryItemRecord],
+        source_items_by_id: dict[str, InventoryItemRecord],
+    ) -> list[str]:
+        stale_product_ids: list[str] = []
+        comparable_fields = (
+            "sku",
+            "name",
+            "category",
+            "brand",
+            "short_description",
+            "full_description",
+            "price",
+            "currency",
+            "stock",
+            "status",
+            "tags",
+            "attributes",
+            "include_in_rag",
+            "updated_at",
+        )
+        for product_id, source_item in source_items_by_id.items():
+            catalog_item = catalog.get(product_id)
+            if catalog_item is None:
+                continue
+            for field_name in comparable_fields:
+                if getattr(catalog_item, field_name) != getattr(source_item, field_name):
+                    stale_product_ids.append(product_id)
+                    break
+        return sorted(stale_product_ids)
 
     def _catalog_path(self) -> Path:
         return Path(self.config.catalog_path)

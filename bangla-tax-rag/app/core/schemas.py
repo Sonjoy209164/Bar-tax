@@ -414,6 +414,68 @@ class InventoryStatusResponse(BaseModel):
     vector_store_path: str | None = None
 
 
+class InventorySyncIssue(BaseModel):
+    severity: Literal["info", "warning", "error"]
+    code: str
+    message: str
+    product_id: str | None = None
+
+
+class InventorySyncStatusResponse(BaseModel):
+    status: str
+    ready: bool
+    catalog_count: int
+    rag_enabled_count: int
+    vector_record_count: int
+    vector_ids_available: bool
+    vector_synced: bool | None = None
+    missing_vector_ids: list[str] = Field(default_factory=list)
+    stale_vector_ids: list[str] = Field(default_factory=list)
+    invalid_catalog_product_ids: list[str] = Field(default_factory=list)
+    issues: list[InventorySyncIssue] = Field(default_factory=list)
+
+
+class InventorySyncValidateRequest(BaseModel):
+    source_product_ids: list[str] = Field(
+        default_factory=list,
+        description="Product IDs from PostgreSQL/source of truth.",
+    )
+    source_items: list[InventoryItemRecord] = Field(
+        default_factory=list,
+        description="Optional full source items from PostgreSQL for deeper stale/data-quality validation.",
+    )
+
+    @field_validator("source_product_ids")
+    @classmethod
+    def normalize_source_product_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for product_id in value:
+            stripped = product_id.strip()
+            if not stripped or stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return normalized
+
+
+class InventorySyncValidateResponse(BaseModel):
+    status: str
+    valid: bool
+    source_count: int
+    catalog_count: int
+    rag_enabled_count: int
+    vector_record_count: int
+    vector_ids_available: bool
+    missing_in_catalog: list[str] = Field(default_factory=list)
+    extra_in_catalog: list[str] = Field(default_factory=list)
+    stale_catalog_product_ids: list[str] = Field(default_factory=list)
+    missing_vector_ids: list[str] = Field(default_factory=list)
+    stale_vector_ids: list[str] = Field(default_factory=list)
+    invalid_catalog_product_ids: list[str] = Field(default_factory=list)
+    issues: list[InventorySyncIssue] = Field(default_factory=list)
+
+
 class InventoryUpsertRequest(BaseModel):
     items: list[InventoryItemRecord] = Field(default_factory=list, min_length=1)
 

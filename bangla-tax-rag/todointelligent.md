@@ -472,21 +472,21 @@ Agentic mode answers business questions from real operational data, not only cat
 
 Add endpoints:
 
-- [ ] `GET /inventory/sync/status`
-- [ ] `POST /inventory/sync/validate`
+- [x] `GET /inventory/sync/status`
+- [x] `POST /inventory/sync/validate`
 - [ ] `POST /inventory/sync/rebuild`
 
 Validation:
 
-- [ ] catalog count
-- [ ] vector count
-- [ ] missing product IDs
-- [ ] stale product IDs
-- [ ] invalid metadata
-- [ ] empty descriptions
-- [ ] missing category
-- [ ] missing product type
-- [ ] out-of-date prices
+- [x] catalog count
+- [x] vector count
+- [x] missing product IDs
+- [x] stale product IDs
+- [x] invalid metadata
+- [x] empty descriptions
+- [x] missing category
+- [x] missing product type
+- [x] out-of-date prices
 
 Success criteria:
 
@@ -582,7 +582,7 @@ Recommended implementation sequence:
 8. [x] Final answer verifier
 9. [x] Better natural prompt
 10. [x] Conversation memory contract
-11. [ ] Sync validation
+11. [x] Sync validation
 12. [ ] Observability
 13. [ ] Agentic business tools
 14. [ ] Production storage and vector backend

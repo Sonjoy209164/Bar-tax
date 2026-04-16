@@ -16,6 +16,9 @@ from app.core.schemas import (
     InventorySearchRequest,
     InventorySearchResponse,
     InventoryStatusResponse,
+    InventorySyncStatusResponse,
+    InventorySyncValidateRequest,
+    InventorySyncValidateResponse,
     InventoryUpsertRequest,
     InventoryUpsertResponse,
 )
@@ -32,6 +35,27 @@ async def get_inventory_status() -> InventoryStatusResponse:
 @router.get("/agentic/status", response_model=InventoryAgenticStatusResponse)
 async def get_inventory_agentic_status() -> InventoryAgenticStatusResponse:
     return get_inventory_service().agentic_status()
+
+
+@router.get("/sync/status", response_model=InventorySyncStatusResponse)
+async def get_inventory_sync_status() -> InventorySyncStatusResponse:
+    return get_inventory_service().sync_status()
+
+
+@router.post("/sync/validate", response_model=InventorySyncValidateResponse)
+async def validate_inventory_sync(request: InventorySyncValidateRequest) -> InventorySyncValidateResponse:
+    try:
+        return get_inventory_service().sync_validate(request)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "invalid_inventory_sync_validation", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "inventory_sync_validation_failed", "message": str(exc)},
+        ) from exc
 
 
 @router.get("/items", response_model=InventoryCatalogResponse)

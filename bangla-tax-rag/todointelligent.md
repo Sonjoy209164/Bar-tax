@@ -389,24 +389,24 @@ The bot cannot confidently say unsupported things without being caught.
 
 Prompt should include:
 
-- [ ] intent
-- [ ] preferences
-- [ ] answer plan
-- [ ] verified product facts
-- [ ] excluded products
-- [ ] tradeoffs
-- [ ] next-best question
-- [ ] output JSON schema
+- [x] intent
+- [x] preferences
+- [x] answer plan
+- [x] verified product facts
+- [x] excluded products
+- [x] tradeoffs
+- [x] next-best question
+- [x] output JSON schema
 
 Rules:
 
-- [ ] Do not change product selection.
-- [ ] Do not add products.
-- [ ] Do not mention excluded products as recommendations.
-- [ ] Use metadata only if present.
-- [ ] Ask one next-best question only when useful.
-- [ ] Keep customer-facing language natural.
-- [ ] Keep staff-facing sales coaching practical.
+- [x] Do not change product selection.
+- [x] Do not add products.
+- [x] Do not mention excluded products as recommendations.
+- [x] Use metadata only if present.
+- [x] Ask one next-best question only when useful.
+- [x] Keep customer-facing language natural.
+- [x] Keep staff-facing sales coaching practical.
 
 Success criteria:
 
@@ -580,7 +580,7 @@ Recommended implementation sequence:
 6. [x] Rich answer plan
 7. [x] Tradeoff reasoning
 8. [x] Final answer verifier
-9. [ ] Better natural prompt
+9. [x] Better natural prompt
 10. [ ] Conversation memory contract
 11. [ ] Sync validation
 12. [ ] Observability

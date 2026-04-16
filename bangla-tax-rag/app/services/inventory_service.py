@@ -1645,6 +1645,12 @@ class InventoryService:
         reasoning_summary: list[str],
         missing_facts: list[str],
     ) -> list[ChatMessage]:
+        answer_plan_payload = base_reply.answer_plan.model_dump(mode="json")
+        verification_payload = base_reply.verification.model_dump(mode="json")
+        allowed_product_ids = self._allowed_answer_product_ids(
+            hits=hits,
+            answer_plan=base_reply.answer_plan,
+        )
         evidence_payload = {
             "question": question,
             "assistant_mode": assistant_mode,
@@ -1662,35 +1668,54 @@ class InventoryService:
                 "recommended_product_ids": base_reply.recommended_product_ids,
                 "cross_sell_product_ids": base_reply.cross_sell_product_ids,
             },
-            "answer_plan": base_reply.answer_plan.model_dump(mode="json"),
-            "verification": base_reply.verification.model_dump(mode="json"),
+            "writer_contract": {
+                "decision_authority": "answer_plan",
+                "allowed_product_ids": allowed_product_ids,
+                "primary_product_id": base_reply.answer_plan.primary_product_id,
+                "alternative_product_ids": base_reply.answer_plan.alternative_product_ids,
+                "cross_sell_product_ids": base_reply.answer_plan.cross_sell_product_ids,
+                "excluded_product_ids": base_reply.answer_plan.excluded_product_ids,
+                "required_tradeoffs": base_reply.answer_plan.tradeoffs,
+                "risk_notes": base_reply.answer_plan.risk_notes,
+                "next_best_question": base_reply.answer_plan.next_best_question,
+                "abstain": base_reply.answer_plan.abstain,
+                "abstention_reason": base_reply.answer_plan.abstention_reason,
+            },
+            "answer_plan": answer_plan_payload,
+            "verification": verification_payload,
             "reasoning_summary": reasoning_summary,
             "missing_facts": missing_facts,
             "hits": self._serialize_inventory_hits(hits),
         }
         system_prompt = (
-            "You are a grounded ecommerce sales and support assistant. "
-            "Write like a natural human assistant, but only from the supplied answer plan, catalog evidence, metadata, and draft reply. "
-            "Do not invent products, prices, stock levels, brands, categories, features, or policies. "
-            "Do not change the product selection in answer_plan. "
-            "Treat answer_plan as the product-selection authority and the draft reply as the wording scaffold. "
-            "Use attributes and metadata when they are relevant, but never expose internal IDs or database implementation details to the user. "
-            "Never mention products listed in answer_plan.excluded_product_ids as recommendations, alternatives, or cross-sells. "
-            "If verification.passed is false, preserve caution and do not expand the recommendation. "
-            "If the draft or evidence indicates no exact match, preserve that exactness and do not offer unrelated substitutes. "
-            "Keep 'short' replies tight and conversational. Keep 'detailed' replies richer but still concise. "
-            "If the evidence is too weak, set abstained to true. "
-            "Return strict JSON with this shape: "
-            '{"answer":"...", "follow_up_question":null, "abstained":false, "abstention_reason":null}'
+            "You are the natural-language writer for a grounded ecommerce inventory assistant. "
+            "The system has already decided what to recommend. Your job is to express that decision clearly, naturally, and safely. "
+            "Decision hierarchy: answer_plan is authoritative, writer_contract is binding, catalog hits are factual evidence, draft_reply is wording guidance, and conversation history is context only. "
+            "Do not choose products, reorder product roles, add products, remove required caveats, or override answer_plan. "
+            "Use answer_plan.primary_reason, alternative_reason, cross_sell_reason, tradeoffs, risk_notes, next_best_question, and confidence_breakdown when they are present. "
+            "If answer_plan.tradeoffs contains caveats, include the important caveat in plain language, especially for nearby alternatives and cross-sells. "
+            "If answer_plan.abstain is true or verification.passed is false, be cautious and do not expand into a recommendation. "
+            "Never recommend, pitch, substitute, or cross-sell a product in writer_contract.excluded_product_ids. "
+            "Never treat writer_contract.cross_sell_product_ids as substitutes or replacements; they are add-ons only. "
+            "Never present a nearby product-family alternative as an exact substitute unless answer_plan says it is exact. "
+            "Do not invent products, prices, stock levels, brands, categories, warranties, shipping, discounts, policies, specs, or features. "
+            "Use attributes, metadata, and evidence_scores only if they appear in the evidence package. "
+            "Do not expose internal database implementation details, raw IDs, or the phrase 'answer_plan' to the user. "
+            "Ask at most one follow-up question, and prefer writer_contract.next_best_question. "
+            "Keep short replies concise and human. Keep detailed replies richer but not rambling. "
+            "Return only strict JSON with exactly this schema: "
+            '{"answer":"...", "follow_up_question":null, "abstained":false, "abstention_reason":null}. '
+            "No markdown, no extra keys, no commentary outside JSON."
         )
         if assistant_mode == "sales":
             system_prompt += (
-                " In sales mode, sound helpful and persuasive, but never overclaim beyond the evidence."
+                " In sales mode, sound helpful and persuasive, handle the buyer concern directly, and keep staff-facing coaching practical without overclaiming."
             )
         else:
-            system_prompt += " In support mode, sound clear, calm, and operationally reliable."
+            system_prompt += " In support mode, sound clear, calm, factual, and operationally reliable."
         user_prompt = (
-            "Rewrite the grounded draft into a more natural answer.\n\n"
+            "Write the final customer-facing answer from this evidence package. "
+            "Follow the writer_contract and answer_plan exactly.\n\n"
             "Evidence package:\n"
             f"{json.dumps(evidence_payload, ensure_ascii=False, indent=2)}"
         )
@@ -1698,6 +1723,24 @@ class InventoryService:
             ChatMessage(role="system", content=system_prompt),
             ChatMessage(role="user", content=user_prompt),
         ]
+
+    @staticmethod
+    def _allowed_answer_product_ids(
+        *,
+        hits: list[InventorySearchHit],
+        answer_plan: InventoryAnswerPlan,
+    ) -> list[str]:
+        allowed: list[str] = []
+        for product_id in [
+            answer_plan.primary_product_id,
+            *answer_plan.alternative_product_ids,
+            *answer_plan.cross_sell_product_ids,
+            *(hit.product_id for hit in hits[:5]),
+        ]:
+            if not product_id or product_id in answer_plan.excluded_product_ids or product_id in allowed:
+                continue
+            allowed.append(product_id)
+        return allowed
 
     def _serialize_inventory_hits(self, hits: list[InventorySearchHit], limit: int = 5) -> list[dict[str, object]]:
         serialized_hits: list[dict[str, object]] = []

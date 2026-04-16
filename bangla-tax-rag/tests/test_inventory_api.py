@@ -1,6 +1,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.schemas import InventoryAnswerPlan, InventoryAnswerVerification, InventorySearchHit
 from app.main import app
 from app.retrieval import (
     EmbedderConfig,
@@ -11,7 +12,7 @@ from app.retrieval import (
     VectorStoreConfig,
     VectorStoreProvider,
 )
-from app.services.inventory_service import InventoryService, InventoryServiceConfig
+from app.services.inventory_service import InventoryReply, InventoryService, InventoryServiceConfig
 
 
 class KeywordEmbedder(TextEmbedder):
@@ -68,6 +69,67 @@ def _build_inventory_service(tmp_path) -> InventoryService:  # type: ignore[no-u
             agentic_trace_dir=str(tmp_path / "inventory_agentic_traces"),
         ),
     )
+
+
+def test_inventory_natural_prompt_uses_writer_contract_and_plan_fields(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+    hit = InventorySearchHit(
+        product_id="prod-headphones",
+        sku="AUD-HP-001",
+        name="Auralite Flex ANC Headphones",
+        category="Audio",
+        brand="Auralite",
+        price=249.0,
+        currency="USD",
+        stock=18,
+        status="Active",
+        tags=["audio", "wireless", "headphones", "premium"],
+        snippet="Wireless noise-cancelling headphones under 300 for focused office work",
+        attributes={"battery_hours": "35"},
+        evidence_scores={"final_score": 0.82, "reasons": ["exact product type match: headphones"]},
+        score=0.82,
+    )
+    reply = InventoryReply(
+        answer="For this customer, I would start with Auralite Flex ANC Headphones.",
+        recommended_product_ids=[hit.product_id],
+        answer_plan=InventoryAnswerPlan(
+            intent="sales_premium",
+            primary_product_id=hit.product_id,
+            excluded_product_ids=["prod-keyboard"],
+            primary_reason="Primary recommendation is Auralite Flex ANC Headphones because it is an exact product type match.",
+            tradeoffs=["Keep this as the premium lead; do not position nearby products as exact substitutes."],
+            risk_notes=["Do not claim shipping or discounts."],
+            next_best_question="Do they care more about call quality or battery life?",
+            confidence_breakdown={"primary": {"final_score": 0.82}},
+        ),
+        verification=InventoryAnswerVerification(passed=True, checked_final_answer=True),
+    )
+
+    messages = service._build_inventory_answer_messages(
+        question="Recommend premium wireless headphones under 300",
+        assistant_mode="sales",
+        reply_style="detailed",
+        confidence_score=0.82,
+        hits=[hit],
+        base_reply=reply,
+        conversation_history=[],
+        conversation_summary=None,
+        execution_path="inventory_ask",
+        reasoning_summary=[],
+        missing_facts=[],
+    )
+
+    system_prompt = messages[0].content
+    user_prompt = messages[1].content
+    assert "Decision hierarchy: answer_plan is authoritative" in system_prompt
+    assert "Do not choose products" in system_prompt
+    assert "Never treat writer_contract.cross_sell_product_ids as substitutes" in system_prompt
+    assert "Return only strict JSON" in system_prompt
+    assert '"writer_contract"' in user_prompt
+    assert '"required_tradeoffs"' in user_prompt
+    assert '"risk_notes"' in user_prompt
+    assert '"next_best_question": "Do they care more about call quality or battery life?"' in user_prompt
+    assert '"excluded_product_ids": [' in user_prompt
 
 
 @pytest.mark.anyio

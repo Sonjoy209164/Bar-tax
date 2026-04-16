@@ -512,6 +512,8 @@ class InventorySearchHit(BaseModel):
     tags: list[str] = Field(default_factory=list)
     updated_at: str | None = None
     snippet: str | None = None
+    attributes: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     score: float
 
 
@@ -521,6 +523,44 @@ class InventorySearchResponse(BaseModel):
     total_hits: int
     applied_filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
     hits: list[InventorySearchHit] = Field(default_factory=list)
+
+
+class InventoryAnswerPlan(BaseModel):
+    intent: str = "unknown"
+    primary_product_id: str | None = None
+    alternative_product_ids: list[str] = Field(default_factory=list)
+    cross_sell_product_ids: list[str] = Field(default_factory=list)
+    excluded_product_ids: list[str] = Field(default_factory=list)
+    reasoning_steps: list[str] = Field(default_factory=list)
+    metadata_used: list[str] = Field(default_factory=list)
+    abstain: bool = False
+    abstention_reason: str | None = None
+
+
+class InventoryAnswerVerification(BaseModel):
+    passed: bool = True
+    issues: list[str] = Field(default_factory=list)
+
+
+class InventoryConversationTurn(BaseModel):
+    role: str
+    content: str
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"user", "assistant"}:
+            raise ValueError("role must be either 'user' or 'assistant'")
+        return normalized
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("content must not be empty")
+        return stripped
 
 
 class InventoryAskRequest(BaseModel):
@@ -535,6 +575,15 @@ class InventoryAskRequest(BaseModel):
     reply_style: str = Field(
         default="short",
         description="Response length and detail level. Use 'detailed' for longer guidance with reasoning and follow-up.",
+    )
+    answer_engine: str = Field(
+        default="auto",
+        description="Answer generation strategy. Use 'natural' for grounded LLM synthesis, 'deterministic' for rule-based replies, or 'auto' to let the service choose.",
+    )
+    conversation_history: list[InventoryConversationTurn] = Field(default_factory=list)
+    conversation_summary: str | None = Field(
+        default=None,
+        description="Optional server-built summary of the recent chat state so follow-up answers remain grounded.",
     )
 
     @field_validator("question")
@@ -561,6 +610,22 @@ class InventoryAskRequest(BaseModel):
             raise ValueError("reply_style must be either 'short' or 'detailed'")
         return normalized
 
+    @field_validator("answer_engine")
+    @classmethod
+    def validate_answer_engine(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"auto", "deterministic", "natural"}:
+            raise ValueError("answer_engine must be one of: auto, deterministic, natural")
+        return normalized
+
+    @field_validator("conversation_summary")
+    @classmethod
+    def normalize_conversation_summary(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
 
 class InventoryAskResponse(BaseModel):
     status: str
@@ -568,13 +633,18 @@ class InventoryAskResponse(BaseModel):
     answer: str
     assistant_mode: str
     reply_style: str
+    answer_engine: str
     confidence_score: float
+    abstained: bool = False
+    abstention_reason: str | None = None
     total_hits: int
     applied_filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
     hits: list[InventorySearchHit] = Field(default_factory=list)
     recommended_product_ids: list[str] = Field(default_factory=list)
     cross_sell_product_ids: list[str] = Field(default_factory=list)
     follow_up_question: str | None = None
+    answer_plan: InventoryAnswerPlan = Field(default_factory=InventoryAnswerPlan)
+    verification: InventoryAnswerVerification = Field(default_factory=InventoryAnswerVerification)
 
 
 class InventoryRouteRequest(BaseModel):
@@ -689,6 +759,9 @@ class InventoryAgenticRequest(BaseModel):
     low_stock_threshold: int = Field(default=10, ge=0, le=10000)
     assistant_mode: str = Field(default="support")
     reply_style: str = Field(default="short")
+    answer_engine: str = Field(default="auto")
+    conversation_history: list[InventoryConversationTurn] = Field(default_factory=list)
+    conversation_summary: str | None = None
     max_reasoning_steps: int = Field(default=4, ge=1, le=8)
     audience: str = Field(default="customer")
     available_data_domains: list[str] = Field(default_factory=lambda: ["catalog"])
@@ -717,6 +790,14 @@ class InventoryAgenticRequest(BaseModel):
             raise ValueError("reply_style must be either 'short' or 'detailed'")
         return normalized
 
+    @field_validator("answer_engine")
+    @classmethod
+    def validate_agentic_answer_engine(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"auto", "deterministic", "natural"}:
+            raise ValueError("answer_engine must be one of: auto, deterministic, natural")
+        return normalized
+
     @field_validator("audience")
     @classmethod
     def validate_agentic_audience(cls, value: str) -> str:
@@ -724,6 +805,14 @@ class InventoryAgenticRequest(BaseModel):
         if normalized not in {"customer", "staff", "manager", "operator"}:
             raise ValueError("audience must be one of: customer, staff, manager, operator")
         return normalized
+
+    @field_validator("conversation_summary")
+    @classmethod
+    def normalize_agentic_conversation_summary(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
     @field_validator("available_data_domains")
     @classmethod
@@ -767,8 +856,11 @@ class InventoryAgenticResponse(BaseModel):
     answer: str
     assistant_mode: str
     reply_style: str
+    answer_engine: str
     execution_path: str
     confidence_score: float
+    abstained: bool = False
+    abstention_reason: str | None = None
     trace_id: str
     reasoning_summary: list[str] = Field(default_factory=list)
     missing_facts: list[str] = Field(default_factory=list)
@@ -779,6 +871,8 @@ class InventoryAgenticResponse(BaseModel):
     recommended_product_ids: list[str] = Field(default_factory=list)
     cross_sell_product_ids: list[str] = Field(default_factory=list)
     follow_up_question: str | None = None
+    answer_plan: InventoryAnswerPlan = Field(default_factory=InventoryAnswerPlan)
+    verification: InventoryAnswerVerification = Field(default_factory=InventoryAnswerVerification)
 
 
 class InventoryAgenticTraceResponse(BaseModel):

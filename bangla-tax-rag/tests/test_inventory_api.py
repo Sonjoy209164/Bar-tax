@@ -322,6 +322,100 @@ async def test_inventory_sales_mode_recommends_grounded_product(monkeypatch: pyt
 
 
 @pytest.mark.anyio
+async def test_inventory_sales_mode_excludes_unrelated_cross_category_fallbacks(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-headphones",
+                        "sku": "AUD-HP-001",
+                        "name": "Auralite Flex ANC Headphones",
+                        "category": "Audio",
+                        "brand": "Auralite",
+                        "short_description": "Wireless noise-cancelling headphones under 300 for focused office work",
+                        "price": 249.0,
+                        "currency": "USD",
+                        "stock": 18,
+                        "status": "Active",
+                        "tags": ["audio", "wireless", "headphones", "premium"],
+                        "attributes": {
+                            "connectivity": "Bluetooth 5.3",
+                            "battery_hours": "35",
+                            "warranty_years": "2",
+                        },
+                        "metadata": {
+                            "raw_attributes": {
+                                "connectivity": "Bluetooth 5.3",
+                                "battery_hours": 35,
+                                "warranty_years": 2,
+                            },
+                            "source_of_truth": "express-postgresql",
+                        },
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-keyboard",
+                        "sku": "CMP-KB-002",
+                        "name": "KeyForge Mechanical Keyboard",
+                        "category": "Computing",
+                        "brand": "KeyForge",
+                        "short_description": "Wireless mechanical keyboard with tactile switches",
+                        "price": 139.0,
+                        "currency": "USD",
+                        "stock": 17,
+                        "status": "Active",
+                        "tags": ["computing", "keyboard", "wireless", "premium"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-mouse",
+                        "sku": "CMP-MS-003",
+                        "name": "GlidePoint Wireless Mouse",
+                        "category": "Computing",
+                        "brand": "GlidePoint",
+                        "short_description": "Silent wireless mouse for office floors",
+                        "price": 49.0,
+                        "currency": "USD",
+                        "stock": 31,
+                        "status": "Active",
+                        "tags": ["computing", "mouse", "wireless"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "Recommend the best premium wireless headphones for a customer",
+                "assistant_mode": "sales",
+                "reply_style": "detailed",
+                "answer_engine": "deterministic",
+                "top_k": 5,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recommended_product_ids"] == ["prod-headphones"]
+    assert payload["cross_sell_product_ids"] == []
+    assert "KeyForge Mechanical Keyboard ready as the fallback" not in payload["answer"]
+    assert "GlidePoint Wireless Mouse" not in payload["answer"]
+    assert "battery life: 35 hours" in payload["answer"]
+    assert payload["answer_plan"]["primary_product_id"] == "prod-headphones"
+    assert set(payload["answer_plan"]["excluded_product_ids"]) == {"prod-keyboard", "prod-mouse"}
+    assert "attributes.battery_hours" in payload["answer_plan"]["metadata_used"]
+    assert payload["verification"]["passed"] is True
+
+
+@pytest.mark.anyio
 async def test_inventory_support_mode_handles_small_talk_without_searching(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     from app.api import routes_inventory
 
@@ -894,3 +988,122 @@ async def test_inventory_routes_are_present_in_openapi(monkeypatch: pytest.Monke
     assert "/inventory/search" in paths
     assert "/inventory/route" in paths
     assert "/inventory/ask" in paths
+
+
+@pytest.mark.anyio
+async def test_inventory_ask_uses_natural_answer_engine_when_enabled(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    service.config.natural_answers_enabled = True
+    service.config.natural_answer_min_confidence = 0.0
+    monkeypatch.setattr(
+        service,
+        "_run_inventory_answer_model",
+        lambda **kwargs: (
+            '{"answer":"I do have a strong watch option for you. TrailMark Smart Watch is available at USD 199.00 with 10 units in stock.",'
+            ' "follow_up_question":"Do you want a cheaper watch or the strongest fitness-focused option?",'
+            ' "abstained": false,'
+            ' "abstention_reason": null}'
+        ),
+    )
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    }
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "show me some watches",
+                "assistant_mode": "support",
+                "reply_style": "short",
+                "answer_engine": "natural",
+                "conversation_summary": "User is browsing watches for a fitness-oriented use case.",
+                "conversation_history": [
+                    {"role": "user", "content": "I need a watch."},
+                    {"role": "assistant", "content": "I can help you narrow that down."},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer_engine"] == "natural"
+    assert payload["abstained"] is False
+    assert "TrailMark Smart Watch is available" in payload["answer"]
+    assert payload["follow_up_question"] == "Do you want a cheaper watch or the strongest fitness-focused option?"
+
+
+@pytest.mark.anyio
+async def test_inventory_ask_keeps_exact_no_match_abstention_when_natural_mode_requested(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    service.config.natural_answers_enabled = True
+    service.config.natural_answer_min_confidence = 0.0
+    monkeypatch.setattr(
+        service,
+        "_run_inventory_answer_model",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("Natural model should not run for exact no-match requests.")),
+    )
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    }
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "do you have any bike?",
+                "assistant_mode": "support",
+                "answer_engine": "natural",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer_engine"] == "deterministic"
+    assert payload["abstained"] is True
+    assert payload["total_hits"] == 0
+    assert payload["hits"] == []
+    assert "exact catalog match for bike" in payload["answer"].lower()
+    assert "exact catalog match for bike" in (payload["abstention_reason"] or "").lower()

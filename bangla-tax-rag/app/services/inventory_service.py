@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Iterable
 from functools import lru_cache
@@ -15,9 +16,12 @@ from app.core.schemas import (
     InventoryAgenticStatusResponse,
     InventoryAgenticStep,
     InventoryAgenticTraceResponse,
+    InventoryAnswerPlan,
+    InventoryAnswerVerification,
     InventoryAskRequest,
     InventoryAskResponse,
     InventoryCatalogResponse,
+    InventoryConversationTurn,
     InventoryDeleteResponse,
     InventoryExecutionContract,
     InventoryItemRecord,
@@ -32,7 +36,10 @@ from app.core.schemas import (
     InventoryUpsertResponse,
 )
 from app.core.settings import get_settings
+from app.generation.generator import ChatMessage, build_generation_options, get_chat_client
 from app.retrieval import TextEmbedder, VectorRecord, VectorStore, build_embedder, build_vector_store
+
+logger = logging.getLogger(__name__)
 
 _UNDER_PRICE_PATTERN = re.compile(r"(?:under|below|less than)\s*\$?\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
 _OVER_PRICE_PATTERN = re.compile(r"(?:over|above|more than)\s*\$?\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
@@ -101,6 +108,31 @@ _QUALITY_OBJECTION_PHRASES = [
     "higher-end",
     "better quality",
 ]
+_CROSS_SELL_HINTS = [
+    "add on",
+    "add-on",
+    "addon",
+    "accessory",
+    "accessories",
+    "bundle",
+    "cross sell",
+    "cross-sell",
+    "complete setup",
+    "full setup",
+    "go with",
+    "pair with",
+    "upsell bundle",
+]
+_GENERIC_RELATION_TAGS = {
+    "active",
+    "budget",
+    "bluetooth",
+    "office",
+    "portable",
+    "premium",
+    "travel",
+    "wireless",
+}
 _INVENTORY_REQUEST_HINTS = [
     "product",
     "products",
@@ -244,6 +276,13 @@ class InventoryServiceConfig(BaseModel):
     low_stock_threshold: int = Field(default=10, ge=0, le=10000)
     agentic_trace_dir: str = "results/traces/inventory_agentic"
     default_agentic_max_reasoning_steps: int = Field(default=4, ge=1, le=8)
+    natural_answers_enabled: bool = False
+    natural_answer_model_name: str | None = None
+    natural_answer_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    natural_answer_max_tokens: int = Field(default=320, ge=64, le=4096)
+    natural_answer_min_confidence: float = Field(default=0.45, ge=0.0, le=1.0)
+    natural_answer_timeout_seconds: float = Field(default=60.0, ge=5.0, le=300.0)
+    conversation_history_limit: int = Field(default=6, ge=0, le=20)
 
 
 class InventoryAgenticTraceStore:
@@ -275,6 +314,15 @@ class InventoryReply(BaseModel):
     recommended_product_ids: list[str] = Field(default_factory=list)
     cross_sell_product_ids: list[str] = Field(default_factory=list)
     follow_up_question: str | None = None
+    answer_plan: InventoryAnswerPlan = Field(default_factory=InventoryAnswerPlan)
+    verification: InventoryAnswerVerification = Field(default_factory=InventoryAnswerVerification)
+
+
+class InventoryNaturalAnswer(BaseModel):
+    answer: str
+    follow_up_question: str | None = None
+    abstained: bool = False
+    abstention_reason: str | None = None
 
 
 class InventoryService:
@@ -404,13 +452,18 @@ class InventoryService:
                 answer=reply.answer,
                 assistant_mode=request.assistant_mode,
                 reply_style=request.reply_style,
+                answer_engine="deterministic",
                 confidence_score=confidence_score,
+                abstained=False,
+                abstention_reason=None,
                 total_hits=0,
                 applied_filters=request.filters.model_copy(deep=True),
                 hits=[],
                 recommended_product_ids=reply.recommended_product_ids,
                 cross_sell_product_ids=reply.cross_sell_product_ids,
                 follow_up_question=reply.follow_up_question,
+                answer_plan=reply.answer_plan,
+                verification=reply.verification,
             )
 
         effective_filters = self._merge_question_filters(
@@ -440,19 +493,42 @@ class InventoryService:
             assistant_mode=request.assistant_mode,
             reply_style=request.reply_style,
         )
+        confidence_score = self._estimate_confidence(ordered_hits)
+        abstention_reason = self._build_abstention_reason(
+            question=request.question,
+            hits=ordered_hits,
+        )
+        reply, answer_engine, abstained, abstention_reason = self._finalize_inventory_reply(
+            question=request.question,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+            requested_answer_engine=request.answer_engine,
+            confidence_score=confidence_score,
+            hits=ordered_hits,
+            base_reply=reply,
+            conversation_history=request.conversation_history,
+            conversation_summary=request.conversation_summary,
+            abstention_reason=abstention_reason,
+            execution_path="inventory_ask",
+        )
         return InventoryAskResponse(
             status="success",
             question=request.question,
             answer=reply.answer,
             assistant_mode=request.assistant_mode,
             reply_style=request.reply_style,
-            confidence_score=self._estimate_confidence(ordered_hits),
+            answer_engine=answer_engine,
+            confidence_score=confidence_score,
+            abstained=abstained,
+            abstention_reason=abstention_reason,
             total_hits=search_response.total_hits,
             applied_filters=effective_filters,
             hits=ordered_hits,
             recommended_product_ids=reply.recommended_product_ids,
             cross_sell_product_ids=reply.cross_sell_product_ids,
             follow_up_question=reply.follow_up_question,
+            answer_plan=reply.answer_plan,
+            verification=reply.verification,
         )
 
     def route(self, request: InventoryRouteRequest) -> InventoryRouteResponse:
@@ -595,6 +671,34 @@ class InventoryService:
             missing_facts=missing_facts,
             retrieval_steps=len(retrieval_steps),
         )
+        abstention_reason = self._build_abstention_reason(
+            question=request.question,
+            hits=ordered_hits,
+        )
+        composed_reply = InventoryReply(
+            answer=answer,
+            recommended_product_ids=final_reply.recommended_product_ids,
+            cross_sell_product_ids=final_reply.cross_sell_product_ids,
+            follow_up_question=final_reply.follow_up_question,
+            answer_plan=final_reply.answer_plan,
+            verification=final_reply.verification,
+        )
+        composed_reply, answer_engine, abstained, abstention_reason = self._finalize_inventory_reply(
+            question=request.question,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+            requested_answer_engine=request.answer_engine,
+            confidence_score=confidence_score,
+            hits=ordered_hits,
+            base_reply=composed_reply,
+            conversation_history=request.conversation_history,
+            conversation_summary=request.conversation_summary,
+            abstention_reason=abstention_reason,
+            execution_path="inventory_agentic",
+            reasoning_summary=reasoning_summary,
+            missing_facts=missing_facts,
+        )
+        answer = composed_reply.answer
 
         trace_id = str(uuid4())
         trace_payload = {
@@ -616,8 +720,11 @@ class InventoryService:
             answer=answer,
             assistant_mode=request.assistant_mode,
             reply_style=request.reply_style,
+            answer_engine=answer_engine,
             execution_path="inventory_agentic",
             confidence_score=confidence_score,
+            abstained=abstained,
+            abstention_reason=abstention_reason,
             trace_id=trace_id,
             reasoning_summary=reasoning_summary,
             missing_facts=missing_facts,
@@ -625,9 +732,11 @@ class InventoryService:
             total_hits=len(ordered_hits),
             applied_filters=effective_filters,
             hits=ordered_hits,
-            recommended_product_ids=final_reply.recommended_product_ids,
-            cross_sell_product_ids=final_reply.cross_sell_product_ids,
-            follow_up_question=final_reply.follow_up_question,
+            recommended_product_ids=composed_reply.recommended_product_ids,
+            cross_sell_product_ids=composed_reply.cross_sell_product_ids,
+            follow_up_question=composed_reply.follow_up_question,
+            answer_plan=composed_reply.answer_plan,
+            verification=composed_reply.verification,
         )
 
     def get_agentic_trace(self, trace_id: str) -> InventoryAgenticTraceResponse | None:
@@ -1234,6 +1343,333 @@ class InventoryService:
             adjusted = min(1.0, adjusted + 0.05)
         return round(max(0.0, adjusted), 3)
 
+    def _build_abstention_reason(
+        self,
+        *,
+        question: str,
+        hits: list[InventorySearchHit],
+    ) -> str | None:
+        if hits:
+            return None
+        return self._build_exact_no_match_answer(question=question) or "No reliable catalog evidence was found for this request."
+
+    def _finalize_inventory_reply(
+        self,
+        *,
+        question: str,
+        assistant_mode: str,
+        reply_style: str,
+        requested_answer_engine: str,
+        confidence_score: float,
+        hits: list[InventorySearchHit],
+        base_reply: InventoryReply,
+        conversation_history: list[InventoryConversationTurn],
+        conversation_summary: str | None,
+        abstention_reason: str | None,
+        execution_path: str,
+        reasoning_summary: list[str] | None = None,
+        missing_facts: list[str] | None = None,
+    ) -> tuple[InventoryReply, str, bool, str | None]:
+        abstained = abstention_reason is not None
+        answer_engine = self._resolve_inventory_answer_engine(
+            requested_answer_engine=requested_answer_engine,
+            confidence_score=confidence_score,
+            hits=hits,
+            abstention_reason=abstention_reason,
+        )
+        if answer_engine != "natural":
+            return base_reply, "deterministic", abstained, abstention_reason
+
+        synthesized_reply = self._synthesize_inventory_reply(
+            question=question,
+            assistant_mode=assistant_mode,
+            reply_style=reply_style,
+            confidence_score=confidence_score,
+            hits=hits,
+            base_reply=base_reply,
+            conversation_history=conversation_history,
+            conversation_summary=conversation_summary,
+            execution_path=execution_path,
+            reasoning_summary=reasoning_summary or [],
+            missing_facts=missing_facts or [],
+        )
+        if synthesized_reply is None or synthesized_reply.abstained or not synthesized_reply.answer.strip():
+            return base_reply, "deterministic", abstained, abstention_reason
+
+        return (
+            InventoryReply(
+                answer=synthesized_reply.answer.strip(),
+                recommended_product_ids=base_reply.recommended_product_ids,
+                cross_sell_product_ids=base_reply.cross_sell_product_ids,
+                follow_up_question=synthesized_reply.follow_up_question or base_reply.follow_up_question,
+                answer_plan=base_reply.answer_plan,
+                verification=base_reply.verification,
+            ),
+            "natural",
+            False,
+            None,
+        )
+
+    def _resolve_inventory_answer_engine(
+        self,
+        *,
+        requested_answer_engine: str,
+        confidence_score: float,
+        hits: list[InventorySearchHit],
+        abstention_reason: str | None,
+    ) -> str:
+        if requested_answer_engine == "deterministic":
+            return "deterministic"
+        if abstention_reason is not None or not hits:
+            return "deterministic"
+        if not self.config.natural_answers_enabled:
+            return "deterministic"
+        if confidence_score < self.config.natural_answer_min_confidence:
+            return "deterministic"
+        if requested_answer_engine in {"auto", "natural"}:
+            return "natural"
+        return "deterministic"
+
+    def _synthesize_inventory_reply(
+        self,
+        *,
+        question: str,
+        assistant_mode: str,
+        reply_style: str,
+        confidence_score: float,
+        hits: list[InventorySearchHit],
+        base_reply: InventoryReply,
+        conversation_history: list[InventoryConversationTurn],
+        conversation_summary: str | None,
+        execution_path: str,
+        reasoning_summary: list[str],
+        missing_facts: list[str],
+    ) -> InventoryNaturalAnswer | None:
+        try:
+            raw_output = self._run_inventory_answer_model(
+                question=question,
+                assistant_mode=assistant_mode,
+                reply_style=reply_style,
+                confidence_score=confidence_score,
+                hits=hits,
+                base_reply=base_reply,
+                conversation_history=conversation_history,
+                conversation_summary=conversation_summary,
+                execution_path=execution_path,
+                reasoning_summary=reasoning_summary,
+                missing_facts=missing_facts,
+            )
+            return self._parse_inventory_answer_model_output(raw_output)
+        except Exception:
+            logger.exception("Inventory natural answer synthesis failed; falling back to deterministic reply.")
+            return None
+
+    def _build_inventory_answer_messages(
+        self,
+        *,
+        question: str,
+        assistant_mode: str,
+        reply_style: str,
+        confidence_score: float,
+        hits: list[InventorySearchHit],
+        base_reply: InventoryReply,
+        conversation_history: list[InventoryConversationTurn],
+        conversation_summary: str | None,
+        execution_path: str,
+        reasoning_summary: list[str],
+        missing_facts: list[str],
+    ) -> list[ChatMessage]:
+        evidence_payload = {
+            "question": question,
+            "assistant_mode": assistant_mode,
+            "reply_style": reply_style,
+            "execution_path": execution_path,
+            "confidence_score": confidence_score,
+            "conversation_summary": conversation_summary,
+            "conversation_history": [
+                turn.model_dump(mode="json")
+                for turn in self._trim_conversation_history(conversation_history)
+            ],
+            "draft_reply": {
+                "answer": base_reply.answer,
+                "follow_up_question": base_reply.follow_up_question,
+                "recommended_product_ids": base_reply.recommended_product_ids,
+                "cross_sell_product_ids": base_reply.cross_sell_product_ids,
+            },
+            "answer_plan": base_reply.answer_plan.model_dump(mode="json"),
+            "verification": base_reply.verification.model_dump(mode="json"),
+            "reasoning_summary": reasoning_summary,
+            "missing_facts": missing_facts,
+            "hits": self._serialize_inventory_hits(hits),
+        }
+        system_prompt = (
+            "You are a grounded ecommerce sales and support assistant. "
+            "Write like a natural human assistant, but only from the supplied answer plan, catalog evidence, metadata, and draft reply. "
+            "Do not invent products, prices, stock levels, brands, categories, features, or policies. "
+            "Do not change the product selection in answer_plan. "
+            "Treat answer_plan as the product-selection authority and the draft reply as the wording scaffold. "
+            "Use attributes and metadata when they are relevant, but never expose internal IDs or database implementation details to the user. "
+            "Never mention products listed in answer_plan.excluded_product_ids as recommendations, alternatives, or cross-sells. "
+            "If verification.passed is false, preserve caution and do not expand the recommendation. "
+            "If the draft or evidence indicates no exact match, preserve that exactness and do not offer unrelated substitutes. "
+            "Keep 'short' replies tight and conversational. Keep 'detailed' replies richer but still concise. "
+            "If the evidence is too weak, set abstained to true. "
+            "Return strict JSON with this shape: "
+            '{"answer":"...", "follow_up_question":null, "abstained":false, "abstention_reason":null}'
+        )
+        if assistant_mode == "sales":
+            system_prompt += (
+                " In sales mode, sound helpful and persuasive, but never overclaim beyond the evidence."
+            )
+        else:
+            system_prompt += " In support mode, sound clear, calm, and operationally reliable."
+        user_prompt = (
+            "Rewrite the grounded draft into a more natural answer.\n\n"
+            "Evidence package:\n"
+            f"{json.dumps(evidence_payload, ensure_ascii=False, indent=2)}"
+        )
+        return [
+            ChatMessage(role="system", content=system_prompt),
+            ChatMessage(role="user", content=user_prompt),
+        ]
+
+    def _serialize_inventory_hits(self, hits: list[InventorySearchHit], limit: int = 5) -> list[dict[str, object]]:
+        serialized_hits: list[dict[str, object]] = []
+        for hit in hits[:limit]:
+            serialized_hits.append(
+                {
+                    "product_id": hit.product_id,
+                    "sku": hit.sku,
+                    "name": hit.name,
+                    "category": hit.category,
+                    "brand": hit.brand,
+                    "status": hit.status,
+                    "price": hit.price,
+                    "currency": hit.currency,
+                    "stock": hit.stock,
+                    "tags": hit.tags,
+                    "snippet": hit.snippet,
+                    "attributes": hit.attributes,
+                    "metadata": hit.metadata,
+                    "score": hit.score,
+                }
+            )
+        return serialized_hits
+
+    def _trim_conversation_history(
+        self,
+        conversation_history: list[InventoryConversationTurn],
+    ) -> list[InventoryConversationTurn]:
+        if self.config.conversation_history_limit <= 0:
+            return []
+        return conversation_history[-self.config.conversation_history_limit :]
+
+    def _run_inventory_answer_model(
+        self,
+        *,
+        question: str,
+        assistant_mode: str,
+        reply_style: str,
+        confidence_score: float,
+        hits: list[InventorySearchHit],
+        base_reply: InventoryReply,
+        conversation_history: list[InventoryConversationTurn],
+        conversation_summary: str | None,
+        execution_path: str,
+        reasoning_summary: list[str],
+        missing_facts: list[str],
+    ) -> str:
+        options = build_generation_options(
+            model_name=self.config.natural_answer_model_name or None,
+        ).model_copy(
+            update={
+                "temperature": self.config.natural_answer_temperature,
+                "max_generation_tokens": self.config.natural_answer_max_tokens,
+            }
+        )
+        messages = self._build_inventory_answer_messages(
+            question=question,
+            assistant_mode=assistant_mode,
+            reply_style=reply_style,
+            confidence_score=confidence_score,
+            hits=hits,
+            base_reply=base_reply,
+            conversation_history=conversation_history,
+            conversation_summary=conversation_summary,
+            execution_path=execution_path,
+            reasoning_summary=reasoning_summary,
+            missing_facts=missing_facts,
+        )
+        client = get_chat_client(options)
+        return client.complete(
+            messages=messages,
+            model_name=options.model_name,
+            temperature=options.temperature,
+            max_tokens=options.max_generation_tokens,
+            timeout_seconds=self.config.natural_answer_timeout_seconds,
+            response_format={"type": "json_object"},
+        )
+
+    def _parse_inventory_answer_model_output(self, raw_output: str) -> InventoryNaturalAnswer | None:
+        stripped_output = raw_output.strip()
+        candidates = [stripped_output]
+        unfenced_output = self._strip_json_code_fence(stripped_output)
+        if unfenced_output != stripped_output:
+            candidates.append(unfenced_output)
+        extracted_json = self._extract_first_json_object(unfenced_output)
+        if extracted_json and extracted_json not in candidates:
+            candidates.append(extracted_json)
+
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            if parsed.get("abstained") and not parsed.get("answer") and parsed.get("abstention_reason"):
+                parsed["answer"] = parsed["abstention_reason"]
+            try:
+                return InventoryNaturalAnswer.model_validate(parsed)
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _strip_json_code_fence(text: str) -> str:
+        stripped = text.strip()
+        fence_match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", stripped, flags=re.DOTALL | re.IGNORECASE)
+        if fence_match:
+            return fence_match.group(1).strip()
+        return stripped
+
+    @staticmethod
+    def _extract_first_json_object(text: str) -> str | None:
+        start_index = text.find("{")
+        if start_index < 0:
+            return None
+        depth = 0
+        in_string = False
+        escape_next = False
+        for index, char in enumerate(text[start_index:], start=start_index):
+            if in_string:
+                if escape_next:
+                    escape_next = False
+                elif char == "\\":
+                    escape_next = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start_index:index + 1]
+        return None
+
     def _build_normal_rag_contract(self, *, request: InventoryRouteRequest) -> InventoryExecutionContract:
         return InventoryExecutionContract(
             mode="normal_rag",
@@ -1357,7 +1793,19 @@ class InventoryService:
                 answer += f" {follow_up_question}"
             else:
                 answer += " Tell me the product type, brand, budget, or stock question and I will narrow it down."
-            return InventoryReply(answer=answer, follow_up_question=follow_up_question)
+            plan = self._build_inventory_answer_plan(
+                intent="support_no_match",
+                primary=None,
+                abstain=True,
+                abstention_reason=exact_no_match or "No reliable catalog match.",
+                reasoning_steps=["No retrieved product passed the exact or confidence checks."],
+            )
+            return InventoryReply(
+                answer=answer,
+                follow_up_question=follow_up_question,
+                answer_plan=plan,
+                verification=self._verify_answer_plan(answer_plan=plan, hits=hits),
+            )
 
         lowered = question.casefold()
         objection_type = self._detect_objection_type(lowered)
@@ -1452,7 +1900,24 @@ class InventoryService:
             answer += f" {follow_up_question}"
         else:
             follow_up_question = clarification_question
-        return InventoryReply(answer=answer, follow_up_question=follow_up_question)
+        primary = top_hits[0] if top_hits else None
+        plan = self._build_inventory_answer_plan(
+            intent="support_product_search",
+            primary=primary,
+            alternative=top_hits[1] if len(top_hits) > 1 else None,
+            excluded_hits=[],
+            metadata_source=primary,
+            reasoning_steps=[
+                "Summarized the highest-ranked matching products.",
+                "Kept the answer grounded in retrieved catalog fields including price, stock, brand, and metadata when present.",
+            ],
+        )
+        return InventoryReply(
+            answer=answer,
+            follow_up_question=follow_up_question,
+            answer_plan=plan,
+            verification=self._verify_answer_plan(answer_plan=plan, hits=hits),
+        )
 
     def _format_answer(self, *, intro: str, hits: list[InventorySearchHit], limit: int = 5) -> str:
         lines = [intro]
@@ -1481,7 +1946,19 @@ class InventoryService:
                 answer += f" {follow_up_question}"
             else:
                 answer += " Give me the product type, budget, or customer need and I will recommend something I can actually support with inventory data."
-            return InventoryReply(answer=answer, follow_up_question=follow_up_question)
+            plan = self._build_inventory_answer_plan(
+                intent="sales_no_match",
+                primary=None,
+                abstain=True,
+                abstention_reason="No reliable catalog-backed sales match.",
+                reasoning_steps=["No retrieved product was strong enough to recommend."],
+            )
+            return InventoryReply(
+                answer=answer,
+                follow_up_question=follow_up_question,
+                answer_plan=plan,
+                verification=self._verify_answer_plan(answer_plan=plan, hits=hits),
+            )
 
         sales_style = self._classify_sales_style(
             question=question,
@@ -1532,12 +2009,19 @@ class InventoryService:
             )
 
         primary = in_stock_hits[0]
-        recommended_product_ids = [hit.product_id for hit in in_stock_hits[:3]]
+        coherent_hits = self._filter_coherent_sales_hits(primary=primary, hits=in_stock_hits)
+        excluded_hits = [hit for hit in in_stock_hits if hit.product_id not in {candidate.product_id for candidate in coherent_hits}]
+        coherent_clarification_question = self._build_clarification_question(
+            question=question,
+            assistant_mode="sales",
+            hits=coherent_hits,
+            filters=filters,
+        )
         answer_parts = [self._build_sales_intro(primary=primary, sales_style=sales_style)]
 
         reason_parts = self._build_sales_reason_parts(
             primary=primary,
-            hits=in_stock_hits,
+            hits=coherent_hits,
             sales_style=sales_style,
             low_stock_threshold=low_stock_threshold,
         )
@@ -1549,7 +2033,7 @@ class InventoryService:
 
         alternative = self._select_sales_alternative(
             primary=primary,
-            hits=in_stock_hits[1:],
+            hits=coherent_hits[1:],
             sales_style=sales_style,
         )
         if alternative is not None:
@@ -1566,18 +2050,22 @@ class InventoryService:
 
         upsell_candidate = self._select_sales_upsell_candidate(
             primary=primary,
-            hits=in_stock_hits[1:],
+            hits=coherent_hits[1:],
             sales_style=sales_style,
         )
         if upsell_candidate is not None and reply_style == "detailed":
             answer_parts.append(self._build_sales_upsell_line(primary=primary, upsell=upsell_candidate))
 
-        cross_sell_candidate = self._select_cross_sell_candidate(primary=primary, hits=in_stock_hits[1:])
+        cross_sell_candidate = self._select_cross_sell_candidate(
+            primary=primary,
+            hits=in_stock_hits[1:],
+            question=question,
+        )
         cross_sell_product_ids = [cross_sell_candidate.product_id] if cross_sell_candidate is not None else []
         if cross_sell_candidate is not None and reply_style == "detailed":
             answer_parts.append(self._build_cross_sell_line(primary=primary, cross_sell=cross_sell_candidate))
 
-        follow_up_question = clarification_question or self._build_sales_follow_up_question(
+        follow_up_question = coherent_clarification_question or self._build_sales_follow_up_question(
             sales_style=sales_style,
             primary=primary,
         )
@@ -1587,11 +2075,35 @@ class InventoryService:
             )
             if follow_up_question:
                 answer_parts.append(follow_up_question)
+        recommended_product_ids = self._build_recommended_product_ids(
+            primary=primary,
+            alternative=alternative,
+            upsell=upsell_candidate,
+            coherent_hits=coherent_hits,
+        )
+        answer_plan = self._build_inventory_answer_plan(
+            intent=f"sales_{sales_style}",
+            primary=primary,
+            alternative=alternative,
+            cross_sell=cross_sell_candidate,
+            excluded_hits=excluded_hits,
+            metadata_source=primary,
+            reasoning_steps=self._build_sales_plan_steps(
+                primary=primary,
+                alternative=alternative,
+                cross_sell=cross_sell_candidate,
+                sales_style=sales_style,
+                excluded_hits=excluded_hits,
+            ),
+        )
+        verification = self._verify_answer_plan(answer_plan=answer_plan, hits=hits)
         return InventoryReply(
             answer=" ".join(part for part in answer_parts if part),
             recommended_product_ids=recommended_product_ids,
             cross_sell_product_ids=cross_sell_product_ids,
             follow_up_question=follow_up_question,
+            answer_plan=answer_plan,
+            verification=verification,
         )
 
     def _format_hit_line(self, hit: InventorySearchHit) -> str:
@@ -1605,6 +2117,198 @@ class InventoryService:
         if hit.status:
             details.append(f"status {hit.status}")
         return "; ".join(details) + "."
+
+    def _filter_coherent_sales_hits(
+        self,
+        *,
+        primary: InventorySearchHit,
+        hits: list[InventorySearchHit],
+    ) -> list[InventorySearchHit]:
+        coherent_hits: list[InventorySearchHit] = []
+        seen: set[str] = set()
+        for hit in hits:
+            if hit.product_id in seen:
+                continue
+            if hit.product_id == primary.product_id or self._is_coherent_recommendation_candidate(
+                primary=primary,
+                candidate=hit,
+            ):
+                coherent_hits.append(hit)
+                seen.add(hit.product_id)
+        return coherent_hits or [primary]
+
+    def _is_coherent_recommendation_candidate(
+        self,
+        *,
+        primary: InventorySearchHit,
+        candidate: InventorySearchHit,
+    ) -> bool:
+        if primary.category and candidate.category and primary.category.casefold() == candidate.category.casefold():
+            return True
+        primary_meaningful_tags = self._meaningful_tags(primary)
+        candidate_meaningful_tags = self._meaningful_tags(candidate)
+        if primary.brand and candidate.brand and primary.brand.casefold() == candidate.brand.casefold():
+            return bool(primary_meaningful_tags.intersection(candidate_meaningful_tags)) or not primary_meaningful_tags
+        return bool(primary_meaningful_tags.intersection(candidate_meaningful_tags))
+
+    @staticmethod
+    def _build_recommended_product_ids(
+        *,
+        primary: InventorySearchHit,
+        alternative: InventorySearchHit | None,
+        upsell: InventorySearchHit | None,
+        coherent_hits: list[InventorySearchHit],
+    ) -> list[str]:
+        product_ids: list[str] = []
+        for candidate in (primary, alternative, upsell, *coherent_hits[1:2]):
+            if candidate is None or candidate.product_id in product_ids:
+                continue
+            product_ids.append(candidate.product_id)
+            if len(product_ids) >= 3:
+                break
+        return product_ids
+
+    def _build_inventory_answer_plan(
+        self,
+        *,
+        intent: str,
+        primary: InventorySearchHit | None,
+        alternative: InventorySearchHit | None = None,
+        cross_sell: InventorySearchHit | None = None,
+        excluded_hits: list[InventorySearchHit] | None = None,
+        metadata_source: InventorySearchHit | None = None,
+        reasoning_steps: list[str] | None = None,
+        abstain: bool = False,
+        abstention_reason: str | None = None,
+    ) -> InventoryAnswerPlan:
+        metadata_used = self._metadata_used_for_hit(metadata_source or primary)
+        return InventoryAnswerPlan(
+            intent=intent,
+            primary_product_id=primary.product_id if primary else None,
+            alternative_product_ids=[alternative.product_id] if alternative else [],
+            cross_sell_product_ids=[cross_sell.product_id] if cross_sell else [],
+            excluded_product_ids=[hit.product_id for hit in excluded_hits or []],
+            reasoning_steps=reasoning_steps or [],
+            metadata_used=metadata_used,
+            abstain=abstain,
+            abstention_reason=abstention_reason,
+        )
+
+    def _build_sales_plan_steps(
+        self,
+        *,
+        primary: InventorySearchHit,
+        alternative: InventorySearchHit | None,
+        cross_sell: InventorySearchHit | None,
+        sales_style: str,
+        excluded_hits: list[InventorySearchHit],
+    ) -> list[str]:
+        steps = [
+            f"Selected {primary.name} because it is the strongest {sales_style} match after stock, relevance, and quality ranking.",
+        ]
+        if primary.category:
+            steps.append(f"Kept recommendation logic anchored to the {primary.category} category unless an explicit cross-sell is requested.")
+        metadata_step = self._metadata_reason_step(primary)
+        if metadata_step:
+            steps.append(metadata_step)
+        if alternative is not None:
+            steps.append(f"Selected {alternative.name} as a related fallback, not a random semantic neighbor.")
+        if cross_sell is not None:
+            steps.append(f"Selected {cross_sell.name} as a cross-sell only because the user asked for an add-on or bundle-style suggestion.")
+        if excluded_hits:
+            steps.append(
+                "Excluded unrelated retrieval hits from recommendation logic: "
+                + self._natural_join(hit.name for hit in excluded_hits[:3])
+                + "."
+            )
+        return steps
+
+    def _verify_answer_plan(
+        self,
+        *,
+        answer_plan: InventoryAnswerPlan,
+        hits: list[InventorySearchHit],
+    ) -> InventoryAnswerVerification:
+        issues: list[str] = []
+        hit_by_id = {hit.product_id: hit for hit in hits}
+        primary = hit_by_id.get(answer_plan.primary_product_id or "")
+        if answer_plan.primary_product_id and primary is None:
+            issues.append("Primary product is not present in retrieved evidence.")
+        for product_id in answer_plan.alternative_product_ids:
+            candidate = hit_by_id.get(product_id)
+            if candidate is None:
+                issues.append(f"Alternative product {product_id} is not present in retrieved evidence.")
+                continue
+            if primary is not None and not self._is_coherent_recommendation_candidate(primary=primary, candidate=candidate):
+                issues.append(f"Alternative product {candidate.name} is not logically related to the primary recommendation.")
+        for product_id in answer_plan.cross_sell_product_ids:
+            candidate = hit_by_id.get(product_id)
+            if candidate is None:
+                issues.append(f"Cross-sell product {product_id} is not present in retrieved evidence.")
+        used_product_ids = {
+            product_id
+            for product_id in [
+                answer_plan.primary_product_id,
+                *answer_plan.alternative_product_ids,
+                *answer_plan.cross_sell_product_ids,
+            ]
+            if product_id
+        }
+        overlapping_exclusions = set(answer_plan.excluded_product_ids).intersection(used_product_ids)
+        if overlapping_exclusions:
+            issues.append("Answer plan both used and excluded the same product IDs.")
+        return InventoryAnswerVerification(passed=not issues, issues=issues)
+
+    def _metadata_used_for_hit(self, hit: InventorySearchHit | None) -> list[str]:
+        if hit is None:
+            return []
+        fields: list[str] = []
+        for key in sorted(hit.attributes):
+            if key not in fields:
+                fields.append(f"attributes.{key}")
+        for key in sorted(hit.metadata):
+            if key == "raw_attributes" and isinstance(hit.metadata.get(key), dict):
+                for raw_key in sorted(hit.metadata[key]):
+                    fields.append(f"metadata.raw_attributes.{raw_key}")
+            elif key not in {"source_record_id"}:
+                fields.append(f"metadata.{key}")
+        return fields[:12]
+
+    def _metadata_reason_step(self, hit: InventorySearchHit) -> str | None:
+        useful_bits: list[str] = []
+        for key in ("connectivity", "battery_hours", "warranty_years", "input", "use_case", "watts"):
+            value = hit.attributes.get(key)
+            if value:
+                useful_bits.append(f"{key.replace('_', ' ')}: {value}")
+        if not useful_bits:
+            raw_attributes = hit.metadata.get("raw_attributes")
+            if isinstance(raw_attributes, dict):
+                for key, value in list(sorted(raw_attributes.items()))[:3]:
+                    useful_bits.append(f"{key.replace('_', ' ')}: {value}")
+        if not useful_bits:
+            return None
+        return "Used structured metadata/attributes for the recommendation: " + "; ".join(useful_bits[:4]) + "."
+
+    def _metadata_answer_sentence(self, hit: InventorySearchHit) -> str | None:
+        useful_bits: list[str] = []
+        display_names = {
+            "connectivity": "connectivity",
+            "battery_hours": "battery life",
+            "warranty_years": "warranty",
+            "input": "input",
+            "use_case": "use case",
+            "watts": "power",
+            "color": "color",
+        }
+        for key, label in display_names.items():
+            value = hit.attributes.get(key)
+            if value:
+                suffix = " hours" if key == "battery_hours" and str(value).isdigit() else ""
+                suffix = " year(s)" if key == "warranty_years" and str(value).isdigit() else suffix
+                useful_bits.append(f"{label}: {value}{suffix}")
+        if not useful_bits:
+            return None
+        return "Structured details include " + "; ".join(useful_bits[:4]) + "."
 
     def _estimate_confidence(self, hits: list[InventorySearchHit]) -> float:
         if not hits:
@@ -1681,6 +2385,8 @@ class InventoryService:
             tags=list(item.tags),
             updated_at=item.updated_at,
             snippet=self._build_snippet(item),
+            attributes=dict(item.attributes),
+            metadata=dict(item.metadata),
             score=round(score, 4),
         )
 
@@ -1921,6 +2627,9 @@ class InventoryService:
 
         if primary.snippet:
             reasons.append(f"The product description highlights {primary.snippet[:160].rstrip('.')}.")
+        metadata_sentence = self._metadata_answer_sentence(primary)
+        if metadata_sentence:
+            reasons.append(metadata_sentence)
         return reasons
 
     def _select_sales_alternative(
@@ -2174,13 +2883,27 @@ class InventoryService:
             answer_parts.append(f"There are {primary.stock} unit(s) in stock right now.")
         if primary.snippet:
             answer_parts.append(f"From the catalog description: {primary.snippet.rstrip('.')}.")
+        metadata_sentence = self._metadata_answer_sentence(primary)
+        if metadata_sentence:
+            answer_parts.append(metadata_sentence)
 
         follow_up_question = "Do you want a comparison, stock check, or a lower-price alternative for this item?"
         if reply_style == "detailed":
             answer_parts.append(follow_up_question)
+        plan = self._build_inventory_answer_plan(
+            intent="support_product_detail",
+            primary=primary,
+            metadata_source=primary,
+            reasoning_steps=[
+                f"Answered from the exact product record for {primary.name}.",
+                "Used price, stock, category, description, and available metadata/attributes.",
+            ],
+        )
         return InventoryReply(
             answer=" ".join(answer_parts),
             follow_up_question=follow_up_question,
+            answer_plan=plan,
+            verification=self._verify_answer_plan(answer_plan=plan, hits=hits),
         )
 
     def _build_sales_objection_reply(
@@ -2326,7 +3049,10 @@ class InventoryService:
         *,
         primary: InventorySearchHit,
         hits: list[InventorySearchHit],
+        question: str,
     ) -> InventorySearchHit | None:
+        if not self._should_offer_cross_sell(question):
+            return None
         cross_sell_hits = [
             hit
             for hit in hits
@@ -2353,9 +3079,21 @@ class InventoryService:
             return True
         if primary.brand and candidate.brand and primary.brand.casefold() == candidate.brand.casefold():
             return True
-        primary_tags = {tag.casefold() for tag in primary.tags}
-        candidate_tags = {tag.casefold() for tag in candidate.tags}
+        primary_tags = self._meaningful_tags(primary)
+        candidate_tags = self._meaningful_tags(candidate)
         return bool(primary_tags.intersection(candidate_tags))
+
+    @staticmethod
+    def _meaningful_tags(hit: InventorySearchHit) -> set[str]:
+        return {
+            tag.casefold()
+            for tag in hit.tags
+            if tag and tag.casefold() not in _GENERIC_RELATION_TAGS
+        }
+
+    def _should_offer_cross_sell(self, question: str) -> bool:
+        normalized = self._normalize_conversation_text(question)
+        return self._has_any_phrase(normalized, _CROSS_SELL_HINTS)
 
     def _build_cross_sell_line(
         self,
@@ -2733,5 +3471,12 @@ def get_inventory_service() -> InventoryService:
             namespace=settings.inventory_vector_namespace,
             default_top_k=settings.top_k,
             agentic_trace_dir=str(Path(settings.trace_dir) / "inventory_agentic"),
+            natural_answers_enabled=settings.inventory_natural_answers_enabled,
+            natural_answer_model_name=settings.inventory_natural_answer_model_name,
+            natural_answer_temperature=settings.inventory_natural_answer_temperature,
+            natural_answer_max_tokens=settings.inventory_natural_answer_max_tokens,
+            natural_answer_min_confidence=settings.inventory_natural_answer_min_confidence,
+            natural_answer_timeout_seconds=settings.inventory_natural_answer_timeout_seconds,
+            conversation_history_limit=settings.inventory_conversation_history_limit,
         ),
     )

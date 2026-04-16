@@ -21,12 +21,20 @@ retrieval:
   final_evidence_k: 3
 generation:
   provider: openai_compatible
-  model_name: deepseek-r1:7b
+  model_name: qwen3:8b
   base_url: http://127.0.0.1:11434/v1
   max_tokens: 512
   temperature: 0.0
   abstention_score_threshold: 0.75
   verification_enabled: true
+inventory_chat:
+  natural_answers_enabled: true
+  natural_answer_model_name: qwen3:8b
+  natural_answer_temperature: 0.2
+  natural_answer_max_tokens: 320
+  natural_answer_min_confidence: 0.45
+  natural_answer_timeout_seconds: 60.0
+  conversation_history_limit: 6
 embeddings:
   provider: transformers
   model_name: BAAI/bge-m3

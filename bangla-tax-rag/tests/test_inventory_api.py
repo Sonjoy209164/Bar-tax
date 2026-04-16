@@ -1117,3 +1117,64 @@ async def test_inventory_ask_keeps_exact_no_match_abstention_when_natural_mode_r
     assert payload["hits"] == []
     assert "exact catalog match for bike" in payload["answer"].lower()
     assert "exact catalog match for bike" in (payload["abstention_reason"] or "").lower()
+
+
+@pytest.mark.anyio
+async def test_inventory_ask_falls_back_when_natural_answer_fails_final_verification(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    service.config.natural_answers_enabled = True
+    service.config.natural_answer_min_confidence = 0.0
+    monkeypatch.setattr(
+        service,
+        "_run_inventory_answer_model",
+        lambda **kwargs: (
+            '{"answer":"TrailMark Smart Watch is available at USD 999.00 with 10 units in stock.",'
+            ' "follow_up_question":null,'
+            ' "abstained": false,'
+            ' "abstention_reason": null}'
+        ),
+    )
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    }
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "show me some watches",
+                "assistant_mode": "support",
+                "answer_engine": "natural",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer_engine"] == "deterministic"
+    assert "USD 999.00" not in payload["answer"]
+    assert payload["verification"]["checked_final_answer"] is True
+    assert payload["verification"]["passed"] is True

@@ -558,6 +558,8 @@ class InventoryAnswerPlan(BaseModel):
 class InventoryAnswerVerification(BaseModel):
     passed: bool = True
     issues: list[str] = Field(default_factory=list)
+    checked_final_answer: bool = False
+    final_answer_issues: list[str] = Field(default_factory=list)
 
 
 class InventoryConversationTurn(BaseModel):

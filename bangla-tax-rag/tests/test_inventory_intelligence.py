@@ -4,6 +4,7 @@ from app.core.schemas import InventoryAnswerPlan, InventorySearchFilters, Invent
 from app.inventory import (
     EcommerceReranker,
     InventoryAnswerPlanner,
+    InventoryFinalAnswerVerifier,
     InventoryIntentClassifier,
     InventoryPreferenceExtractor,
     InventoryTradeoffReasoner,
@@ -326,3 +327,76 @@ def test_inventory_tradeoff_reasoner_distinguishes_fallbacks_and_cross_sells() -
     assert "limited stock" in joined or "safer availability" in joined
     assert "cross-sell add-on" in joined
     assert "not a substitute" in joined
+
+
+def test_inventory_final_answer_verifier_catches_unsupported_price_and_claims() -> None:
+    verifier = InventoryFinalAnswerVerifier()
+    hit = InventorySearchHit(
+        product_id="prod-watch",
+        sku="ACC-WAT-001",
+        name="TrailMark Smart Watch",
+        category="Wearables",
+        brand="TrailMark",
+        price=199.0,
+        currency="USD",
+        stock=10,
+        status="Active",
+        tags=["watch", "wearable", "fitness"],
+        snippet="Fitness watch with heart-rate and GPS tracking",
+        score=0.7,
+    )
+    plan = InventoryAnswerPlan(primary_product_id=hit.product_id)
+
+    verification = verifier.verify(
+        answer="TrailMark Smart Watch is available for USD 999.00 with free shipping.",
+        answer_plan=plan,
+        hits=[hit],
+    )
+
+    assert verification.passed is False
+    assert verification.checked_final_answer is True
+    assert any("unsupported price" in issue.lower() for issue in verification.final_answer_issues)
+    assert any("free shipping" in issue.lower() for issue in verification.final_answer_issues)
+
+
+def test_inventory_final_answer_verifier_catches_cross_sell_as_substitute() -> None:
+    verifier = InventoryFinalAnswerVerifier()
+    laptop = InventorySearchHit(
+        product_id="prod-laptop",
+        sku="CMP-LAP-001",
+        name="Nimbus 14 Business Ultrabook",
+        category="Computing",
+        brand="Nimbus",
+        price=1199.0,
+        currency="USD",
+        stock=8,
+        tags=["computing", "laptop"],
+        snippet="Lightweight 14 inch laptop",
+        score=0.8,
+    )
+    mouse = InventorySearchHit(
+        product_id="prod-mouse",
+        sku="CMP-MS-002",
+        name="GlidePoint Wireless Mouse",
+        category="Computing",
+        brand="GlidePoint",
+        price=49.0,
+        currency="USD",
+        stock=31,
+        tags=["computing", "mouse"],
+        snippet="Silent wireless mouse",
+        score=0.5,
+    )
+    plan = InventoryAnswerPlan(
+        primary_product_id=laptop.product_id,
+        cross_sell_product_ids=[mouse.product_id],
+    )
+
+    verification = verifier.verify(
+        answer="If they do not want the laptop, switch to GlidePoint Wireless Mouse as the replacement.",
+        answer_plan=plan,
+        hits=[laptop, mouse],
+    )
+
+    assert verification.passed is False
+    assert any("cross-sell" in issue.lower() and "substitute" in issue.lower() for issue in verification.final_answer_issues)

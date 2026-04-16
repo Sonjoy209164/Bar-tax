@@ -363,21 +363,21 @@ Current verifier checks the plan. Add final-answer verification.
 
 Checks:
 
-- [ ] Answer does not recommend excluded products.
-- [ ] Answer does not invent product names.
-- [ ] Answer does not invent stock.
-- [ ] Answer does not invent price.
-- [ ] Answer does not invent features.
-- [ ] Answer respects abstention.
-- [ ] Answer does not treat cross-sell as substitute.
-- [ ] Answer includes required caveat for near alternatives.
+- [x] Answer does not recommend excluded products.
+- [x] Answer does not invent product names.
+- [x] Answer does not invent stock.
+- [x] Answer does not invent price.
+- [x] Answer does not invent features.
+- [x] Answer respects abstention.
+- [x] Answer does not treat cross-sell as substitute.
+- [x] Answer includes required caveat for near alternatives.
 
 Actions:
 
-- [ ] If verification passes, return answer.
-- [ ] If verification fails and natural mode was used, retry deterministic answer.
-- [ ] If deterministic also fails, return safe abstention.
-- [ ] Log verification issues.
+- [x] If verification passes, return answer.
+- [x] If verification fails and natural mode was used, retry deterministic answer.
+- [x] If deterministic also fails, return safe abstention.
+- [x] Log verification issues.
 
 Success criteria:
 
@@ -579,7 +579,7 @@ Recommended implementation sequence:
 5. [x] Ecommerce reranker
 6. [x] Rich answer plan
 7. [x] Tradeoff reasoning
-8. [ ] Final answer verifier
+8. [x] Final answer verifier
 9. [ ] Better natural prompt
 10. [ ] Conversation memory contract
 11. [ ] Sync validation

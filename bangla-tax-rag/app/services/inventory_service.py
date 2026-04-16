@@ -40,6 +40,7 @@ from app.generation.generator import ChatMessage, build_generation_options, get_
 from app.inventory import (
     EcommerceReranker,
     InventoryAnswerPlanner,
+    InventoryFinalAnswerVerifier,
     InventoryIntentClassifier,
     InventoryIntentResult,
     InventoryPreferenceExtractor,
@@ -351,6 +352,7 @@ class InventoryService:
         self.preference_extractor = InventoryPreferenceExtractor(self.product_ontology)
         self.ecommerce_reranker = EcommerceReranker(self.product_ontology)
         self.answer_planner = InventoryAnswerPlanner(self.product_ontology)
+        self.final_answer_verifier = InventoryFinalAnswerVerifier(self.product_ontology)
 
     def status(self) -> InventoryStatusResponse:
         items = self._load_catalog()
@@ -1455,7 +1457,15 @@ class InventoryService:
             abstention_reason=abstention_reason,
         )
         if answer_engine != "natural":
-            return base_reply, "deterministic", abstained, abstention_reason
+            verified_base_reply = self._with_final_answer_verification(reply=base_reply, hits=hits)
+            if verified_base_reply.verification.passed:
+                return verified_base_reply, "deterministic", abstained, abstention_reason
+            safe_reply = self._build_safe_final_answer_reply(
+                base_reply=verified_base_reply,
+                hits=hits,
+                reason="The deterministic answer did not pass final answer verification.",
+            )
+            return safe_reply, "deterministic", True, safe_reply.answer_plan.abstention_reason
 
         synthesized_reply = self._synthesize_inventory_reply(
             question=question,
@@ -1471,21 +1481,100 @@ class InventoryService:
             missing_facts=missing_facts or [],
         )
         if synthesized_reply is None or synthesized_reply.abstained or not synthesized_reply.answer.strip():
-            return base_reply, "deterministic", abstained, abstention_reason
+            verified_base_reply = self._with_final_answer_verification(reply=base_reply, hits=hits)
+            return verified_base_reply, "deterministic", abstained, abstention_reason
 
-        return (
-            InventoryReply(
-                answer=synthesized_reply.answer.strip(),
-                recommended_product_ids=base_reply.recommended_product_ids,
-                cross_sell_product_ids=base_reply.cross_sell_product_ids,
-                follow_up_question=synthesized_reply.follow_up_question or base_reply.follow_up_question,
-                answer_plan=base_reply.answer_plan,
-                verification=base_reply.verification,
-            ),
-            "natural",
-            False,
-            None,
+        natural_reply = InventoryReply(
+            answer=synthesized_reply.answer.strip(),
+            recommended_product_ids=base_reply.recommended_product_ids,
+            cross_sell_product_ids=base_reply.cross_sell_product_ids,
+            follow_up_question=synthesized_reply.follow_up_question or base_reply.follow_up_question,
+            answer_plan=base_reply.answer_plan,
+            verification=base_reply.verification,
         )
+        verified_natural_reply = self._with_final_answer_verification(reply=natural_reply, hits=hits)
+        if verified_natural_reply.verification.passed:
+            return verified_natural_reply, "natural", False, None
+
+        logger.warning(
+            "Inventory natural answer failed final verification; falling back to deterministic answer. issues=%s",
+            verified_natural_reply.verification.final_answer_issues,
+        )
+        verified_base_reply = self._with_final_answer_verification(reply=base_reply, hits=hits)
+        if verified_base_reply.verification.passed:
+            return verified_base_reply, "deterministic", abstained, abstention_reason
+
+        safe_reply = self._build_safe_final_answer_reply(
+            base_reply=verified_base_reply,
+            hits=hits,
+            reason="Both natural and deterministic answers failed final answer verification.",
+        )
+        return safe_reply, "deterministic", True, safe_reply.answer_plan.abstention_reason
+
+    def _with_final_answer_verification(
+        self,
+        *,
+        reply: InventoryReply,
+        hits: list[InventorySearchHit],
+    ) -> InventoryReply:
+        final_verification = self.final_answer_verifier.verify(
+            answer=reply.answer,
+            answer_plan=reply.answer_plan,
+            hits=hits,
+        )
+        existing_verification = reply.verification
+        issues = self._dedupe_verification_issues(
+            [
+                *existing_verification.issues,
+                *final_verification.final_answer_issues,
+            ]
+        )
+        verification = InventoryAnswerVerification(
+            passed=existing_verification.passed and final_verification.passed,
+            issues=issues,
+            checked_final_answer=True,
+            final_answer_issues=final_verification.final_answer_issues,
+        )
+        return reply.model_copy(update={"verification": verification})
+
+    def _build_safe_final_answer_reply(
+        self,
+        *,
+        base_reply: InventoryReply,
+        hits: list[InventorySearchHit],
+        reason: str,
+    ) -> InventoryReply:
+        plan = base_reply.answer_plan.model_copy(
+            update={
+                "abstain": True,
+                "abstention_reason": reason,
+                "risk_notes": self._dedupe_verification_issues([*base_reply.answer_plan.risk_notes, reason]),
+            }
+        )
+        answer = (
+            "I need to be careful here: the generated inventory answer did not pass final verification. "
+            "Please ask again with a product name, category, budget, or stock question and I will answer from verified catalog data."
+        )
+        safe_reply = InventoryReply(
+            answer=answer,
+            recommended_product_ids=[],
+            cross_sell_product_ids=[],
+            follow_up_question="What exact product, category, budget, or stock question should I verify?",
+            answer_plan=plan,
+            verification=base_reply.verification,
+        )
+        return self._with_final_answer_verification(reply=safe_reply, hits=hits)
+
+    @staticmethod
+    def _dedupe_verification_issues(issues: list[str]) -> list[str]:
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for issue in issues:
+            if issue in seen:
+                continue
+            seen.add(issue)
+            deduped.append(issue)
+        return deduped
 
     def _resolve_inventory_answer_engine(
         self,

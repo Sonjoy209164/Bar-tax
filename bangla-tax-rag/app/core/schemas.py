@@ -527,6 +527,13 @@ class InventorySearchResponse(BaseModel):
 
 class InventoryAnswerPlan(BaseModel):
     intent: str = "unknown"
+    detected_intent: str | None = None
+    intent_confidence: float | None = Field(default=None, ge=0, le=1)
+    intent_reasons: list[str] = Field(default_factory=list)
+    strategy: str | None = None
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    product_type: str | None = None
+    product_family: str | None = None
     primary_product_id: str | None = None
     alternative_product_ids: list[str] = Field(default_factory=list)
     cross_sell_product_ids: list[str] = Field(default_factory=list)

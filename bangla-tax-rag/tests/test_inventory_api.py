@@ -410,7 +410,8 @@ async def test_inventory_sales_mode_excludes_unrelated_cross_category_fallbacks(
     assert "GlidePoint Wireless Mouse" not in payload["answer"]
     assert "battery life: 35 hours" in payload["answer"]
     assert payload["answer_plan"]["primary_product_id"] == "prod-headphones"
-    assert set(payload["answer_plan"]["excluded_product_ids"]) == {"prod-keyboard", "prod-mouse"}
+    assert payload["answer_plan"]["excluded_product_ids"] == []
+    assert all(hit["product_id"] == "prod-headphones" for hit in payload["hits"])
     assert "attributes.battery_hours" in payload["answer_plan"]["metadata_used"]
     assert payload["verification"]["passed"] is True
 
@@ -729,6 +730,9 @@ async def test_inventory_support_mode_anchors_explicit_product_terms(monkeypatch
     assert payload["hits"][0]["product_id"] == "prod-watch"
     assert all(hit["product_id"] == "prod-watch" for hit in payload["hits"])
     assert "TrailMark Smart Watch" in payload["answer"]
+    assert payload["answer_plan"]["detected_intent"] == "product_search"
+    assert payload["answer_plan"]["product_type"] == "watch"
+    assert payload["answer_plan"]["product_family"] == "wearable"
 
 
 @pytest.mark.anyio
@@ -784,6 +788,9 @@ async def test_inventory_support_mode_rejects_unmatched_exact_lookup_queries(mon
     assert payload["total_hits"] == 0
     assert payload["hits"] == []
     assert "exact catalog match for bike" in payload["answer"].lower()
+    assert payload["answer_plan"]["detected_intent"] == "product_search"
+    assert payload["answer_plan"]["product_type"] == "bike"
+    assert payload["answer_plan"]["abstain"] is True
 
 
 @pytest.mark.anyio

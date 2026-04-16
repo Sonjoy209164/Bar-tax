@@ -37,6 +37,13 @@ from app.core.schemas import (
 )
 from app.core.settings import get_settings
 from app.generation.generator import ChatMessage, build_generation_options, get_chat_client
+from app.inventory import (
+    InventoryIntentClassifier,
+    InventoryIntentResult,
+    InventoryPreferenceExtractor,
+    InventoryPreferenceProfile,
+    ProductOntology,
+)
 from app.retrieval import TextEmbedder, VectorRecord, VectorStore, build_embedder, build_vector_store
 
 logger = logging.getLogger(__name__)
@@ -337,6 +344,9 @@ class InventoryService:
         self.vector_store = vector_store
         self.config = config or InventoryServiceConfig()
         self.trace_store = InventoryAgenticTraceStore(self.config.agentic_trace_dir)
+        self.product_ontology = ProductOntology()
+        self.intent_classifier = InventoryIntentClassifier(self.product_ontology)
+        self.preference_extractor = InventoryPreferenceExtractor(self.product_ontology)
 
     def status(self) -> InventoryStatusResponse:
         items = self._load_catalog()
@@ -446,6 +456,13 @@ class InventoryService:
         )
         if conversational_reply is not None:
             reply, confidence_score = conversational_reply
+            reply = self._enrich_reply_plan(
+                reply=reply,
+                question=request.question,
+                filters=request.filters,
+                hits=[],
+                strategy="conversation",
+            )
             return InventoryAskResponse(
                 status="success",
                 question=request.question,
@@ -777,8 +794,16 @@ class InventoryService:
             subject_phrase=subject_phrase,
             detail_request=detail_request,
         )
+        preference_profile = self.preference_extractor.extract(
+            query_text,
+            filters=filters,
+            products=list(catalog.values()),
+        )
+        requested_product_type = preference_profile.product_type
+        if detail_request and subject_phrase and len(subject_phrase.split()) >= 3:
+            requested_product_type = None
 
-        candidates: list[tuple[InventorySearchHit, float, float, int]] = []
+        candidates: list[tuple[InventorySearchHit, float, float, int, int]] = []
         for item in catalog.values():
             if not self._item_matches_filters(item, filters):
                 continue
@@ -792,13 +817,32 @@ class InventoryService:
             if lexical_score <= 0 and item.product_id not in vector_scores:
                 continue
             confidence_score = max(vector_score, min(1.0, lexical_score / 12.0))
-            candidates.append((self._build_search_hit(item=item, score=confidence_score), lexical_score, vector_score, coverage))
+            relation_score = self.product_ontology.relation_score(requested_product_type, item)
+            candidates.append(
+                (
+                    self._build_search_hit(item=item, score=confidence_score),
+                    lexical_score,
+                    vector_score,
+                    coverage,
+                    relation_score,
+                )
+            )
 
         if not candidates:
             return []
 
+        if requested_product_type:
+            exact_type_candidates = [candidate for candidate in candidates if candidate[4] >= 3]
+            related_type_candidates = [candidate for candidate in candidates if candidate[4] >= 2]
+            if exact_type_candidates:
+                candidates = exact_type_candidates
+            elif related_type_candidates and not exact_lookup:
+                candidates = related_type_candidates
+            elif exact_lookup:
+                return []
+
         if exact_lookup:
-            max_coverage = max(coverage for _, _, _, coverage in candidates)
+            max_coverage = max(coverage for _, _, _, coverage, _ in candidates)
             if max_coverage <= 0:
                 return []
             coverage_threshold = len(query_terms) if len(query_terms) <= 2 else max(1, len(query_terms) - 1)
@@ -808,7 +852,7 @@ class InventoryService:
             else:
                 return []
 
-        best_lexical_score = max(lexical_score for _, lexical_score, _, _ in candidates)
+        best_lexical_score = max(lexical_score for _, lexical_score, _, _, _ in candidates)
         anchor_to_lexical = self._should_anchor_to_lexical(
             query_terms=query_terms,
             subject_phrase=subject_phrase,
@@ -827,6 +871,7 @@ class InventoryService:
             candidates,
             key=lambda candidate: (
                 -candidate[3],
+                -candidate[4],
                 -candidate[1],
                 -candidate[2],
                 self._is_out_of_stock(candidate[0]),
@@ -835,7 +880,7 @@ class InventoryService:
                 candidate[0].name.casefold(),
             ),
         )
-        return [hit for hit, _, _, _ in ranked_candidates[:top_k]]
+        return [hit for hit, _, _, _, _ in ranked_candidates[:top_k]]
 
     def _browse_items(
         self,
@@ -1756,19 +1801,27 @@ class InventoryService:
         reply_style: str,
     ) -> InventoryReply:
         if assistant_mode == "sales":
-            return self._build_sales_answer(
+            reply = self._build_sales_answer(
                 question=question,
                 hits=hits,
                 filters=filters,
                 low_stock_threshold=low_stock_threshold,
                 reply_style=reply_style,
             )
-        return self._build_support_answer(
+        else:
+            reply = self._build_support_answer(
+                question=question,
+                hits=hits,
+                filters=filters,
+                low_stock_threshold=low_stock_threshold,
+                reply_style=reply_style,
+            )
+        return self._enrich_reply_plan(
+            reply=reply,
             question=question,
-            hits=hits,
             filters=filters,
-            low_stock_threshold=low_stock_threshold,
-            reply_style=reply_style,
+            hits=hits,
+            strategy=reply.answer_plan.intent if reply.answer_plan.intent != "unknown" else assistant_mode,
         )
 
     def _build_support_answer(
@@ -2143,13 +2196,7 @@ class InventoryService:
         primary: InventorySearchHit,
         candidate: InventorySearchHit,
     ) -> bool:
-        if primary.category and candidate.category and primary.category.casefold() == candidate.category.casefold():
-            return True
-        primary_meaningful_tags = self._meaningful_tags(primary)
-        candidate_meaningful_tags = self._meaningful_tags(candidate)
-        if primary.brand and candidate.brand and primary.brand.casefold() == candidate.brand.casefold():
-            return bool(primary_meaningful_tags.intersection(candidate_meaningful_tags)) or not primary_meaningful_tags
-        return bool(primary_meaningful_tags.intersection(candidate_meaningful_tags))
+        return self.product_ontology.valid_alternative(primary, candidate)
 
     @staticmethod
     def _build_recommended_product_ids(
@@ -2194,6 +2241,60 @@ class InventoryService:
             abstention_reason=abstention_reason,
         )
 
+    def _enrich_reply_plan(
+        self,
+        *,
+        reply: InventoryReply,
+        question: str,
+        filters: InventorySearchFilters,
+        hits: list[InventorySearchHit],
+        strategy: str | None,
+    ) -> InventoryReply:
+        intent_result = self.intent_classifier.classify(question, filters=filters)
+        preference_profile = self.preference_extractor.extract(
+            question,
+            filters=filters,
+            products=list(hits),
+        )
+        plan = self._enrich_answer_plan(
+            answer_plan=reply.answer_plan,
+            intent_result=intent_result,
+            preference_profile=preference_profile,
+            strategy=strategy,
+        )
+        return InventoryReply(
+            answer=reply.answer,
+            recommended_product_ids=reply.recommended_product_ids,
+            cross_sell_product_ids=reply.cross_sell_product_ids,
+            follow_up_question=reply.follow_up_question,
+            answer_plan=plan,
+            verification=self._verify_answer_plan(answer_plan=plan, hits=hits),
+        )
+
+    @staticmethod
+    def _enrich_answer_plan(
+        *,
+        answer_plan: InventoryAnswerPlan,
+        intent_result: InventoryIntentResult,
+        preference_profile: InventoryPreferenceProfile,
+        strategy: str | None,
+    ) -> InventoryAnswerPlan:
+        plan_intent = answer_plan.intent
+        if plan_intent == "unknown":
+            plan_intent = intent_result.intent
+        return answer_plan.model_copy(
+            update={
+                "intent": plan_intent,
+                "detected_intent": intent_result.intent,
+                "intent_confidence": intent_result.confidence,
+                "intent_reasons": list(intent_result.reasons),
+                "strategy": strategy if strategy != plan_intent else answer_plan.strategy,
+                "preferences": preference_profile.to_plan_dict(),
+                "product_type": preference_profile.product_type,
+                "product_family": preference_profile.product_family,
+            }
+        )
+
     def _build_sales_plan_steps(
         self,
         *,
@@ -2212,9 +2313,15 @@ class InventoryService:
         if metadata_step:
             steps.append(metadata_step)
         if alternative is not None:
-            steps.append(f"Selected {alternative.name} as a related fallback, not a random semantic neighbor.")
+            steps.append(
+                f"Selected {alternative.name} as a related fallback, not a random semantic neighbor. "
+                + self.product_ontology.explain_relationship(primary, alternative)
+            )
         if cross_sell is not None:
-            steps.append(f"Selected {cross_sell.name} as a cross-sell only because the user asked for an add-on or bundle-style suggestion.")
+            steps.append(
+                f"Selected {cross_sell.name} as a cross-sell only because the user asked for an add-on or bundle-style suggestion. "
+                + self.product_ontology.explain_relationship(primary, cross_sell)
+            )
         if excluded_hits:
             steps.append(
                 "Excluded unrelated retrieval hits from recommendation logic: "
@@ -3019,6 +3126,7 @@ class InventoryService:
             and (primary.price is None or hit.price > primary.price)
             and not self._is_out_of_stock(hit)
             and self._quality_score(hit) >= 3
+            and self.product_ontology.valid_alternative(primary, hit)
         ]
         if not higher_priced_hits:
             return None
@@ -3051,16 +3159,15 @@ class InventoryService:
         hits: list[InventorySearchHit],
         question: str,
     ) -> InventorySearchHit | None:
-        if not self._should_offer_cross_sell(question):
+        explicit_cross_sell = self._should_offer_cross_sell(question)
+        if not explicit_cross_sell:
             return None
         cross_sell_hits = [
             hit
             for hit in hits
             if not self._is_out_of_stock(hit)
             and self._quality_score(hit) >= 3
-            and hit.category
-            and primary.category
-            and hit.category.casefold() != primary.category.casefold()
+            and self.product_ontology.valid_cross_sell(primary, hit, explicit_cross_sell=explicit_cross_sell)
         ]
         if not cross_sell_hits:
             return None
@@ -3075,21 +3182,10 @@ class InventoryService:
         primary: InventorySearchHit,
         candidate: InventorySearchHit,
     ) -> bool:
-        if primary.category and candidate.category and primary.category.casefold() == candidate.category.casefold():
-            return True
-        if primary.brand and candidate.brand and primary.brand.casefold() == candidate.brand.casefold():
-            return True
-        primary_tags = self._meaningful_tags(primary)
-        candidate_tags = self._meaningful_tags(candidate)
-        return bool(primary_tags.intersection(candidate_tags))
+        return self.product_ontology.valid_alternative(primary, candidate)
 
-    @staticmethod
-    def _meaningful_tags(hit: InventorySearchHit) -> set[str]:
-        return {
-            tag.casefold()
-            for tag in hit.tags
-            if tag and tag.casefold() not in _GENERIC_RELATION_TAGS
-        }
+    def _meaningful_tags(self, hit: InventorySearchHit) -> set[str]:
+        return self.product_ontology.meaningful_tags(hit)
 
     def _should_offer_cross_sell(self, question: str) -> bool:
         normalized = self._normalize_conversation_text(question)

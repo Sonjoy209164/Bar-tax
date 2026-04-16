@@ -39,6 +39,7 @@ from app.core.settings import get_settings
 from app.generation.generator import ChatMessage, build_generation_options, get_chat_client
 from app.inventory import (
     EcommerceReranker,
+    InventoryAnswerPlanner,
     InventoryIntentClassifier,
     InventoryIntentResult,
     InventoryPreferenceExtractor,
@@ -349,6 +350,7 @@ class InventoryService:
         self.intent_classifier = InventoryIntentClassifier(self.product_ontology)
         self.preference_extractor = InventoryPreferenceExtractor(self.product_ontology)
         self.ecommerce_reranker = EcommerceReranker(self.product_ontology)
+        self.answer_planner = InventoryAnswerPlanner(self.product_ontology)
 
     def status(self) -> InventoryStatusResponse:
         items = self._load_catalog()
@@ -2291,7 +2293,9 @@ class InventoryService:
             answer_plan=reply.answer_plan,
             intent_result=intent_result,
             preference_profile=preference_profile,
+            hits=hits,
             strategy=strategy,
+            next_best_question=reply.follow_up_question,
         )
         return InventoryReply(
             answer=reply.answer,
@@ -2302,18 +2306,20 @@ class InventoryService:
             verification=self._verify_answer_plan(answer_plan=plan, hits=hits),
         )
 
-    @staticmethod
     def _enrich_answer_plan(
+        self,
         *,
         answer_plan: InventoryAnswerPlan,
         intent_result: InventoryIntentResult,
         preference_profile: InventoryPreferenceProfile,
+        hits: list[InventorySearchHit],
         strategy: str | None,
+        next_best_question: str | None,
     ) -> InventoryAnswerPlan:
         plan_intent = answer_plan.intent
         if plan_intent == "unknown":
             plan_intent = intent_result.intent
-        return answer_plan.model_copy(
+        base_plan = answer_plan.model_copy(
             update={
                 "intent": plan_intent,
                 "detected_intent": intent_result.intent,
@@ -2324,6 +2330,14 @@ class InventoryService:
                 "product_type": preference_profile.product_type,
                 "product_family": preference_profile.product_family,
             }
+        )
+        return self.answer_planner.enrich_plan(
+            answer_plan=base_plan,
+            hits=hits,
+            intent_result=intent_result,
+            preferences=preference_profile,
+            strategy=strategy,
+            next_best_question=next_best_question,
         )
 
     def _build_sales_plan_steps(

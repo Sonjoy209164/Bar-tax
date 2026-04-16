@@ -307,25 +307,25 @@ Extend `InventoryAnswerPlan`.
 
 Add:
 
-- [ ] `preferences`
-- [ ] `primary_reason`
-- [ ] `alternative_reason`
-- [ ] `cross_sell_reason`
-- [ ] `tradeoffs`
-- [ ] `risk_notes`
-- [ ] `next_best_question`
-- [ ] `confidence_breakdown`
+- [x] `preferences`
+- [x] `primary_reason`
+- [x] `alternative_reason`
+- [x] `cross_sell_reason`
+- [x] `tradeoffs`
+- [x] `risk_notes`
+- [x] `next_best_question`
+- [x] `confidence_breakdown`
 
 Plan should decide:
 
-- [ ] primary product
-- [ ] fallback product
-- [ ] premium step-up
-- [ ] cheaper alternative
-- [ ] cross-sell add-on
-- [ ] excluded products
-- [ ] abstention
-- [ ] next-best question
+- [x] primary product
+- [x] fallback product
+- [x] premium step-up
+- [x] cheaper alternative
+- [x] cross-sell add-on
+- [x] excluded products
+- [x] abstention
+- [x] next-best question
 
 Success criteria:
 
@@ -577,7 +577,7 @@ Recommended implementation sequence:
 3. [x] Preference extractor
 4. [x] Product ontology
 5. [x] Ecommerce reranker
-6. [ ] Rich answer plan
+6. [x] Rich answer plan
 7. [ ] Tradeoff reasoning
 8. [ ] Final answer verifier
 9. [ ] Better natural prompt

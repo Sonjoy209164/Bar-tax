@@ -413,6 +413,9 @@ async def test_inventory_sales_mode_excludes_unrelated_cross_category_fallbacks(
     assert payload["answer_plan"]["excluded_product_ids"] == []
     assert all(hit["product_id"] == "prod-headphones" for hit in payload["hits"])
     assert "attributes.battery_hours" in payload["answer_plan"]["metadata_used"]
+    assert payload["answer_plan"]["primary_reason"]
+    assert payload["answer_plan"]["next_best_question"]
+    assert payload["answer_plan"]["confidence_breakdown"]["primary"]["final_score"] == payload["hits"][0]["score"]
     assert payload["verification"]["passed"] is True
 
 

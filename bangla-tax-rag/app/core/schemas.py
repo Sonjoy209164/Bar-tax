@@ -542,6 +542,13 @@ class InventoryAnswerPlan(BaseModel):
     alternative_product_ids: list[str] = Field(default_factory=list)
     cross_sell_product_ids: list[str] = Field(default_factory=list)
     excluded_product_ids: list[str] = Field(default_factory=list)
+    primary_reason: str | None = None
+    alternative_reason: str | None = None
+    cross_sell_reason: str | None = None
+    tradeoffs: list[str] = Field(default_factory=list)
+    risk_notes: list[str] = Field(default_factory=list)
+    next_best_question: str | None = None
+    confidence_breakdown: dict[str, Any] = Field(default_factory=dict)
     reasoning_steps: list[str] = Field(default_factory=list)
     metadata_used: list[str] = Field(default_factory=list)
     abstain: bool = False

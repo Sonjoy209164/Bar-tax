@@ -1,7 +1,13 @@
 from types import SimpleNamespace
 
-from app.core.schemas import InventorySearchFilters
-from app.inventory import EcommerceReranker, InventoryIntentClassifier, InventoryPreferenceExtractor, ProductOntology
+from app.core.schemas import InventoryAnswerPlan, InventorySearchFilters, InventorySearchHit
+from app.inventory import (
+    EcommerceReranker,
+    InventoryAnswerPlanner,
+    InventoryIntentClassifier,
+    InventoryPreferenceExtractor,
+    ProductOntology,
+)
 
 
 def test_inventory_intent_classifier_detects_core_intents() -> None:
@@ -175,3 +181,83 @@ def test_ecommerce_reranker_scores_budget_and_stock_fit() -> None:
     assert in_budget_score.final_score > out_of_stock_score.final_score
     assert in_budget_score.price_fit == 1.0
     assert out_of_stock_score.out_of_stock_penalty > 0
+
+
+def test_inventory_answer_planner_builds_rich_decision_metadata() -> None:
+    ontology = ProductOntology()
+    preferences = InventoryPreferenceExtractor(ontology).extract(
+        "Need premium wireless headphones under 300 for office calls"
+    )
+    intent = InventoryIntentClassifier(ontology).classify(
+        "Need premium wireless headphones under 300 for office calls"
+    )
+    planner = InventoryAnswerPlanner(ontology)
+    primary = InventorySearchHit(
+        product_id="prod-headphones",
+        sku="AUD-HP-001",
+        name="Auralite Flex ANC Headphones",
+        category="Audio",
+        brand="Auralite",
+        price=249.0,
+        currency="USD",
+        stock=18,
+        status="Active",
+        tags=["audio", "wireless", "headphones", "premium"],
+        snippet="Wireless noise-cancelling headphones under 300 for focused office work",
+        attributes={"battery_hours": "35"},
+        evidence_scores={
+            "final_score": 0.82,
+            "semantic_score": 0.7,
+            "lexical_score": 0.95,
+            "product_type_match": 1.0,
+            "family_match": 1.0,
+            "price_fit": 1.0,
+            "stock_fit": 1.0,
+            "metadata_match": 1.0,
+            "reasons": ["exact product type match: headphones", "price is inside requested budget", "in stock"],
+        },
+        score=0.82,
+    )
+    alternative = InventorySearchHit(
+        product_id="prod-earbuds",
+        sku="AUD-EB-002",
+        name="EchoWave Studio Earbuds",
+        category="Audio",
+        brand="EchoWave",
+        price=129.0,
+        currency="USD",
+        stock=12,
+        status="Active",
+        tags=["audio", "wireless", "earbuds"],
+        snippet="Compact wireless earbuds for calls",
+        evidence_scores={
+            "final_score": 0.58,
+            "family_match": 1.0,
+            "price_fit": 1.0,
+            "stock_fit": 1.0,
+            "reasons": ["same product family: audio_listening", "price is inside requested budget"],
+        },
+        score=0.58,
+    )
+    plan = InventoryAnswerPlan(
+        intent="sales_premium",
+        primary_product_id=primary.product_id,
+        alternative_product_ids=[alternative.product_id],
+    )
+
+    rich_plan = planner.enrich_plan(
+        answer_plan=plan,
+        hits=[primary, alternative],
+        intent_result=intent,
+        preferences=preferences,
+        strategy="sales_premium",
+        next_best_question=None,
+    )
+
+    assert rich_plan.primary_reason is not None
+    assert "Auralite Flex ANC Headphones" in rich_plan.primary_reason
+    assert rich_plan.alternative_reason is not None
+    assert "EchoWave Studio Earbuds" in rich_plan.alternative_reason
+    assert rich_plan.tradeoffs
+    assert rich_plan.next_best_question is not None
+    assert rich_plan.confidence_breakdown["primary"]["final_score"] == 0.82

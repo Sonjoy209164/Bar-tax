@@ -514,6 +514,10 @@ class InventorySearchHit(BaseModel):
     snippet: str | None = None
     attributes: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    evidence_scores: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Debug-friendly ecommerce reranking score components.",
+    )
     score: float
 
 

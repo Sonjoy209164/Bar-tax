@@ -38,6 +38,7 @@ from app.core.schemas import (
 from app.core.settings import get_settings
 from app.generation.generator import ChatMessage, build_generation_options, get_chat_client
 from app.inventory import (
+    EcommerceReranker,
     InventoryIntentClassifier,
     InventoryIntentResult,
     InventoryPreferenceExtractor,
@@ -347,6 +348,7 @@ class InventoryService:
         self.product_ontology = ProductOntology()
         self.intent_classifier = InventoryIntentClassifier(self.product_ontology)
         self.preference_extractor = InventoryPreferenceExtractor(self.product_ontology)
+        self.ecommerce_reranker = EcommerceReranker(self.product_ontology)
 
     def status(self) -> InventoryStatusResponse:
         items = self._load_catalog()
@@ -867,9 +869,37 @@ class InventoryService:
             if anchored_candidates:
                 candidates = anchored_candidates
 
+        max_vector_score = max((vector_score for _, _, vector_score, _, _ in candidates), default=0.0)
+        max_lexical_score = max((lexical_score for _, lexical_score, _, _, _ in candidates), default=0.0)
+        scored_candidates: list[tuple[InventorySearchHit, float, float, int, int, float]] = []
+        for hit, lexical_score, vector_score, coverage, relation_score in candidates:
+            evidence_score = self.ecommerce_reranker.score_product(
+                hit,
+                preferences=preference_profile,
+                semantic_score=(vector_score / max_vector_score) if max_vector_score > 0 else 0.0,
+                lexical_score=(lexical_score / max_lexical_score) if max_lexical_score > 0 else 0.0,
+            )
+            scored_hit = hit.model_copy(
+                update={
+                    "score": evidence_score.final_score,
+                    "evidence_scores": evidence_score.to_debug_dict(),
+                }
+            )
+            scored_candidates.append(
+                (
+                    scored_hit,
+                    lexical_score,
+                    vector_score,
+                    coverage,
+                    relation_score,
+                    evidence_score.final_score,
+                )
+            )
+
         ranked_candidates = sorted(
-            candidates,
+            scored_candidates,
             key=lambda candidate: (
+                -candidate[5],
                 -candidate[3],
                 -candidate[4],
                 -candidate[1],
@@ -880,7 +910,7 @@ class InventoryService:
                 candidate[0].name.casefold(),
             ),
         )
-        return [hit for hit, _, _, _, _ in ranked_candidates[:top_k]]
+        return [hit for hit, _, _, _, _, _ in ranked_candidates[:top_k]]
 
     def _browse_items(
         self,
@@ -1596,6 +1626,7 @@ class InventoryService:
                     "snippet": hit.snippet,
                     "attributes": hit.attributes,
                     "metadata": hit.metadata,
+                    "evidence_scores": hit.evidence_scores,
                     "score": hit.score,
                 }
             )

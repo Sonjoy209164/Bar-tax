@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from app.core.schemas import InventorySearchFilters
-from app.inventory import InventoryIntentClassifier, InventoryPreferenceExtractor, ProductOntology
+from app.inventory import EcommerceReranker, InventoryIntentClassifier, InventoryPreferenceExtractor, ProductOntology
 
 
 def test_inventory_intent_classifier_detects_core_intents() -> None:
@@ -84,3 +84,94 @@ def test_product_ontology_rejects_unrelated_substitutes() -> None:
     assert ontology.valid_alternative(headphones, keyboard) is False
     assert ontology.relation_score("headphones", headphones) == 3
     assert ontology.relation_score("headphones", keyboard) == 0
+
+
+def test_ecommerce_reranker_prefers_exact_product_type_over_generic_semantic_match() -> None:
+    ontology = ProductOntology()
+    reranker = EcommerceReranker(ontology)
+    extractor = InventoryPreferenceExtractor(ontology)
+    preferences = extractor.extract("Find wireless headphones under 300 for office calls")
+
+    headphones = SimpleNamespace(
+        product_id="hp",
+        name="Auralite Flex ANC Headphones",
+        category="Audio",
+        brand="Auralite",
+        price=249.0,
+        stock=18,
+        tags=["audio", "wireless", "headphones"],
+        snippet="Wireless noise-cancelling headphones under 300 for focused office work",
+        attributes={"connectivity": "Bluetooth 5.3", "battery_hours": "35"},
+        metadata={},
+    )
+    keyboard = SimpleNamespace(
+        product_id="kb",
+        name="KeyForge Wireless Mechanical Keyboard",
+        category="Computing",
+        brand="KeyForge",
+        price=139.0,
+        stock=17,
+        tags=["computing", "wireless", "premium"],
+        snippet="Wireless mechanical keyboard with tactile switches",
+        attributes={},
+        metadata={},
+    )
+
+    headphone_score = reranker.score_product(
+        headphones,
+        preferences=preferences,
+        semantic_score=0.6,
+        lexical_score=0.9,
+    )
+    keyboard_score = reranker.score_product(
+        keyboard,
+        preferences=preferences,
+        semantic_score=0.9,
+        lexical_score=0.5,
+    )
+
+    assert headphone_score.final_score > keyboard_score.final_score
+    assert headphone_score.product_type_match == 1.0
+    assert keyboard_score.unrelated_category_penalty > 0
+
+
+def test_ecommerce_reranker_scores_budget_and_stock_fit() -> None:
+    reranker = EcommerceReranker()
+    preferences = InventoryPreferenceExtractor().extract("Need a budget laptop under 900 available now")
+    in_budget = SimpleNamespace(
+        product_id="value",
+        name="Nimbus 13 Essential Laptop",
+        category="Computing",
+        brand="Nimbus",
+        price=799.0,
+        stock=16,
+        tags=["computing", "laptop"],
+        snippet="Lower-cost business laptop for everyday work",
+        attributes={},
+        metadata={},
+    )
+    out_of_stock = SimpleNamespace(
+        product_id="premium",
+        name="Nimbus 14 Business Ultrabook",
+        category="Computing",
+        brand="Nimbus",
+        price=1199.0,
+        stock=0,
+        tags=["computing", "laptop", "premium"],
+        snippet="Lightweight premium laptop",
+        attributes={},
+        metadata={},
+    )
+
+    in_budget_score = reranker.score_product(in_budget, preferences=preferences, semantic_score=0.8, lexical_score=0.8)
+    out_of_stock_score = reranker.score_product(
+        out_of_stock,
+        preferences=preferences,
+        semantic_score=0.8,
+        lexical_score=0.8,
+        assistant_mode="sales",
+    )
+
+    assert in_budget_score.final_score > out_of_stock_score.final_score
+    assert in_budget_score.price_fit == 1.0
+    assert out_of_stock_score.out_of_stock_penalty > 0

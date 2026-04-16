@@ -269,31 +269,31 @@ Create `ProductEvidenceScore`.
 
 Fields:
 
-- [ ] `semantic_score`
-- [ ] `lexical_score`
-- [ ] `category_match`
-- [ ] `brand_match`
-- [ ] `product_type_match`
-- [ ] `family_match`
-- [ ] `price_fit`
-- [ ] `stock_fit`
-- [ ] `metadata_match`
-- [ ] `premium_fit`
-- [ ] `budget_fit`
-- [ ] `unrelated_category_penalty`
-- [ ] `out_of_stock_penalty`
-- [ ] `final_score`
+- [x] `semantic_score`
+- [x] `lexical_score`
+- [x] `category_match`
+- [x] `brand_match`
+- [x] `product_type_match`
+- [x] `family_match`
+- [x] `price_fit`
+- [x] `stock_fit`
+- [x] `metadata_match`
+- [x] `premium_fit`
+- [x] `budget_fit`
+- [x] `unrelated_category_penalty`
+- [x] `out_of_stock_penalty`
+- [x] `final_score`
 
 Implementation tasks:
 
-- [ ] Score all retrieved hits.
-- [ ] Use preferences and ontology.
-- [ ] Penalize unrelated categories.
-- [ ] Penalize weak metadata fit.
-- [ ] Prefer in-stock items for selling.
-- [ ] Prefer exact product type over broad semantic match.
-- [ ] Expose debug score in dev/admin response.
-- [ ] Add tests for wrong-category penalties.
+- [x] Score all retrieved hits.
+- [x] Use preferences and ontology.
+- [x] Penalize unrelated categories.
+- [x] Penalize weak metadata fit.
+- [x] Prefer in-stock items for selling.
+- [x] Prefer exact product type over broad semantic match.
+- [x] Expose debug score in dev/admin response.
+- [x] Add tests for wrong-category penalties.
 
 Success criteria:
 
@@ -576,7 +576,7 @@ Recommended implementation sequence:
 2. [x] Intent classifier
 3. [x] Preference extractor
 4. [x] Product ontology
-5. [ ] Ecommerce reranker
+5. [x] Ecommerce reranker
 6. [ ] Rich answer plan
 7. [ ] Tradeoff reasoning
 8. [ ] Final answer verifier

@@ -1,0 +1,313 @@
+{
+  "version": "demo-2026-04-17",
+  "description": "Small ecommerce catalog shaped exactly for the bangla-tax-rag inventory RAG endpoints.",
+  "items": [
+    {
+      "product_id": "watch-trailmark-pro",
+      "sku": "WAT-TRM-001",
+      "name": "TrailMark Pro Smart Watch",
+      "category": "Wearables",
+      "brand": "TrailMark",
+      "short_description": "Premium smart watch with GPS, heart-rate monitoring, sleep tracking, and bright always-on display.",
+      "full_description": "Best for fitness-focused buyers who want accurate activity tracking, phone notifications, and long battery life in a polished everyday watch.",
+      "price": 219,
+      "currency": "USD",
+      "stock": 6,
+      "status": "Low Stock",
+      "tags": ["watch", "smartwatch", "wearable", "fitness", "premium"],
+      "attributes": {
+        "battery_hours": "48",
+        "gps": "built-in",
+        "water_resistance": "5ATM",
+        "display": "AMOLED"
+      },
+      "metadata": {
+        "source": "frontend-demo-json",
+        "demo_rank": "hero"
+      },
+      "include_in_rag": true,
+      "updated_at": "2026-04-17T09:00:00Z"
+    },
+    {
+      "product_id": "watch-pulseline-lite",
+      "sku": "WAT-PLS-002",
+      "name": "PulseLine Lite Watch",
+      "category": "Wearables",
+      "brand": "PulseLine",
+      "short_description": "Affordable smart watch for daily steps, notifications, and basic health tracking.",
+      "full_description": "Good for budget-conscious customers who want a simple wearable without premium GPS or advanced sport metrics.",
+      "price": 129,
+      "currency": "USD",
+      "stock": 18,
+      "status": "Active",
+      "tags": ["watch", "smartwatch", "wearable", "budget"],
+      "attributes": {
+        "battery_hours": "72",
+        "gps": "phone-connected",
+        "display": "LCD"
+      },
+      "metadata": {
+        "source": "frontend-demo-json"
+      },
+      "include_in_rag": true,
+      "updated_at": "2026-04-17T09:00:00Z"
+    },
+    {
+      "product_id": "headphones-auralite-flex",
+      "sku": "AUD-HP-001",
+      "name": "Auralite Flex ANC Headphones",
+      "category": "Audio",
+      "brand": "Auralite",
+      "short_description": "Wireless over-ear headphones with active noise cancellation for focused office calls and travel.",
+      "full_description": "Premium Bluetooth headphones with strong battery life, ANC, comfortable earcups, and clear voice pickup for remote meetings.",
+      "price": 249,
+      "currency": "USD",
+      "stock": 14,
+      "status": "Active",
+      "tags": ["headphones", "audio", "wireless", "anc", "premium", "office"],
+      "attributes": {
+        "battery_hours": "35",
+        "connectivity": "Bluetooth 5.3",
+        "noise_cancellation": "active",
+        "use_case": "office calls"
+      },
+      "metadata": {
+        "source": "frontend-demo-json"
+      },
+      "include_in_rag": true,
+      "updated_at": "2026-04-17T09:00:00Z"
+    },
+    {
+      "product_id": "earbuds-echowave-studio",
+      "sku": "AUD-EB-002",
+      "name": "EchoWave Studio Earbuds",
+      "category": "Audio",
+      "brand": "EchoWave",
+      "short_description": "Compact wireless earbuds with clear calls and a pocket charging case.",
+      "full_description": "A lower-price audio fallback for customers who want portability and wireless convenience, but not an over-ear headphone fit.",
+      "price": 119,
+      "currency": "USD",
+      "stock": 22,
+      "status": "Active",
+      "tags": ["earbuds", "audio", "wireless", "portable", "value"],
+      "attributes": {
+        "battery_hours": "28",
+        "connectivity": "Bluetooth 5.2",
+        "case_charging": "USB-C"
+      },
+      "metadata": {
+        "source": "frontend-demo-json"
+      },
+      "include_in_rag": true,
+      "updated_at": "2026-04-17T09:00:00Z"
+    },
+    {
+      "product_id": "mic-voxcast-usb",
+      "sku": "AUD-MIC-004",
+      "name": "VoxCast USB Podcast Microphone",
+      "category": "Audio",
+      "brand": "VoxCast",
+      "short_description": "Cardioid USB microphone for podcasts, webinars, and clean desk recordings.",
+      "full_description": "Best for creators and support teams who need simple USB audio capture with a focused pickup pattern and minimal setup.",
+      "price": 159,
+      "currency": "USD",
+      "stock": 3,
+      "status": "Low Stock",
+      "tags": ["microphone", "audio", "usb", "podcast", "webinar"],
+      "attributes": {
+        "pickup_pattern": "cardioid",
+        "input": "USB-C",
+        "use_case": "podcasting"
+      },
+      "metadata": {
+        "source": "frontend-demo-json"
+      },
+      "include_in_rag": true,
+      "updated_at": "2026-04-17T09:00:00Z"
+    },
+    {
+      "product_id": "laptop-nimbus-14",
+      "sku": "CMP-LTP-014",
+      "name": "Nimbus 14 Business Ultrabook",
+      "category": "Computing",
+      "brand": "Nimbus",
+      "short_description": "Lightweight business laptop for managers, analysts, and frequent travelers.",
+      "full_description": "Premium 14-inch laptop with strong portability, long battery life, and enough performance for office productivity.",
+      "price": 1199,
+      "currency": "USD",
+      "stock": 9,
+      "status": "Active",
+      "tags": ["laptop", "computing", "business", "premium", "portable"],
+      "attributes": {
+        "screen_size": "14 inch",
+        "ram": "16GB",
+        "storage": "512GB SSD",
+        "battery_hours": "12"
+      },
+      "metadata": {
+        "source": "frontend-demo-json"
+      },
+      "include_in_rag": true,
+      "updated_at": "2026-04-17T09:00:00Z"
+    },
+    {
+      "product_id": "dock-hub-4k",
+      "sku": "CMP-DCK-004",
+      "name": "DockHub 4K Triple Display Station",
+      "category": "Computing",
+      "brand": "DockHub",
+      "short_description": "USB-C docking station for laptop fleets and multi-monitor desks.",
+      "full_description": "Strong laptop add-on for office setups needing HDMI, USB-C power delivery, wired networking, and multiple external displays.",
+      "price": 229,
+      "currency": "USD",
+      "stock": 11,
+      "status": "Active",
+      "tags": ["dock", "computing", "usb-c", "laptop", "office", "cross-sell"],
+      "attributes": {
+        "ports": "HDMI, USB-C, Ethernet",
+        "power_delivery_watts": "100",
+        "display_support": "triple 4K"
+      },
+      "metadata": {
+        "source": "frontend-demo-json"
+      },
+      "include_in_rag": true,
+      "updated_at": "2026-04-17T09:00:00Z"
+    },
+    {
+      "product_id": "chair-ergomesh-pro",
+      "sku": "OFF-CHR-004",
+      "name": "ErgoMesh Pro Chair",
+      "category": "Office",
+      "brand": "ErgoMesh",
+      "short_description": "Premium ergonomic office chair with breathable mesh and adjustable lumbar support.",
+      "full_description": "Designed for long desk sessions, posture support, and premium office setups where comfort matters.",
+      "price": 549,
+      "currency": "USD",
+      "stock": 4,
+      "status": "Low Stock",
+      "tags": ["chair", "office", "ergonomic", "premium"],
+      "attributes": {
+        "lumbar_support": "adjustable",
+        "material": "mesh",
+        "armrests": "4D"
+      },
+      "metadata": {
+        "source": "frontend-demo-json"
+      },
+      "include_in_rag": true,
+      "updated_at": "2026-04-17T09:00:00Z"
+    }
+  ],
+  "business_signals": [
+    {
+      "product_id": "watch-trailmark-pro",
+      "period_start": "2026-04-01",
+      "period_end": "2026-04-17",
+      "units_sold": 38,
+      "revenue": 8322,
+      "order_count": 31,
+      "return_count": 1,
+      "return_rate": 0.03,
+      "gross_margin": 2912.7,
+      "gross_margin_rate": 0.35,
+      "inventory_on_hand": 6,
+      "inventory_snapshot_at": "2026-04-17T09:00:00Z",
+      "supplier_id": "sup-wearables",
+      "supplier_name": "Wearable Supply House",
+      "supplier_lead_time_days": 18,
+      "supplier_risk_score": 0.32,
+      "customer_segments": ["fitness buyers", "office professionals"],
+      "demand_score": 0.82,
+      "updated_at": "2026-04-17T09:00:00Z"
+    },
+    {
+      "product_id": "mic-voxcast-usb",
+      "period_start": "2026-04-01",
+      "period_end": "2026-04-17",
+      "units_sold": 64,
+      "revenue": 10176,
+      "order_count": 48,
+      "return_count": 2,
+      "return_rate": 0.03,
+      "gross_margin": 3358,
+      "gross_margin_rate": 0.33,
+      "inventory_on_hand": 3,
+      "inventory_snapshot_at": "2026-04-17T09:00:00Z",
+      "supplier_id": "sup-audio",
+      "supplier_name": "Audio Supply Co",
+      "supplier_lead_time_days": 21,
+      "supplier_risk_score": 0.35,
+      "customer_segments": ["podcasters", "webinar teams"],
+      "demand_score": 0.91,
+      "updated_at": "2026-04-17T09:00:00Z"
+    },
+    {
+      "product_id": "chair-ergomesh-pro",
+      "period_start": "2026-04-01",
+      "period_end": "2026-04-17",
+      "units_sold": 19,
+      "revenue": 10431,
+      "order_count": 17,
+      "return_count": 1,
+      "return_rate": 0.06,
+      "gross_margin": 4172.4,
+      "gross_margin_rate": 0.4,
+      "inventory_on_hand": 4,
+      "inventory_snapshot_at": "2026-04-17T09:00:00Z",
+      "supplier_id": "sup-office",
+      "supplier_name": "Office Comfort Works",
+      "supplier_lead_time_days": 30,
+      "supplier_risk_score": 0.42,
+      "customer_segments": ["remote workers", "premium office buyers"],
+      "demand_score": 0.74,
+      "updated_at": "2026-04-17T09:00:00Z"
+    }
+  ],
+  "test_questions": [
+    {
+      "label": "Exact watch search",
+      "question": "show me some watches",
+      "endpoint": "ask",
+      "assistant_mode": "support",
+      "reply_style": "short",
+      "expected_product_ids": ["watch-trailmark-pro", "watch-pulseline-lite"],
+      "forbidden_product_ids": ["headphones-auralite-flex", "chair-ergomesh-pro"]
+    },
+    {
+      "label": "Premium headphones",
+      "question": "Recommend premium wireless headphones under 300 for office calls",
+      "endpoint": "ask",
+      "assistant_mode": "sales",
+      "reply_style": "detailed",
+      "expected_product_ids": ["headphones-auralite-flex"],
+      "forbidden_product_ids": ["dock-hub-4k", "chair-ergomesh-pro"]
+    },
+    {
+      "label": "Laptop cross-sell",
+      "question": "What can I bundle with the Nimbus laptop?",
+      "endpoint": "ask",
+      "assistant_mode": "sales",
+      "reply_style": "detailed",
+      "expected_product_ids": ["laptop-nimbus-14", "dock-hub-4k"],
+      "forbidden_product_ids": ["chair-ergomesh-pro"]
+    },
+    {
+      "label": "Business restock",
+      "question": "What should I restock first to prevent stockout?",
+      "endpoint": "agentic",
+      "assistant_mode": "support",
+      "reply_style": "detailed",
+      "expected_product_ids": ["mic-voxcast-usb", "watch-trailmark-pro", "chair-ergomesh-pro"],
+      "must_include_text": ["Business-tool read"]
+    },
+    {
+      "label": "No bike abstention",
+      "question": "do you have any bike?",
+      "endpoint": "ask",
+      "assistant_mode": "support",
+      "reply_style": "short",
+      "expected_no_hits": true
+    }
+  ]
+}

@@ -15,3 +15,4 @@ indexes/*
 !indexes/.gitkeep
 results/*
 !results/.gitkeep
+frontend/config.local.json

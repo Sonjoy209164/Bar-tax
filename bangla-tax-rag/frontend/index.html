@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inventory RAG Chat Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Inventory RAG Demo</p>
+          <h1>Test the ecommerce chatbot against a small product JSON.</h1>
+          <p class="hero-copy">
+            Sync sample products into the live RAG API, chat with support or sales mode, run quality checks, and inspect traces without adding a separate backend.
+          </p>
+        </div>
+        <div class="hero-card">
+          <span class="status-dot" id="connectionDot"></span>
+          <strong id="connectionLabel">Not checked</strong>
+          <small id="connectionDetail">Enter API settings and check status.</small>
+        </div>
+      </section>
+
+      <section class="panel setup-panel">
+        <div class="field">
+          <label for="apiBaseUrl">RAG API base URL</label>
+          <input id="apiBaseUrl" value="http://localhost:4893" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="apiKey">API key, if enabled</label>
+          <input id="apiKey" type="password" placeholder="X-API-Key" spellcheck="false" />
+        </div>
+        <div class="button-row">
+          <button id="saveSettingsButton">Save Settings</button>
+          <button id="checkStatusButton" class="secondary">Check Status</button>
+          <button id="syncCatalogButton" class="accent">Sync Sample JSON</button>
+        </div>
+        <p class="warning">
+          Demo only: this static page calls the RAG API directly, so do not use a production secret here. In production, call RAG through Express.
+        </p>
+      </section>
+
+      <section class="grid">
+        <aside class="panel catalog-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Sample Data</p>
+              <h2>Products</h2>
+            </div>
+            <span class="pill" id="productCount">0 products</span>
+          </div>
+          <div id="productList" class="product-list"></div>
+        </aside>
+
+        <section class="panel chat-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Chatbot</p>
+              <h2>Ask Inventory AI</h2>
+            </div>
+            <span class="pill" id="lastTraceId">No trace yet</span>
+          </div>
+
+          <div class="chat-controls">
+            <label>
+              Mode
+              <select id="assistantMode">
+                <option value="support">Support</option>
+                <option value="sales">Sales</option>
+              </select>
+            </label>
+            <label>
+              Reply
+              <select id="replyStyle">
+                <option value="short">Short</option>
+                <option value="detailed">Detailed</option>
+              </select>
+            </label>
+            <label>
+              Path
+              <select id="endpointMode">
+                <option value="ask">Normal RAG</option>
+                <option value="agentic">Agentic</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="messages" class="messages"></div>
+
+          <form id="chatForm" class="chat-form">
+            <input id="questionInput" placeholder="Ask about watches, headphones, restock, margins..." autocomplete="off" />
+            <button type="submit">Ask</button>
+          </form>
+        </section>
+      </section>
+
+      <section class="grid bottom-grid">
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Quality Page</p>
+              <h2>Run Test Questions</h2>
+            </div>
+            <button id="runTestsButton" class="secondary">Run Tests</button>
+          </div>
+          <div id="testResults" class="test-results"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Debug</p>
+              <h2>Trace Inspector</h2>
+            </div>
+            <button id="loadTraceButton" class="secondary">Load Last Trace</button>
+          </div>
+          <pre id="traceOutput" class="trace-output">Trace details will appear here.</pre>
+        </section>
+      </section>
+    </main>
+
+    <template id="productTemplate">
+      <article class="product-card">
+        <div>
+          <strong data-name></strong>
+          <small data-meta></small>
+        </div>
+        <span data-price></span>
+      </article>
+    </template>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

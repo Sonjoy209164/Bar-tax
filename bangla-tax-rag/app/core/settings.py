@@ -22,6 +22,8 @@ class Settings(BaseSettings):
         default="data/inventory/business_signals.jsonl",
         alias="INVENTORY_BUSINESS_SIGNAL_PATH",
     )
+    inventory_storage_backend: str = Field(default="jsonl", alias="INVENTORY_STORAGE_BACKEND")
+    inventory_sqlite_path: str = Field(default="data/inventory/inventory_mirror.sqlite3", alias="INVENTORY_SQLITE_PATH")
     inventory_vector_namespace: str = Field(default="inventory", alias="INVENTORY_VECTOR_NAMESPACE")
     inventory_natural_answers_enabled: bool = Field(default=False, alias="INVENTORY_NATURAL_ANSWERS_ENABLED")
     inventory_natural_answer_model_name: str | None = Field(default=None, alias="INVENTORY_NATURAL_ANSWER_MODEL_NAME")
@@ -87,6 +89,8 @@ class Settings(BaseSettings):
             "agentic_store_dir": self.agentic_store_dir,
             "inventory_catalog_path": self.inventory_catalog_path,
             "inventory_business_signal_path": self.inventory_business_signal_path,
+            "inventory_storage_backend": self.inventory_storage_backend,
+            "inventory_sqlite_path": self.inventory_sqlite_path,
             "inventory_vector_namespace": self.inventory_vector_namespace,
             "inventory_natural_answers_enabled": self.inventory_natural_answers_enabled,
             "inventory_natural_answer_model_name": self.inventory_natural_answer_model_name,
@@ -198,6 +202,8 @@ def get_settings() -> Settings:
         "processed_data_dir",
         "agentic_store_dir",
         "inventory_catalog_path",
+        "inventory_business_signal_path",
+        "inventory_sqlite_path",
         "sparse_index_dir",
         "dense_index_dir",
         "results_dir",
@@ -205,6 +211,10 @@ def get_settings() -> Settings:
     ):
         if key in paths_config:
             apply_yaml_override(key, paths_config[key])
+    if "storage_backend" in inventory_chat_config:
+        apply_yaml_override("inventory_storage_backend", inventory_chat_config["storage_backend"])
+    if "sqlite_path" in inventory_chat_config:
+        apply_yaml_override("inventory_sqlite_path", inventory_chat_config["sqlite_path"])
     if "provider" in parser_config:
         apply_yaml_override("parser_provider", parser_config["provider"])
     if "result_type" in parser_config:

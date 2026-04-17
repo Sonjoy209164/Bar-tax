@@ -7,6 +7,9 @@ paths:
   raw_data_dir: data/raw
   processed_data_dir: data/processed
   agentic_store_dir: data/agentic_store
+  inventory_catalog_path: data/inventory/catalog.jsonl
+  inventory_business_signal_path: data/inventory/business_signals.jsonl
+  inventory_sqlite_path: data/inventory/inventory_mirror.sqlite3
   sparse_index_dir: indexes/sparse
   dense_index_dir: indexes/dense
   results_dir: results
@@ -28,6 +31,8 @@ generation:
   abstention_score_threshold: 0.75
   verification_enabled: true
 inventory_chat:
+  storage_backend: jsonl
+  sqlite_path: data/inventory/inventory_mirror.sqlite3
   natural_answers_enabled: true
   natural_answer_model_name: qwen3:8b
   natural_answer_temperature: 0.2

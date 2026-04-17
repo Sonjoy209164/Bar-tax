@@ -16,6 +16,7 @@ from app.core.schemas import (
     InventoryDeleteRequest,
     InventoryDeleteResponse,
     InventoryItemRecord,
+    InventoryProductionStatusResponse,
     InventoryRouteRequest,
     InventoryRouteResponse,
     InventorySearchRequest,
@@ -45,6 +46,11 @@ async def get_inventory_agentic_status() -> InventoryAgenticStatusResponse:
 @router.get("/sync/status", response_model=InventorySyncStatusResponse)
 async def get_inventory_sync_status() -> InventorySyncStatusResponse:
     return get_inventory_service().sync_status()
+
+
+@router.get("/production/status", response_model=InventoryProductionStatusResponse)
+async def get_inventory_production_status() -> InventoryProductionStatusResponse:
+    return get_inventory_service().production_status()
 
 
 @router.post("/sync/validate", response_model=InventorySyncValidateResponse)

@@ -412,6 +412,8 @@ class InventoryStatusResponse(BaseModel):
     catalog_path: str
     vector_backend: str
     vector_store_path: str | None = None
+    storage_backend: str | None = None
+    storage_path: str | None = None
 
 
 class InventorySyncIssue(BaseModel):
@@ -419,6 +421,19 @@ class InventorySyncIssue(BaseModel):
     code: str
     message: str
     product_id: str | None = None
+
+
+class InventoryProductionStatusResponse(BaseModel):
+    status: str
+    production_ready: bool
+    storage_backend: str
+    storage_path: str | None = None
+    vector_backend: str
+    vector_index_name: str | None = None
+    vector_namespace: str | None = None
+    vector_record_count: int | None = None
+    issues: list[InventorySyncIssue] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
 
 
 class InventorySyncStatusResponse(BaseModel):

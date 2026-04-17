@@ -33,6 +33,7 @@ from app.core.schemas import (
     InventoryExecutionContract,
     InventoryItemRecord,
     InventoryMemoryResolution,
+    InventoryProductionStatusResponse,
     InventoryRouteRequest,
     InventoryRouteResponse,
     InventoryRouteSignals,
@@ -60,6 +61,7 @@ from app.inventory import (
     InventoryPreferenceProfile,
     ProductOntology,
 )
+from app.inventory.storage import InventoryMirrorStore, build_inventory_mirror_store
 from app.retrieval import TextEmbedder, VectorRecord, VectorStore, build_embedder, build_vector_store
 
 logger = logging.getLogger(__name__)
@@ -300,6 +302,8 @@ class InventoryServiceConfig(BaseModel):
     agentic_trace_dir: str = "results/traces/inventory_agentic"
     chat_trace_dir: str | None = None
     business_signal_path: str = "data/inventory/business_signals.jsonl"
+    inventory_storage_backend: str = Field(default="jsonl")
+    inventory_sqlite_path: str = "data/inventory/inventory_mirror.sqlite3"
     default_agentic_max_reasoning_steps: int = Field(default=4, ge=1, le=8)
     natural_answers_enabled: bool = False
     natural_answer_model_name: str | None = None
@@ -370,6 +374,12 @@ class InventoryService:
         self.config = config or InventoryServiceConfig()
         self.trace_store = InventoryAgenticTraceStore(self.config.agentic_trace_dir)
         self.chat_trace_store = InventoryAgenticTraceStore(self._chat_trace_dir())
+        self.mirror_store: InventoryMirrorStore = build_inventory_mirror_store(
+            backend=self.config.inventory_storage_backend,
+            catalog_path=self.config.catalog_path,
+            business_signal_path=self.config.business_signal_path,
+            sqlite_path=self.config.inventory_sqlite_path,
+        )
         self.product_ontology = ProductOntology()
         self.intent_classifier = InventoryIntentClassifier(self.product_ontology)
         self.preference_extractor = InventoryPreferenceExtractor(self.product_ontology)
@@ -383,10 +393,19 @@ class InventoryService:
             return self.config.chat_trace_dir
         return str(Path(self.config.agentic_trace_dir).with_name("inventory_chat"))
 
+    @staticmethod
+    def _inventory_storage_path(storage_description: dict[str, str]) -> str | None:
+        return (
+            storage_description.get("sqlite_path")
+            or storage_description.get("catalog_path")
+            or storage_description.get("business_signal_path")
+        )
+
     def status(self) -> InventoryStatusResponse:
         items = self._load_catalog()
         rag_enabled_count = sum(1 for item in items.values() if item.include_in_rag)
         vector_stats = self.vector_store.describe(namespace=self.config.namespace)
+        storage_description = self.mirror_store.describe()
         return InventoryStatusResponse(
             status="success",
             ready=True,
@@ -397,6 +416,62 @@ class InventoryService:
             catalog_path=str(self._catalog_path()),
             vector_backend=self.vector_store.provider.value,
             vector_store_path=getattr(self.vector_store.config, "local_store_path", None),
+            storage_backend=storage_description.get("backend"),
+            storage_path=self._inventory_storage_path(storage_description),
+        )
+
+    def production_status(self) -> InventoryProductionStatusResponse:
+        storage_description = self.mirror_store.describe()
+        vector_stats = self.vector_store.describe(namespace=self.config.namespace)
+        issues: list[InventorySyncIssue] = []
+        recommendations: list[str] = []
+
+        storage_backend = storage_description.get("backend", "unknown")
+        if storage_backend == "jsonl":
+            issues.append(
+                InventorySyncIssue(
+                    severity="warning",
+                    code="jsonl_inventory_storage",
+                    message="Inventory mirror is using JSONL storage, which is suitable for development but weak for production concurrency and durability.",
+                )
+            )
+            recommendations.append("Set INVENTORY_STORAGE_BACKEND=sqlite for a durable local mirror or move the mirror into PostgreSQL.")
+        elif storage_backend == "sqlite":
+            recommendations.append("SQLite mirror storage is enabled. For multi-instance production, prefer PostgreSQL or another shared durable store.")
+        else:
+            issues.append(
+                InventorySyncIssue(
+                    severity="error",
+                    code="unknown_inventory_storage",
+                    message=f"Unknown inventory storage backend: {storage_backend}.",
+                )
+            )
+
+        if self.vector_store.provider.value == "local":
+            issues.append(
+                InventorySyncIssue(
+                    severity="warning",
+                    code="local_vector_backend",
+                    message="Vector retrieval is using a local JSONL vector store. Use Milvus or Pinecone for production-grade vector search.",
+                )
+            )
+            recommendations.append("Set VECTOR_DB=milvus or VECTOR_DB=pinecone and configure the matching collection/index settings.")
+        else:
+            recommendations.append(f"{self.vector_store.provider.value} vector backend is configured.")
+
+        has_error = any(issue.severity == "error" for issue in issues)
+        production_ready = not has_error and storage_backend != "jsonl" and self.vector_store.provider.value != "local"
+        return InventoryProductionStatusResponse(
+            status="success",
+            production_ready=production_ready,
+            storage_backend=storage_backend,
+            storage_path=self._inventory_storage_path(storage_description),
+            vector_backend=self.vector_store.provider.value,
+            vector_index_name=vector_stats.index_name,
+            vector_namespace=vector_stats.namespace,
+            vector_record_count=vector_stats.total_vector_count,
+            issues=issues,
+            recommendations=recommendations,
         )
 
     def agentic_status(self) -> InventoryAgenticStatusResponse:
@@ -3587,26 +3662,10 @@ class InventoryService:
         return Path(self.config.business_signal_path)
 
     def _load_business_signals(self) -> dict[str, InventoryBusinessSignalRecord]:
-        signal_path = self._business_signal_path()
-        if not signal_path.exists():
-            return {}
-        signals: dict[str, InventoryBusinessSignalRecord] = {}
-        with signal_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                signal = InventoryBusinessSignalRecord.model_validate_json(stripped)
-                signals[signal.product_id] = signal
-        return signals
+        return self.mirror_store.load_business_signals()
 
     def _persist_business_signals(self, signals: dict[str, InventoryBusinessSignalRecord]) -> None:
-        signal_path = self._business_signal_path()
-        signal_path.parent.mkdir(parents=True, exist_ok=True)
-        with signal_path.open("w", encoding="utf-8") as handle:
-            for signal in sorted(signals.values(), key=self._business_signal_sort_key):
-                handle.write(signal.model_dump_json())
-                handle.write("\n")
+        self.mirror_store.persist_business_signals(signals)
 
     def _business_domains_available(self, signals: dict[str, InventoryBusinessSignalRecord]) -> list[str]:
         domains: set[str] = set()
@@ -3646,26 +3705,10 @@ class InventoryService:
         return Path(self.config.catalog_path)
 
     def _load_catalog(self) -> dict[str, InventoryItemRecord]:
-        catalog_path = self._catalog_path()
-        if not catalog_path.exists():
-            return {}
-        items: dict[str, InventoryItemRecord] = {}
-        with catalog_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                item = InventoryItemRecord.model_validate_json(stripped)
-                items[item.product_id] = item
-        return items
+        return self.mirror_store.load_catalog()
 
     def _persist_catalog(self, items: dict[str, InventoryItemRecord]) -> None:
-        catalog_path = self._catalog_path()
-        catalog_path.parent.mkdir(parents=True, exist_ok=True)
-        with catalog_path.open("w", encoding="utf-8") as handle:
-            for item in sorted(items.values(), key=self._catalog_sort_key):
-                handle.write(item.model_dump_json())
-                handle.write("\n")
+        self.mirror_store.persist_catalog(items)
 
     @staticmethod
     def _matches_text_filter(actual: str | None, expected_values: list[str]) -> bool:
@@ -4666,6 +4709,8 @@ def get_inventory_service() -> InventoryService:
             agentic_trace_dir=str(Path(settings.trace_dir) / "inventory_agentic"),
             chat_trace_dir=str(Path(settings.trace_dir) / "inventory_chat"),
             business_signal_path=settings.inventory_business_signal_path,
+            inventory_storage_backend=settings.inventory_storage_backend,
+            inventory_sqlite_path=settings.inventory_sqlite_path,
             natural_answers_enabled=settings.inventory_natural_answers_enabled,
             natural_answer_model_name=settings.inventory_natural_answer_model_name,
             natural_answer_temperature=settings.inventory_natural_answer_temperature,

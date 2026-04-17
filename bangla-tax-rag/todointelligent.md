@@ -523,9 +523,9 @@ Every bad answer can be debugged from retrieval to final response.
 
 ## Phase 15: Production Hardening
 
-- [ ] Move catalog mirror away from JSONL for production.
-- [ ] Use Postgres mirror table or durable document store.
-- [ ] Use Qdrant/Milvus/Pinecone for vector retrieval.
+- [x] Move catalog mirror away from JSONL for production.
+- [x] Use Postgres mirror table or durable document store.
+- [x] Use Qdrant/Milvus/Pinecone for vector retrieval.
 - [ ] Add rate limiting.
 - [ ] Add HTTPS.
 - [ ] Add key rotation.
@@ -585,20 +585,20 @@ Recommended implementation sequence:
 11. [x] Sync validation
 12. [x] Observability
 13. [x] Agentic business tools
-14. [ ] Production storage and vector backend
+14. [x] Production storage and vector backend
 
 ## Immediate Next Task
 
 Start with:
 
 ```text
-Production storage and vector backend
+Rate limiting and key rotation
 ```
 
 Why:
 
 ```text
-The chatbot now has grounded chat, sync validation, tracing, and mirrored business signals. The next risk is durability and scale: JSONL/local vectors are fine for development, not production.
+The storage/vector migration path now exists. The next production risk is API abuse and leaked or long-lived keys.
 ```
 
 First sprint deliverables:

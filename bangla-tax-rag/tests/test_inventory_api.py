@@ -42,7 +42,7 @@ class KeywordEmbedder(TextEmbedder):
         )
 
 
-def _build_inventory_service(tmp_path) -> InventoryService:  # type: ignore[no-untyped-def]
+def _build_inventory_service(tmp_path, *, storage_backend: str = "jsonl") -> InventoryService:  # type: ignore[no-untyped-def]
     vector_store = LocalVectorStore(
         VectorStoreConfig(
             provider=VectorStoreProvider.LOCAL,
@@ -68,6 +68,8 @@ def _build_inventory_service(tmp_path) -> InventoryService:  # type: ignore[no-u
             low_stock_threshold=10,
             agentic_trace_dir=str(tmp_path / "inventory_agentic_traces"),
             business_signal_path=str(tmp_path / "inventory_business_signals.jsonl"),
+            inventory_storage_backend=storage_backend,
+            inventory_sqlite_path=str(tmp_path / "inventory_mirror.sqlite3"),
         ),
     )
 
@@ -1074,11 +1076,80 @@ async def test_inventory_routes_are_present_in_openapi(monkeypatch: pytest.Monke
     assert "/inventory/route" in paths
     assert "/inventory/sync/status" in paths
     assert "/inventory/sync/validate" in paths
+    assert "/inventory/production/status" in paths
     assert "/inventory/business/status" in paths
     assert "/inventory/business/signals" in paths
     assert "/inventory/business/signals/upsert" in paths
     assert "/inventory/chat/trace/{trace_id}" in paths
     assert "/inventory/ask" in paths
+
+
+@pytest.mark.anyio
+async def test_inventory_sqlite_storage_persists_catalog_and_business_signals(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path, storage_backend="sqlite")
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Smart watch for fitness tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 7,
+                        "status": "Active",
+                        "tags": ["watch", "wearable"],
+                        "include_in_rag": True,
+                    }
+                ]
+            },
+        )
+        await client.post(
+            "/inventory/business/signals/upsert",
+            json={
+                "signals": [
+                    {
+                        "product_id": "prod-watch",
+                        "period_end": "2026-04-15",
+                        "units_sold": 22,
+                        "inventory_on_hand": 7,
+                        "demand_score": 0.7,
+                    }
+                ]
+            },
+        )
+        status_response = await client.get("/inventory/status")
+        production_response = await client.get("/inventory/production/status")
+
+    reloaded_service = _build_inventory_service(tmp_path, storage_backend="sqlite")
+
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["storage_backend"] == "sqlite"
+    assert status_payload["storage_path"].endswith("inventory_mirror.sqlite3")
+
+    assert production_response.status_code == 200
+    production_payload = production_response.json()
+    assert production_payload["storage_backend"] == "sqlite"
+    assert production_payload["production_ready"] is False
+    assert any(issue["code"] == "local_vector_backend" for issue in production_payload["issues"])
+
+    assert reloaded_service.get_item("prod-watch") is not None
+    business_signals = reloaded_service.list_business_signals(product_id="prod-watch")
+    assert business_signals.total_signals == 1
+    assert business_signals.signals[0].units_sold == 22
 
 
 @pytest.mark.anyio

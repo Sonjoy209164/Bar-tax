@@ -476,6 +476,96 @@ class InventorySyncValidateResponse(BaseModel):
     issues: list[InventorySyncIssue] = Field(default_factory=list)
 
 
+class InventoryBusinessSignalRecord(BaseModel):
+    product_id: str = Field(..., description="Stable product identifier from PostgreSQL/source of truth.")
+    period_start: str | None = Field(default=None, description="Start of the metric window.")
+    period_end: str | None = Field(default=None, description="End of the metric window.")
+    units_sold: int | None = Field(default=None, ge=0)
+    revenue: float | None = Field(default=None, ge=0)
+    order_count: int | None = Field(default=None, ge=0)
+    return_count: int | None = Field(default=None, ge=0)
+    return_rate: float | None = Field(default=None, ge=0, le=1)
+    gross_margin: float | None = None
+    gross_margin_rate: float | None = Field(default=None, ge=-1, le=1)
+    inventory_on_hand: int | None = Field(default=None, ge=0)
+    inventory_snapshot_at: str | None = None
+    supplier_id: str | None = None
+    supplier_name: str | None = None
+    supplier_lead_time_days: int | None = Field(default=None, ge=0)
+    supplier_risk_score: float | None = Field(default=None, ge=0, le=1)
+    customer_segments: list[str] = Field(default_factory=list)
+    demand_score: float | None = Field(default=None, ge=0, le=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    updated_at: str | None = None
+
+    @field_validator("product_id")
+    @classmethod
+    def validate_business_product_id(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("product_id must not be empty")
+        return stripped
+
+    @field_validator(
+        "period_start",
+        "period_end",
+        "inventory_snapshot_at",
+        "supplier_id",
+        "supplier_name",
+        "updated_at",
+    )
+    @classmethod
+    def normalize_business_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("customer_segments")
+    @classmethod
+    def normalize_customer_segments(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for segment in value:
+            stripped = segment.strip()
+            if not stripped:
+                continue
+            lowered = stripped.casefold()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(stripped)
+        return normalized
+
+
+class InventoryBusinessSignalsUpsertRequest(BaseModel):
+    signals: list[InventoryBusinessSignalRecord] = Field(default_factory=list, min_length=1)
+
+
+class InventoryBusinessSignalsUpsertResponse(BaseModel):
+    status: str
+    upserted_count: int
+    total_signals: int
+    product_count: int
+    business_signal_path: str
+
+
+class InventoryBusinessSignalsResponse(BaseModel):
+    status: str
+    total_signals: int
+    signals: list[InventoryBusinessSignalRecord] = Field(default_factory=list)
+
+
+class InventoryBusinessStatusResponse(BaseModel):
+    status: str
+    ready: bool
+    total_signals: int
+    product_count: int
+    domains_available: list[str] = Field(default_factory=list)
+    latest_updated_at: str | None = None
+    business_signal_path: str
+
+
 class InventoryUpsertRequest(BaseModel):
     items: list[InventoryItemRecord] = Field(default_factory=list, min_length=1)
 
@@ -750,6 +840,7 @@ class InventoryAskResponse(BaseModel):
     reply_style: str
     answer_engine: str
     confidence_score: float
+    trace_id: str
     abstained: bool = False
     abstention_reason: str | None = None
     total_hits: int
@@ -1019,3 +1110,34 @@ class InventoryAgenticTraceResponse(BaseModel):
     retrieval_steps: list[InventoryAgenticStep] = Field(default_factory=list)
     final_answer: str
     confidence_score: float
+
+
+class InventoryChatTraceResponse(BaseModel):
+    trace_id: str
+    request_id: str
+    created_at: str
+    question: str
+    assistant_mode: str
+    reply_style: str
+    answer_engine: str
+    execution_path: str
+    latency_ms: float
+    fallback_reason: str | None = None
+    intent: str | None = None
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    retrieved_product_ids: list[str] = Field(default_factory=list)
+    reranked_product_ids: list[str] = Field(default_factory=list)
+    recommended_product_ids: list[str] = Field(default_factory=list)
+    cross_sell_product_ids: list[str] = Field(default_factory=list)
+    total_hits: int = 0
+    confidence_score: float
+    abstained: bool = False
+    abstention_reason: str | None = None
+    applied_filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    answer_plan: InventoryAnswerPlan = Field(default_factory=InventoryAnswerPlan)
+    verification: InventoryAnswerVerification = Field(default_factory=InventoryAnswerVerification)
+    memory_resolution: InventoryMemoryResolution = Field(default_factory=InventoryMemoryResolution)
+    reasoning_summary: list[str] = Field(default_factory=list)
+    missing_facts: list[str] = Field(default_factory=list)
+    retrieval_steps: list[InventoryAgenticStep] = Field(default_factory=list)
+    final_answer: str

@@ -4,8 +4,10 @@ import json
 import logging
 import re
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -20,7 +22,12 @@ from app.core.schemas import (
     InventoryAnswerVerification,
     InventoryAskRequest,
     InventoryAskResponse,
+    InventoryBusinessSignalRecord,
+    InventoryBusinessSignalsResponse,
+    InventoryBusinessSignalsUpsertResponse,
+    InventoryBusinessStatusResponse,
     InventoryCatalogResponse,
+    InventoryChatTraceResponse,
     InventoryConversationTurn,
     InventoryDeleteResponse,
     InventoryExecutionContract,
@@ -291,6 +298,8 @@ class InventoryServiceConfig(BaseModel):
     search_candidate_multiplier: int = Field(default=4, ge=1, le=20)
     low_stock_threshold: int = Field(default=10, ge=0, le=10000)
     agentic_trace_dir: str = "results/traces/inventory_agentic"
+    chat_trace_dir: str | None = None
+    business_signal_path: str = "data/inventory/business_signals.jsonl"
     default_agentic_max_reasoning_steps: int = Field(default=4, ge=1, le=8)
     natural_answers_enabled: bool = False
     natural_answer_model_name: str | None = None
@@ -341,6 +350,13 @@ class InventoryNaturalAnswer(BaseModel):
     abstention_reason: str | None = None
 
 
+class InventoryBusinessInsight(BaseModel):
+    answer_addendum: str = ""
+    reasoning_summary: list[str] = Field(default_factory=list)
+    missing_facts: list[str] = Field(default_factory=list)
+    selected_product_ids: list[str] = Field(default_factory=list)
+
+
 class InventoryService:
     def __init__(
         self,
@@ -353,6 +369,7 @@ class InventoryService:
         self.vector_store = vector_store
         self.config = config or InventoryServiceConfig()
         self.trace_store = InventoryAgenticTraceStore(self.config.agentic_trace_dir)
+        self.chat_trace_store = InventoryAgenticTraceStore(self._chat_trace_dir())
         self.product_ontology = ProductOntology()
         self.intent_classifier = InventoryIntentClassifier(self.product_ontology)
         self.preference_extractor = InventoryPreferenceExtractor(self.product_ontology)
@@ -360,6 +377,11 @@ class InventoryService:
         self.answer_planner = InventoryAnswerPlanner(self.product_ontology)
         self.final_answer_verifier = InventoryFinalAnswerVerifier(self.product_ontology)
         self.memory_resolver = InventoryMemoryResolver(self.product_ontology)
+
+    def _chat_trace_dir(self) -> str:
+        if self.config.chat_trace_dir:
+            return self.config.chat_trace_dir
+        return str(Path(self.config.agentic_trace_dir).with_name("inventory_chat"))
 
     def status(self) -> InventoryStatusResponse:
         items = self._load_catalog()
@@ -557,6 +579,45 @@ class InventoryService:
             issues=issues,
         )
 
+    def business_status(self) -> InventoryBusinessStatusResponse:
+        signals = self._load_business_signals()
+        return InventoryBusinessStatusResponse(
+            status="success",
+            ready=bool(signals),
+            total_signals=len(signals),
+            product_count=len(signals),
+            domains_available=self._business_domains_available(signals),
+            latest_updated_at=self._latest_business_signal_update(signals),
+            business_signal_path=str(self._business_signal_path()),
+        )
+
+    def list_business_signals(self, product_id: str | None = None) -> InventoryBusinessSignalsResponse:
+        signals = self._load_business_signals()
+        items = sorted(signals.values(), key=self._business_signal_sort_key, reverse=True)
+        if product_id:
+            items = [signal for signal in items if signal.product_id == product_id]
+        return InventoryBusinessSignalsResponse(
+            status="success",
+            total_signals=len(items),
+            signals=items,
+        )
+
+    def upsert_business_signals(
+        self,
+        signals: list[InventoryBusinessSignalRecord],
+    ) -> InventoryBusinessSignalsUpsertResponse:
+        existing_signals = self._load_business_signals()
+        for signal in signals:
+            existing_signals[signal.product_id] = signal
+        self._persist_business_signals(existing_signals)
+        return InventoryBusinessSignalsUpsertResponse(
+            status="success",
+            upserted_count=len(signals),
+            total_signals=len(existing_signals),
+            product_count=len(existing_signals),
+            business_signal_path=str(self._business_signal_path()),
+        )
+
     def list_items(self) -> InventoryCatalogResponse:
         items = sorted(self._load_catalog().values(), key=self._catalog_sort_key, reverse=True)
         return InventoryCatalogResponse(status="success", total_items=len(items), items=items)
@@ -626,6 +687,8 @@ class InventoryService:
         )
 
     def ask(self, request: InventoryAskRequest) -> InventoryAskResponse:
+        started_at = perf_counter()
+        trace_id = str(uuid4())
         memory_resolution = InventoryMemoryResolution()
         conversational_reply = self._build_conversational_reply(
             question=request.question,
@@ -641,7 +704,7 @@ class InventoryService:
                 hits=[],
                 strategy="conversation",
             )
-            return InventoryAskResponse(
+            response = InventoryAskResponse(
                 status="success",
                 question=request.question,
                 answer=reply.answer,
@@ -649,6 +712,7 @@ class InventoryService:
                 reply_style=request.reply_style,
                 answer_engine="deterministic",
                 confidence_score=confidence_score,
+                trace_id=trace_id,
                 abstained=False,
                 abstention_reason=None,
                 total_hits=0,
@@ -661,6 +725,16 @@ class InventoryService:
                 verification=reply.verification,
                 memory_resolution=memory_resolution,
             )
+            self._save_inventory_chat_trace(
+                trace_id=trace_id,
+                response=response,
+                execution_path="inventory_ask",
+                started_at=started_at,
+                requested_answer_engine=request.answer_engine,
+                retrieved_hits=[],
+                reranked_hits=[],
+            )
+            return response
 
         resolved_memory = self.memory_resolver.resolve(
             question=request.question,
@@ -716,7 +790,7 @@ class InventoryService:
             execution_path="inventory_ask",
             memory_resolution=memory_resolution,
         )
-        return InventoryAskResponse(
+        response = InventoryAskResponse(
             status="success",
             question=request.question,
             answer=reply.answer,
@@ -724,6 +798,7 @@ class InventoryService:
             reply_style=request.reply_style,
             answer_engine=answer_engine,
             confidence_score=confidence_score,
+            trace_id=trace_id,
             abstained=abstained,
             abstention_reason=abstention_reason,
             total_hits=search_response.total_hits,
@@ -736,6 +811,16 @@ class InventoryService:
             verification=reply.verification,
             memory_resolution=memory_resolution,
         )
+        self._save_inventory_chat_trace(
+            trace_id=trace_id,
+            response=response,
+            execution_path="inventory_ask",
+            started_at=started_at,
+            requested_answer_engine=request.answer_engine,
+            retrieved_hits=search_response.hits,
+            reranked_hits=ordered_hits,
+        )
+        return response
 
     def route(self, request: InventoryRouteRequest) -> InventoryRouteResponse:
         signals = self._build_route_signals(
@@ -778,8 +863,14 @@ class InventoryService:
         )
 
     def agentic_ask(self, request: InventoryAgenticRequest) -> InventoryAgenticResponse:
+        started_at = perf_counter()
+        trace_id = str(uuid4())
         reasoning_summary: list[str] = []
         missing_facts: list[str] = []
+        business_signals = self._load_business_signals()
+        business_domains = self._business_domains_available(business_signals)
+        available_data_domains = sorted(set(request.available_data_domains).union(business_domains))
+        business_intent = self._business_tool_intent(request.question)
         resolved_memory = self.memory_resolver.resolve(
             question=request.question,
             filters=request.filters.model_copy(deep=True),
@@ -797,7 +888,7 @@ class InventoryService:
             audience=request.audience,
             prefer_fast_response=False,
             allow_agentic=True,
-            available_data_domains=list(request.available_data_domains),
+            available_data_domains=available_data_domains,
         )
         route_response = self.route(route_request)
         reasoning_summary.append(route_response.reason_summary)
@@ -851,6 +942,40 @@ class InventoryService:
             )
             reasoning_summary.append(observation)
 
+        if business_intent:
+            business_hits = self._business_candidate_hits(
+                question=request.question,
+                filters=effective_filters,
+                business_signals=business_signals,
+                top_k=min(max(request.top_k, 5), self.config.max_top_k),
+            )
+            if business_hits:
+                selected_business_hits = business_hits[: min(3, len(business_hits))]
+                for hit in business_hits:
+                    if hit.product_id in seen_hits:
+                        continue
+                    seen_hits.add(hit.product_id)
+                    aggregated_hits.append(hit)
+                business_observation = self._build_business_signal_observation(
+                    business_intent=business_intent,
+                    selected_hits=selected_business_hits,
+                    business_signals=business_signals,
+                )
+                retrieval_steps.append(
+                    InventoryAgenticStep(
+                        step_number=len(retrieval_steps) + 1,
+                        action="business_signal_analysis",
+                        query_text=f"business_signals:{business_intent}",
+                        applied_filters=effective_filters.model_copy(deep=True),
+                        total_hits=len(business_hits),
+                        selected_product_ids=[hit.product_id for hit in selected_business_hits],
+                        observation=business_observation,
+                    )
+                )
+                reasoning_summary.append(business_observation)
+            elif business_intent in available_data_domains:
+                missing_facts.append(f"No product-level business signals matched this {business_intent} question.")
+
         if not aggregated_hits:
             final_reply = InventoryReply(
                 answer="I could not build a strong inventory-backed answer from the current catalog.",
@@ -876,10 +1001,22 @@ class InventoryService:
             )
             confidence_score = self._estimate_confidence(ordered_hits)
 
+        business_insight = self._build_business_tool_insight(
+            question=request.question,
+            hits=ordered_hits,
+            business_signals=business_signals,
+            business_intent=business_intent,
+        )
+        if business_insight.reasoning_summary:
+            reasoning_summary.extend(business_insight.reasoning_summary)
+        if business_insight.missing_facts:
+            missing_facts.extend(business_insight.missing_facts)
+
         answer = self._compose_agentic_answer(
             base_answer=final_reply.answer,
             route_response=route_response,
             missing_facts=missing_facts,
+            business_insight=business_insight,
         )
         confidence_score = self._adjust_agentic_confidence(
             confidence_score=confidence_score,
@@ -892,7 +1029,7 @@ class InventoryService:
         )
         composed_reply = InventoryReply(
             answer=answer,
-            recommended_product_ids=final_reply.recommended_product_ids,
+            recommended_product_ids=business_insight.selected_product_ids[:3] or final_reply.recommended_product_ids,
             cross_sell_product_ids=final_reply.cross_sell_product_ids,
             follow_up_question=final_reply.follow_up_question,
             answer_plan=final_reply.answer_plan,
@@ -916,7 +1053,6 @@ class InventoryService:
         )
         answer = composed_reply.answer
 
-        trace_id = str(uuid4())
         trace_payload = {
             "trace_id": trace_id,
             "question": request.question,
@@ -930,7 +1066,7 @@ class InventoryService:
             "confidence_score": confidence_score,
         }
         self.trace_store.save(trace_payload)
-        return InventoryAgenticResponse(
+        response = InventoryAgenticResponse(
             status="success",
             question=request.question,
             answer=answer,
@@ -955,12 +1091,118 @@ class InventoryService:
             verification=composed_reply.verification,
             memory_resolution=resolved_memory.resolution,
         )
+        self._save_inventory_chat_trace(
+            trace_id=trace_id,
+            response=response,
+            execution_path="inventory_agentic",
+            started_at=started_at,
+            requested_answer_engine=request.answer_engine,
+            retrieved_hits=aggregated_hits,
+            reranked_hits=ordered_hits,
+            reasoning_summary=reasoning_summary,
+            missing_facts=missing_facts,
+            retrieval_steps=retrieval_steps,
+        )
+        return response
 
     def get_agentic_trace(self, trace_id: str) -> InventoryAgenticTraceResponse | None:
         payload = self.trace_store.load(trace_id)
         if payload is None:
             return None
         return InventoryAgenticTraceResponse.model_validate(payload)
+
+    def get_chat_trace(self, trace_id: str) -> InventoryChatTraceResponse | None:
+        payload = self.chat_trace_store.load(trace_id)
+        if payload is None:
+            return None
+        return InventoryChatTraceResponse.model_validate(payload)
+
+    def _save_inventory_chat_trace(
+        self,
+        *,
+        trace_id: str,
+        response: InventoryAskResponse | InventoryAgenticResponse,
+        execution_path: str,
+        started_at: float,
+        requested_answer_engine: str,
+        retrieved_hits: list[InventorySearchHit],
+        reranked_hits: list[InventorySearchHit],
+        reasoning_summary: list[str] | None = None,
+        missing_facts: list[str] | None = None,
+        retrieval_steps: list[InventoryAgenticStep] | None = None,
+    ) -> None:
+        latency_ms = round((perf_counter() - started_at) * 1000, 3)
+        intent = response.answer_plan.detected_intent or response.answer_plan.intent
+        fallback_reason = self._trace_fallback_reason(
+            requested_answer_engine=requested_answer_engine,
+            response=response,
+        )
+        payload = {
+            "trace_id": trace_id,
+            "request_id": trace_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "question": response.question,
+            "assistant_mode": response.assistant_mode,
+            "reply_style": response.reply_style,
+            "answer_engine": response.answer_engine,
+            "execution_path": execution_path,
+            "latency_ms": latency_ms,
+            "fallback_reason": fallback_reason,
+            "intent": intent,
+            "preferences": response.answer_plan.preferences,
+            "retrieved_product_ids": self._trace_product_ids(retrieved_hits),
+            "reranked_product_ids": self._trace_product_ids(reranked_hits),
+            "recommended_product_ids": response.recommended_product_ids,
+            "cross_sell_product_ids": response.cross_sell_product_ids,
+            "total_hits": response.total_hits,
+            "confidence_score": response.confidence_score,
+            "abstained": response.abstained,
+            "abstention_reason": response.abstention_reason,
+            "applied_filters": response.applied_filters.model_dump(mode="json"),
+            "answer_plan": response.answer_plan.model_dump(mode="json"),
+            "verification": response.verification.model_dump(mode="json"),
+            "memory_resolution": response.memory_resolution.model_dump(mode="json"),
+            "reasoning_summary": reasoning_summary or [],
+            "missing_facts": missing_facts or [],
+            "retrieval_steps": [step.model_dump(mode="json") for step in retrieval_steps or []],
+            "final_answer": response.answer,
+        }
+        self.chat_trace_store.save(payload)
+        logger.info(
+            "inventory_chat_trace trace_id=%s execution_path=%s intent=%s answer_engine=%s total_hits=%s latency_ms=%s fallback_reason=%s",
+            trace_id,
+            execution_path,
+            intent,
+            response.answer_engine,
+            response.total_hits,
+            latency_ms,
+            fallback_reason,
+        )
+
+    @staticmethod
+    def _trace_product_ids(hits: list[InventorySearchHit]) -> list[str]:
+        product_ids: list[str] = []
+        for hit in hits:
+            if hit.product_id in product_ids:
+                continue
+            product_ids.append(hit.product_id)
+        return product_ids
+
+    @staticmethod
+    def _trace_fallback_reason(
+        *,
+        requested_answer_engine: str,
+        response: InventoryAskResponse | InventoryAgenticResponse,
+    ) -> str | None:
+        if response.abstention_reason:
+            return response.abstention_reason
+        if requested_answer_engine == "natural" and response.answer_engine != "natural":
+            return "Natural answer was requested but deterministic fallback was used."
+        if response.verification.final_answer_issues:
+            return "Final answer verification reported issues."
+        if response.verification.issues:
+            return "Answer plan verification reported issues."
+        return None
 
     def _semantic_search(
         self,
@@ -1136,7 +1378,10 @@ class InventoryService:
         merged = filters.model_copy(deep=True)
         lowered = question.casefold()
 
-        if self._has_any_phrase(lowered, ["out of stock", "stockout", "stock out"]):
+        if self._has_any_phrase(lowered, ["prevent stockout", "prevent stock out", "avoid stockout", "avoid stock out"]):
+            if merged.max_stock is None:
+                merged.max_stock = low_stock_threshold
+        elif self._has_any_phrase(lowered, ["out of stock", "stockout", "stock out"]):
             if merged.max_stock is None:
                 merged.max_stock = 0
         elif self._has_any_phrase(lowered, ["low stock", "running low", "below threshold", "limited stock"]):
@@ -1385,11 +1630,24 @@ class InventoryService:
             required.append("inventory_snapshots")
         if any(term in normalized for term in ("sales", "revenue", "profit", "margin")):
             required.append("sales")
+        if any(term in normalized for term in ("demand", "selling", "sold", "velocity", "trend", "dropped")):
+            required.append("sales")
         if "order" in normalized or "orders" in normalized:
             required.append("orders")
         if any(term in normalized for term in ("supplier", "suppliers", "vendor", "vendors", "purchase order")):
             required.append("suppliers")
+        if any(term in normalized for term in ("lead time", "lead-time")):
+            required.append("suppliers")
+        if any(term in normalized for term in ("restock", "reorder", "stockout", "stock out", "running low")):
+            required.append("inventory_snapshots")
+            required.append("sales")
+        if any(term in normalized for term in ("return rate", "returns", "returned")):
+            required.append("returns")
+        if any(term in normalized for term in ("margin", "profit", "profitable")):
+            required.append("margins")
         if "customer" in normalized or "customers" in normalized:
+            required.append("customers")
+        if "segment" in normalized or "segments" in normalized:
             required.append("customers")
         deduped: list[str] = []
         seen: set[str] = set()
@@ -1586,12 +1844,304 @@ class InventoryService:
             )
         return f"Step {step_number} found {total_hits} relevant catalog item(s) led by {self._natural_join(hit.name for hit in selected_hits[:3])}."
 
+    def _business_tool_intent(self, question: str) -> str | None:
+        normalized = self._normalize_conversation_text(question)
+        if self._has_any_phrase(normalized, ["stockout", "stock out", "prevent stockout", "avoid stockout"]):
+            return "stockout_prevention"
+        if self._has_any_phrase(normalized, ["restock", "reorder", "running low", "low stock"]):
+            return "restock"
+        if self._has_any_phrase(normalized, ["supplier", "vendor", "lead time", "lead-time", "purchase order"]):
+            return "supplier_risk"
+        if self._has_any_phrase(normalized, ["margin", "profit", "profitable"]):
+            return "margin"
+        if self._has_any_phrase(normalized, ["return rate", "returns", "returned"]):
+            return "returns"
+        if self._has_any_phrase(normalized, ["customer segment", "customer segments", "segment", "segments"]):
+            return "customer_segments"
+        if self._has_any_phrase(normalized, ["demand", "sales", "sold", "selling", "velocity", "trend", "dropped"]):
+            return "demand"
+        return None
+
+    def _business_candidate_hits(
+        self,
+        *,
+        question: str,
+        filters: InventorySearchFilters,
+        business_signals: dict[str, InventoryBusinessSignalRecord],
+        top_k: int,
+    ) -> list[InventorySearchHit]:
+        if not business_signals:
+            return []
+        catalog = self._load_catalog()
+        business_intent = self._business_tool_intent(question)
+        scored_hits: list[tuple[InventorySearchHit, float]] = []
+        for signal in business_signals.values():
+            item = catalog.get(signal.product_id)
+            if item is None or not self._item_matches_filters(item, filters):
+                continue
+            score = self._business_priority_score(item=item, signal=signal, business_intent=business_intent)
+            if score <= 0:
+                continue
+            hit = self._build_search_hit(item=item, score=round(score, 3))
+            evidence_scores = {
+                **hit.evidence_scores,
+                "business_signal_score": round(score, 4),
+                "business_intent": business_intent,
+                "business_reasons": self._business_signal_reasons(signal=signal, business_intent=business_intent),
+            }
+            scored_hits.append((hit.model_copy(update={"score": round(score, 3), "evidence_scores": evidence_scores}), score))
+        return [
+            hit
+            for hit, _ in sorted(
+                scored_hits,
+                key=lambda item: (
+                    -item[1],
+                    self._is_out_of_stock(item[0]),
+                    self._price_sort_key(item[0]),
+                    item[0].name.casefold(),
+                ),
+            )[:top_k]
+        ]
+
+    def _build_business_signal_observation(
+        self,
+        *,
+        business_intent: str,
+        selected_hits: list[InventorySearchHit],
+        business_signals: dict[str, InventoryBusinessSignalRecord],
+    ) -> str:
+        if not selected_hits:
+            return f"Business signal tool found no matched product signals for {business_intent}."
+        summaries = [
+            self._format_business_signal_summary(
+                hit=hit,
+                signal=business_signals[hit.product_id],
+                include_margin=business_intent == "margin",
+                include_supplier=business_intent in {"restock", "stockout_prevention", "supplier_risk"},
+                include_returns=business_intent == "returns",
+                include_segments=business_intent == "customer_segments",
+            )
+            for hit in selected_hits
+            if hit.product_id in business_signals
+        ]
+        return (
+            f"Business signal tool analyzed {business_intent.replace('_', ' ')} using "
+            f"{self._natural_join(summaries)}."
+        )
+
+    def _build_business_tool_insight(
+        self,
+        *,
+        question: str,
+        hits: list[InventorySearchHit],
+        business_signals: dict[str, InventoryBusinessSignalRecord],
+        business_intent: str | None,
+    ) -> InventoryBusinessInsight:
+        if business_intent is None:
+            return InventoryBusinessInsight()
+        if not business_signals:
+            return InventoryBusinessInsight(
+                missing_facts=[
+                    "Missing business signal mirror: sales, orders, supplier, margin, return, customer, or inventory snapshot data."
+                ]
+            )
+
+        catalog = self._load_catalog()
+        hits_with_signals = sorted(
+            [hit for hit in hits if hit.product_id in business_signals],
+            key=lambda hit: self._business_priority_score(
+                item=catalog[hit.product_id],
+                signal=business_signals[hit.product_id],
+                business_intent=business_intent,
+            ),
+            reverse=True,
+        )
+        if not hits_with_signals:
+            return InventoryBusinessInsight(
+                missing_facts=[f"No product-level business signals matched this {business_intent} question."]
+            )
+
+        selected_hits = hits_with_signals[:3]
+        primary = selected_hits[0]
+        primary_signal = business_signals[primary.product_id]
+        reasoning_summary = [
+            f"Used mirrored business signals for {self._natural_join(self._business_domains_available(business_signals))}.",
+            self._build_business_signal_observation(
+                business_intent=business_intent,
+                selected_hits=selected_hits,
+                business_signals=business_signals,
+            ),
+        ]
+        addendum = self._business_insight_sentence(
+            business_intent=business_intent,
+            primary=primary,
+            primary_signal=primary_signal,
+            selected_hits=selected_hits,
+            business_signals=business_signals,
+        )
+        return InventoryBusinessInsight(
+            answer_addendum=addendum,
+            reasoning_summary=reasoning_summary,
+            selected_product_ids=[hit.product_id for hit in selected_hits],
+        )
+
+    def _business_insight_sentence(
+        self,
+        *,
+        business_intent: str,
+        primary: InventorySearchHit,
+        primary_signal: InventoryBusinessSignalRecord,
+        selected_hits: list[InventorySearchHit],
+        business_signals: dict[str, InventoryBusinessSignalRecord],
+    ) -> str:
+        primary_summary = self._format_business_signal_summary(
+            hit=primary,
+            signal=primary_signal,
+            include_margin=business_intent == "margin",
+            include_supplier=business_intent in {"restock", "stockout_prevention", "supplier_risk"},
+            include_returns=business_intent == "returns",
+            include_segments=business_intent == "customer_segments",
+        )
+        other_names = [hit.name for hit in selected_hits[1:3]]
+        next_clause = f" Next items to review are {self._natural_join(other_names)}." if other_names else ""
+        if business_intent in {"restock", "stockout_prevention"}:
+            return (
+                f"Business-tool read: prioritize {primary.name} because its operational signal is strongest: "
+                f"{primary_summary}.{next_clause}"
+            )
+        if business_intent == "demand":
+            return f"Demand read: {primary_summary} is the strongest demand signal in the matched set.{next_clause}"
+        if business_intent == "margin":
+            return f"Margin read: {primary_summary} gives the clearest margin-aware signal among the matched products.{next_clause}"
+        if business_intent == "supplier_risk":
+            return f"Supplier-risk read: {primary_summary}; avoid promising fast replenishment unless the main backend confirms purchase-order timing.{next_clause}"
+        if business_intent == "returns":
+            return f"Returns read: {primary_summary}; review quality or expectation-setting before pushing it harder.{next_clause}"
+        if business_intent == "customer_segments":
+            return f"Customer-segment read: {primary_summary}; use those segments to frame the next recommendation.{next_clause}"
+        return f"Business-tool read: {primary_summary}.{next_clause}"
+
+    def _format_business_signal_summary(
+        self,
+        *,
+        hit: InventorySearchHit,
+        signal: InventoryBusinessSignalRecord,
+        include_margin: bool,
+        include_supplier: bool,
+        include_returns: bool,
+        include_segments: bool,
+    ) -> str:
+        parts = [hit.name]
+        if signal.units_sold is not None:
+            parts.append(f"sold quantity {signal.units_sold}")
+        if signal.order_count is not None:
+            parts.append(f"order count {signal.order_count}")
+        if signal.demand_score is not None:
+            parts.append(f"demand score {signal.demand_score:.2f}")
+        if signal.inventory_on_hand is not None:
+            parts.append(f"business snapshot inventory level {signal.inventory_on_hand}")
+        if include_supplier and signal.supplier_lead_time_days is not None:
+            parts.append(f"supplier lead time {signal.supplier_lead_time_days} day(s)")
+        if include_supplier and signal.supplier_risk_score is not None:
+            parts.append(f"supplier risk {signal.supplier_risk_score:.2f}")
+        if include_margin and signal.gross_margin_rate is not None:
+            parts.append(f"margin rate {self._format_business_percent(signal.gross_margin_rate)}")
+        if include_returns and signal.return_rate is not None:
+            parts.append(f"return rate {self._format_business_percent(signal.return_rate)}")
+        if include_segments and signal.customer_segments:
+            parts.append(f"customer segments {self._natural_join(signal.customer_segments[:3])}")
+        return ", ".join(parts)
+
+    def _business_priority_score(
+        self,
+        *,
+        item: InventoryItemRecord,
+        signal: InventoryBusinessSignalRecord,
+        business_intent: str | None,
+    ) -> float:
+        if not self._business_signal_has_value(signal):
+            return 0.0
+        score = 0.12
+        if signal.demand_score is not None:
+            score += signal.demand_score * 0.35
+        if signal.units_sold is not None:
+            score += min(signal.units_sold / 80.0, 1.0) * 0.25
+        inventory_level = signal.inventory_on_hand if signal.inventory_on_hand is not None else item.stock
+        if inventory_level <= 0:
+            score += 0.28
+        elif inventory_level <= 5:
+            score += 0.22
+        elif inventory_level <= 10:
+            score += 0.14
+        if signal.supplier_lead_time_days is not None:
+            lead_time_score = min(signal.supplier_lead_time_days / 45.0, 1.0)
+            score += lead_time_score * (0.2 if business_intent in {"restock", "stockout_prevention", "supplier_risk"} else 0.08)
+        if signal.supplier_risk_score is not None and business_intent == "supplier_risk":
+            score += signal.supplier_risk_score * 0.22
+        if signal.gross_margin_rate is not None and business_intent == "margin":
+            score += max(0.0, signal.gross_margin_rate) * 0.28
+        if signal.return_rate is not None:
+            if business_intent == "returns":
+                score += signal.return_rate * 0.25
+            else:
+                score -= signal.return_rate * 0.12
+        return round(max(0.0, min(0.99, score)), 4)
+
+    @staticmethod
+    def _business_signal_has_value(signal: InventoryBusinessSignalRecord) -> bool:
+        return any(
+            value is not None
+            for value in (
+                signal.units_sold,
+                signal.revenue,
+                signal.order_count,
+                signal.return_count,
+                signal.return_rate,
+                signal.gross_margin,
+                signal.gross_margin_rate,
+                signal.inventory_on_hand,
+                signal.supplier_lead_time_days,
+                signal.supplier_risk_score,
+                signal.demand_score,
+            )
+        ) or bool(signal.supplier_id or signal.supplier_name or signal.customer_segments)
+
+    def _business_signal_reasons(
+        self,
+        *,
+        signal: InventoryBusinessSignalRecord,
+        business_intent: str | None,
+    ) -> list[str]:
+        reasons: list[str] = []
+        if signal.units_sold is not None:
+            reasons.append(f"sales quantity signal: {signal.units_sold}")
+        if signal.order_count is not None:
+            reasons.append(f"order count signal: {signal.order_count}")
+        if signal.inventory_on_hand is not None:
+            reasons.append(f"inventory snapshot signal: {signal.inventory_on_hand}")
+        if signal.supplier_lead_time_days is not None:
+            reasons.append(f"supplier lead time signal: {signal.supplier_lead_time_days} day(s)")
+        if signal.gross_margin_rate is not None:
+            reasons.append(f"margin rate signal: {self._format_business_percent(signal.gross_margin_rate)}")
+        if signal.return_rate is not None:
+            reasons.append(f"return rate signal: {self._format_business_percent(signal.return_rate)}")
+        if signal.customer_segments:
+            reasons.append(f"customer segment signal: {self._natural_join(signal.customer_segments[:3])}")
+        if business_intent:
+            reasons.append(f"business intent: {business_intent}")
+        return reasons
+
+    @staticmethod
+    def _format_business_percent(value: float) -> str:
+        return f"{value * 100:.1f}%"
+
     def _compose_agentic_answer(
         self,
         *,
         base_answer: str,
         route_response: InventoryRouteResponse,
         missing_facts: list[str],
+        business_insight: InventoryBusinessInsight | None = None,
     ) -> str:
         answer_parts: list[str] = []
         if route_response.recommended_path == "agentic":
@@ -1602,6 +2152,8 @@ class InventoryService:
                 f"I can only answer part of it from the current catalog mirror because I do not have {self._natural_join(readable_missing)} in this agent yet."
             )
         answer_parts.append(base_answer)
+        if business_insight and business_insight.answer_addendum:
+            answer_parts.append(business_insight.answer_addendum)
         return " ".join(part for part in answer_parts if part)
 
     @staticmethod
@@ -3031,6 +3583,65 @@ class InventoryService:
                     break
         return sorted(stale_product_ids)
 
+    def _business_signal_path(self) -> Path:
+        return Path(self.config.business_signal_path)
+
+    def _load_business_signals(self) -> dict[str, InventoryBusinessSignalRecord]:
+        signal_path = self._business_signal_path()
+        if not signal_path.exists():
+            return {}
+        signals: dict[str, InventoryBusinessSignalRecord] = {}
+        with signal_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                signal = InventoryBusinessSignalRecord.model_validate_json(stripped)
+                signals[signal.product_id] = signal
+        return signals
+
+    def _persist_business_signals(self, signals: dict[str, InventoryBusinessSignalRecord]) -> None:
+        signal_path = self._business_signal_path()
+        signal_path.parent.mkdir(parents=True, exist_ok=True)
+        with signal_path.open("w", encoding="utf-8") as handle:
+            for signal in sorted(signals.values(), key=self._business_signal_sort_key):
+                handle.write(signal.model_dump_json())
+                handle.write("\n")
+
+    def _business_domains_available(self, signals: dict[str, InventoryBusinessSignalRecord]) -> list[str]:
+        domains: set[str] = set()
+        for signal in signals.values():
+            if signal.units_sold is not None or signal.revenue is not None or signal.demand_score is not None:
+                domains.add("sales")
+            if signal.order_count is not None:
+                domains.add("orders")
+            if signal.supplier_id or signal.supplier_name or signal.supplier_lead_time_days is not None:
+                domains.add("suppliers")
+            if signal.inventory_on_hand is not None or signal.inventory_snapshot_at:
+                domains.add("inventory_snapshots")
+            if signal.return_count is not None or signal.return_rate is not None:
+                domains.add("returns")
+            if signal.gross_margin is not None or signal.gross_margin_rate is not None:
+                domains.add("margins")
+            if signal.customer_segments:
+                domains.add("customers")
+        return sorted(domains)
+
+    @staticmethod
+    def _latest_business_signal_update(signals: dict[str, InventoryBusinessSignalRecord]) -> str | None:
+        values = [
+            value
+            for signal in signals.values()
+            for value in (signal.updated_at, signal.period_end, signal.inventory_snapshot_at)
+            if value
+        ]
+        return max(values) if values else None
+
+    @staticmethod
+    def _business_signal_sort_key(signal: InventoryBusinessSignalRecord) -> tuple[str, str, str]:
+        updated_key = signal.updated_at or signal.period_end or signal.inventory_snapshot_at or ""
+        return (updated_key, signal.period_end or "", signal.product_id)
+
     def _catalog_path(self) -> Path:
         return Path(self.config.catalog_path)
 
@@ -4053,6 +4664,8 @@ def get_inventory_service() -> InventoryService:
             namespace=settings.inventory_vector_namespace,
             default_top_k=settings.top_k,
             agentic_trace_dir=str(Path(settings.trace_dir) / "inventory_agentic"),
+            chat_trace_dir=str(Path(settings.trace_dir) / "inventory_chat"),
+            business_signal_path=settings.inventory_business_signal_path,
             natural_answers_enabled=settings.inventory_natural_answers_enabled,
             natural_answer_model_name=settings.inventory_natural_answer_model_name,
             natural_answer_temperature=settings.inventory_natural_answer_temperature,

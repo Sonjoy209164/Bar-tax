@@ -7,7 +7,12 @@ from app.core.schemas import (
     InventoryAgenticTraceResponse,
     InventoryAskRequest,
     InventoryAskResponse,
+    InventoryBusinessSignalsResponse,
+    InventoryBusinessSignalsUpsertRequest,
+    InventoryBusinessSignalsUpsertResponse,
+    InventoryBusinessStatusResponse,
     InventoryCatalogResponse,
+    InventoryChatTraceResponse,
     InventoryDeleteRequest,
     InventoryDeleteResponse,
     InventoryItemRecord,
@@ -55,6 +60,34 @@ async def validate_inventory_sync(request: InventorySyncValidateRequest) -> Inve
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "inventory_sync_validation_failed", "message": str(exc)},
+        ) from exc
+
+
+@router.get("/business/status", response_model=InventoryBusinessStatusResponse)
+async def get_inventory_business_status() -> InventoryBusinessStatusResponse:
+    return get_inventory_service().business_status()
+
+
+@router.get("/business/signals", response_model=InventoryBusinessSignalsResponse)
+async def list_inventory_business_signals(product_id: str | None = None) -> InventoryBusinessSignalsResponse:
+    return get_inventory_service().list_business_signals(product_id=product_id)
+
+
+@router.post("/business/signals/upsert", response_model=InventoryBusinessSignalsUpsertResponse)
+async def upsert_inventory_business_signals(
+    request: InventoryBusinessSignalsUpsertRequest,
+) -> InventoryBusinessSignalsUpsertResponse:
+    try:
+        return get_inventory_service().upsert_business_signals(request.signals)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "invalid_inventory_business_signal", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "inventory_business_signal_upsert_failed", "message": str(exc)},
         ) from exc
 
 
@@ -156,6 +189,17 @@ async def read_inventory_agentic_trace(trace_id: str) -> InventoryAgenticTraceRe
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "inventory_agentic_trace_not_found", "message": f"Trace {trace_id} was not found."},
+        )
+    return trace
+
+
+@router.get("/chat/trace/{trace_id}", response_model=InventoryChatTraceResponse)
+async def read_inventory_chat_trace(trace_id: str) -> InventoryChatTraceResponse:
+    trace = get_inventory_service().get_chat_trace(trace_id)
+    if trace is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "inventory_chat_trace_not_found", "message": f"Trace {trace_id} was not found."},
         )
     return trace
 

@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     processed_data_dir: str = Field(default="data/processed", alias="PROCESSED_DATA_DIR")
     agentic_store_dir: str = Field(default="data/agentic_store", alias="AGENTIC_STORE_DIR")
     inventory_catalog_path: str = Field(default="data/inventory/catalog.jsonl", alias="INVENTORY_CATALOG_PATH")
+    inventory_business_signal_path: str = Field(
+        default="data/inventory/business_signals.jsonl",
+        alias="INVENTORY_BUSINESS_SIGNAL_PATH",
+    )
     inventory_vector_namespace: str = Field(default="inventory", alias="INVENTORY_VECTOR_NAMESPACE")
     inventory_natural_answers_enabled: bool = Field(default=False, alias="INVENTORY_NATURAL_ANSWERS_ENABLED")
     inventory_natural_answer_model_name: str | None = Field(default=None, alias="INVENTORY_NATURAL_ANSWER_MODEL_NAME")
@@ -82,6 +86,7 @@ class Settings(BaseSettings):
             "processed_data_dir": self.processed_data_dir,
             "agentic_store_dir": self.agentic_store_dir,
             "inventory_catalog_path": self.inventory_catalog_path,
+            "inventory_business_signal_path": self.inventory_business_signal_path,
             "inventory_vector_namespace": self.inventory_vector_namespace,
             "inventory_natural_answers_enabled": self.inventory_natural_answers_enabled,
             "inventory_natural_answer_model_name": self.inventory_natural_answer_model_name,

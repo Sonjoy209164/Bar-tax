@@ -67,6 +67,7 @@ def _build_inventory_service(tmp_path) -> InventoryService:  # type: ignore[no-u
             namespace="inventory-test",
             low_stock_threshold=10,
             agentic_trace_dir=str(tmp_path / "inventory_agentic_traces"),
+            business_signal_path=str(tmp_path / "inventory_business_signals.jsonl"),
         ),
     )
 
@@ -659,6 +660,7 @@ async def test_inventory_agentic_trace_and_status_endpoints(monkeypatch: pytest.
         )
         trace_id = ask_response.json()["trace_id"]
         trace_response = await client.get(f"/inventory/agentic/trace/{trace_id}")
+        chat_trace_response = await client.get(f"/inventory/chat/trace/{trace_id}")
         status_response = await client.get("/inventory/agentic/status")
 
     assert trace_response.status_code == 200
@@ -667,6 +669,16 @@ async def test_inventory_agentic_trace_and_status_endpoints(monkeypatch: pytest.
     assert trace_payload["execution_path"] == "inventory_agentic"
     assert trace_payload["retrieval_steps"]
     assert "VoxCast USB Podcast Microphone" in trace_payload["final_answer"]
+
+    assert chat_trace_response.status_code == 200
+    chat_trace_payload = chat_trace_response.json()
+    assert chat_trace_payload["trace_id"] == trace_id
+    assert chat_trace_payload["execution_path"] == "inventory_agentic"
+    assert chat_trace_payload["retrieval_steps"]
+    assert chat_trace_payload["reasoning_summary"]
+    assert chat_trace_payload["retrieved_product_ids"] == ["prod-mic"]
+    assert chat_trace_payload["reranked_product_ids"] == ["prod-mic"]
+    assert "VoxCast USB Podcast Microphone" in chat_trace_payload["final_answer"]
 
     assert status_response.status_code == 200
     status_payload = status_response.json()
@@ -1062,7 +1074,241 @@ async def test_inventory_routes_are_present_in_openapi(monkeypatch: pytest.Monke
     assert "/inventory/route" in paths
     assert "/inventory/sync/status" in paths
     assert "/inventory/sync/validate" in paths
+    assert "/inventory/business/status" in paths
+    assert "/inventory/business/signals" in paths
+    assert "/inventory/business/signals/upsert" in paths
+    assert "/inventory/chat/trace/{trace_id}" in paths
     assert "/inventory/ask" in paths
+
+
+@pytest.mark.anyio
+async def test_inventory_business_signal_endpoints(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        upsert_response = await client.post(
+            "/inventory/business/signals/upsert",
+            json={
+                "signals": [
+                    {
+                        "product_id": "prod-mic",
+                        "period_start": "2026-04-01",
+                        "period_end": "2026-04-15",
+                        "units_sold": 64,
+                        "revenue": 10176.0,
+                        "order_count": 48,
+                        "return_count": 2,
+                        "return_rate": 0.03,
+                        "gross_margin": 3358.0,
+                        "gross_margin_rate": 0.33,
+                        "inventory_on_hand": 2,
+                        "inventory_snapshot_at": "2026-04-15T10:00:00Z",
+                        "supplier_id": "sup-audio",
+                        "supplier_name": "Audio Supply Co",
+                        "supplier_lead_time_days": 21,
+                        "supplier_risk_score": 0.35,
+                        "customer_segments": ["podcasters", "webinar teams"],
+                        "demand_score": 0.91,
+                        "updated_at": "2026-04-15T10:00:00Z",
+                    }
+                ]
+            },
+        )
+        status_response = await client.get("/inventory/business/status")
+        list_response = await client.get("/inventory/business/signals", params={"product_id": "prod-mic"})
+
+    assert upsert_response.status_code == 200
+    assert upsert_response.json()["upserted_count"] == 1
+    assert upsert_response.json()["total_signals"] == 1
+
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["ready"] is True
+    assert status_payload["product_count"] == 1
+    assert set(status_payload["domains_available"]) == {
+        "customers",
+        "inventory_snapshots",
+        "margins",
+        "orders",
+        "returns",
+        "sales",
+        "suppliers",
+    }
+
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    assert list_payload["total_signals"] == 1
+    assert list_payload["signals"][0]["product_id"] == "prod-mic"
+    assert list_payload["signals"][0]["customer_segments"] == ["podcasters", "webinar teams"]
+
+
+@pytest.mark.anyio
+async def test_inventory_agentic_uses_business_signals_for_restock_reasoning(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-mic",
+                        "sku": "AUD-MIC-004",
+                        "name": "VoxCast USB Podcast Microphone",
+                        "category": "Audio",
+                        "brand": "VoxCast",
+                        "short_description": "Cardioid USB microphone for podcasts and webinars",
+                        "price": 159.0,
+                        "currency": "USD",
+                        "stock": 2,
+                        "status": "Low Stock",
+                        "tags": ["audio", "microphone"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-headphones",
+                        "sku": "AUD-HP-001",
+                        "name": "Auralite Flex ANC Headphones",
+                        "category": "Audio",
+                        "brand": "Auralite",
+                        "short_description": "Wireless headphones for office calls",
+                        "price": 249.0,
+                        "currency": "USD",
+                        "stock": 8,
+                        "status": "Low Stock",
+                        "tags": ["audio", "headphones"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        await client.post(
+            "/inventory/business/signals/upsert",
+            json={
+                "signals": [
+                    {
+                        "product_id": "prod-mic",
+                        "period_start": "2026-04-01",
+                        "period_end": "2026-04-15",
+                        "units_sold": 64,
+                        "order_count": 48,
+                        "inventory_on_hand": 2,
+                        "supplier_lead_time_days": 21,
+                        "supplier_risk_score": 0.35,
+                        "gross_margin_rate": 0.33,
+                        "demand_score": 0.91,
+                    },
+                    {
+                        "product_id": "prod-headphones",
+                        "period_start": "2026-04-01",
+                        "period_end": "2026-04-15",
+                        "units_sold": 16,
+                        "order_count": 12,
+                        "inventory_on_hand": 8,
+                        "supplier_lead_time_days": 7,
+                        "gross_margin_rate": 0.28,
+                        "demand_score": 0.4,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/agentic/ask",
+            json={
+                "question": "What should I restock first to prevent stockout?",
+                "assistant_mode": "support",
+                "reply_style": "detailed",
+                "max_reasoning_steps": 3,
+            },
+        )
+        trace_response = await client.get(f"/inventory/chat/trace/{response.json()['trace_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["execution_path"] == "inventory_agentic"
+    assert payload["recommended_product_ids"][0] == "prod-mic"
+    assert "Business-tool read" in payload["answer"]
+    assert "VoxCast USB Podcast Microphone" in payload["answer"]
+    assert "sold quantity 64" in payload["answer"]
+    assert "supplier lead time 21 day(s)" in payload["answer"]
+    assert not any("Missing data domain" in fact for fact in payload["missing_facts"])
+
+    assert trace_response.status_code == 200
+    trace_payload = trace_response.json()
+    assert any(step["action"] == "business_signal_analysis" for step in trace_payload["retrieval_steps"])
+    assert trace_payload["retrieval_steps"][-1]["action"] == "business_signal_analysis"
+    assert "Business signal tool" in " ".join(trace_payload["reasoning_summary"])
+
+
+@pytest.mark.anyio
+async def test_inventory_ask_returns_debuggable_chat_trace(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-mic",
+                        "sku": "AUD-MIC-004",
+                        "name": "VoxCast USB Podcast Microphone",
+                        "category": "Audio",
+                        "brand": "VoxCast",
+                        "short_description": "Cardioid USB microphone for podcasts and webinars",
+                        "price": 159.0,
+                        "currency": "USD",
+                        "stock": 11,
+                        "status": "Active",
+                        "tags": ["audio", "microphone"],
+                        "include_in_rag": True,
+                    }
+                ]
+            },
+        )
+        ask_response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "tell me about VoxCast USB Podcast Microphone",
+                "assistant_mode": "support",
+                "reply_style": "detailed",
+            },
+        )
+        trace_id = ask_response.json()["trace_id"]
+        trace_response = await client.get(f"/inventory/chat/trace/{trace_id}")
+
+    assert ask_response.status_code == 200
+    ask_payload = ask_response.json()
+    assert ask_payload["trace_id"]
+
+    assert trace_response.status_code == 200
+    trace_payload = trace_response.json()
+    assert trace_payload["trace_id"] == trace_id
+    assert trace_payload["request_id"] == trace_id
+    assert trace_payload["execution_path"] == "inventory_ask"
+    assert trace_payload["question"] == ask_payload["question"]
+    assert trace_payload["final_answer"] == ask_payload["answer"]
+    assert trace_payload["answer_engine"] == ask_payload["answer_engine"]
+    assert trace_payload["latency_ms"] >= 0
+    assert trace_payload["intent"] in {"exact_lookup", "product_detail", "product_search"}
+    assert trace_payload["preferences"]["product_type"] == "microphone"
+    assert trace_payload["retrieved_product_ids"] == ["prod-mic"]
+    assert trace_payload["reranked_product_ids"] == ["prod-mic"]
+    assert trace_payload["answer_plan"]["primary_product_id"] == "prod-mic"
+    assert trace_payload["verification"]["checked_final_answer"] is True
+    assert trace_payload["fallback_reason"] is None
 
 
 @pytest.mark.anyio

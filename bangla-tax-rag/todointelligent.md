@@ -445,22 +445,22 @@ Only after normal chat is strong.
 
 Add tools for:
 
-- [ ] sales history
-- [ ] order history
-- [ ] supplier lead time
-- [ ] margins
-- [ ] inventory snapshots
-- [ ] return rates
-- [ ] customer segments
+- [x] sales history
+- [x] order history
+- [x] supplier lead time
+- [x] margins
+- [x] inventory snapshots
+- [x] return rates
+- [x] customer segments
 
 Agentic use cases:
 
-- [ ] restock prioritization
-- [ ] demand reasoning
-- [ ] why sales dropped
-- [ ] supplier risk
-- [ ] margin-aware recommendation
-- [ ] stockout prevention
+- [x] restock prioritization
+- [x] demand reasoning
+- [x] why sales dropped
+- [x] supplier risk
+- [x] margin-aware recommendation
+- [x] stockout prevention
 
 Success criteria:
 
@@ -498,22 +498,22 @@ The bot cannot be smarter than stale or dirty product data, so sync health must 
 
 Log every chat turn:
 
-- [ ] request ID
-- [ ] question
-- [ ] intent
-- [ ] preferences
-- [ ] retrieved IDs
-- [ ] reranked IDs
-- [ ] answer plan
-- [ ] verification
-- [ ] final answer
-- [ ] answer engine
-- [ ] latency
-- [ ] fallback reason
+- [x] request ID
+- [x] question
+- [x] intent
+- [x] preferences
+- [x] retrieved IDs
+- [x] reranked IDs
+- [x] answer plan
+- [x] verification
+- [x] final answer
+- [x] answer engine
+- [x] latency
+- [x] fallback reason
 
 Add endpoint:
 
-- [ ] `GET /inventory/chat/trace/{trace_id}`
+- [x] `GET /inventory/chat/trace/{trace_id}`
 
 Success criteria:
 
@@ -583,8 +583,8 @@ Recommended implementation sequence:
 9. [x] Better natural prompt
 10. [x] Conversation memory contract
 11. [x] Sync validation
-12. [ ] Observability
-13. [ ] Agentic business tools
+12. [x] Observability
+13. [x] Agentic business tools
 14. [ ] Production storage and vector backend
 
 ## Immediate Next Task
@@ -592,13 +592,13 @@ Recommended implementation sequence:
 Start with:
 
 ```text
-IntentClassifier + PreferenceExtractor + ProductOntology
+Production storage and vector backend
 ```
 
 Why:
 
 ```text
-These make the bot understand what the user wants before retrieval, ranking, and generation.
+The chatbot now has grounded chat, sync validation, tracing, and mirrored business signals. The next risk is durability and scale: JSONL/local vectors are fine for development, not production.
 ```
 
 First sprint deliverables:

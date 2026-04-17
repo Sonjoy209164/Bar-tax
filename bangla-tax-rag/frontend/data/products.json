@@ -53,7 +53,7 @@
       "updated_at": "2026-04-17T09:00:00Z"
     },
     {
-      "product_id": "headphones-auralite-flex",
+      "product_id": "seed-audio-001",
       "sku": "AUD-HP-001",
       "name": "Auralite Flex ANC Headphones",
       "category": "Audio",
@@ -78,7 +78,7 @@
       "updated_at": "2026-04-17T09:00:00Z"
     },
     {
-      "product_id": "earbuds-echowave-studio",
+      "product_id": "seed-audio-002",
       "sku": "AUD-EB-002",
       "name": "EchoWave Studio Earbuds",
       "category": "Audio",
@@ -102,7 +102,7 @@
       "updated_at": "2026-04-17T09:00:00Z"
     },
     {
-      "product_id": "mic-voxcast-usb",
+      "product_id": "seed-audio-004",
       "sku": "AUD-MIC-004",
       "name": "VoxCast USB Podcast Microphone",
       "category": "Audio",
@@ -175,7 +175,7 @@
       "updated_at": "2026-04-17T09:00:00Z"
     },
     {
-      "product_id": "chair-ergomesh-pro",
+      "product_id": "seed-office-004",
       "sku": "OFF-CHR-004",
       "name": "ErgoMesh Pro Chair",
       "category": "Office",
@@ -222,7 +222,7 @@
       "updated_at": "2026-04-17T09:00:00Z"
     },
     {
-      "product_id": "mic-voxcast-usb",
+      "product_id": "seed-audio-004",
       "period_start": "2026-04-01",
       "period_end": "2026-04-17",
       "units_sold": 64,
@@ -243,7 +243,7 @@
       "updated_at": "2026-04-17T09:00:00Z"
     },
     {
-      "product_id": "chair-ergomesh-pro",
+      "product_id": "seed-office-004",
       "period_start": "2026-04-01",
       "period_end": "2026-04-17",
       "units_sold": 19,
@@ -272,7 +272,7 @@
       "assistant_mode": "support",
       "reply_style": "short",
       "expected_product_ids": ["watch-trailmark-pro", "watch-pulseline-lite"],
-      "forbidden_product_ids": ["headphones-auralite-flex", "chair-ergomesh-pro"]
+      "forbidden_product_ids": ["seed-audio-001", "seed-office-004"]
     },
     {
       "label": "Premium headphones",
@@ -280,8 +280,8 @@
       "endpoint": "ask",
       "assistant_mode": "sales",
       "reply_style": "detailed",
-      "expected_product_ids": ["headphones-auralite-flex"],
-      "forbidden_product_ids": ["dock-hub-4k", "chair-ergomesh-pro"]
+      "expected_product_ids": ["seed-audio-001"],
+      "forbidden_product_ids": ["dock-hub-4k", "seed-office-004"]
     },
     {
       "label": "Laptop cross-sell",
@@ -290,7 +290,7 @@
       "assistant_mode": "sales",
       "reply_style": "detailed",
       "expected_product_ids": ["laptop-nimbus-14", "dock-hub-4k"],
-      "forbidden_product_ids": ["chair-ergomesh-pro"]
+      "forbidden_product_ids": ["seed-office-004"]
     },
     {
       "label": "Business restock",
@@ -298,7 +298,7 @@
       "endpoint": "agentic",
       "assistant_mode": "support",
       "reply_style": "detailed",
-      "expected_product_ids": ["mic-voxcast-usb", "watch-trailmark-pro", "chair-ergomesh-pro"],
+      "expected_product_ids": ["seed-audio-004", "watch-trailmark-pro", "seed-office-004"],
       "must_include_text": ["Business-tool read"]
     },
     {

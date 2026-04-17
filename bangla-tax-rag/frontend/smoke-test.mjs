@@ -18,10 +18,21 @@ console.log(`Status: ${inventoryStatus.status}, products=${inventoryStatus.total
 const upsertCatalog = await apiPost("/inventory/items/upsert", { items: sample.items });
 console.log(`Catalog sync: upserted=${upsertCatalog.upserted_count}, total=${upsertCatalog.total_items}`);
 
-const upsertSignals = await apiPost("/inventory/business/signals/upsert", {
+const upsertSignals = await optionalApiPost("/inventory/business/signals/upsert", {
   signals: sample.business_signals || []
 });
-console.log(`Business sync: upserted=${upsertSignals.upserted_count}, total=${upsertSignals.total_signals}`);
+if (upsertSignals.unavailable) {
+  console.log("Business sync: skipped because this server does not expose business-signal endpoints");
+} else {
+  console.log(`Business sync: upserted=${upsertSignals.upserted_count}, total=${upsertSignals.total_signals}`);
+}
+
+const syncStatus = await optionalApiGet("/inventory/sync/status");
+if (syncStatus.unavailable) {
+  console.log("Sync status: skipped because this server does not expose sync-status endpoint");
+} else {
+  console.log(`Sync status: catalog=${syncStatus.catalog_count}, vector=${syncStatus.vector_record_count}`);
+}
 
 const normalAnswer = await apiPost("/inventory/ask", {
   question: "show me smart watches under 250",
@@ -31,6 +42,19 @@ const normalAnswer = await apiPost("/inventory/ask", {
   answer_engine: "auto"
 });
 printAnswer("Normal chat", normalAnswer);
+
+const scopedComparison = await apiPost("/inventory/ask", {
+  question: "Between these two ErgoMesh Pro Chair records, which one should I buy?",
+  assistant_mode: "sales",
+  reply_style: "detailed",
+  top_k: 6,
+  answer_engine: "auto",
+  filters: {
+    product_ids: ["seed-office-004", "chair-ergomesh-pro"]
+  },
+  focused_product_ids: ["seed-office-004", "chair-ergomesh-pro"]
+});
+printAnswer("Scoped comparison", scopedComparison);
 
 const agenticAnswer = await apiPost("/inventory/agentic/ask", {
   question: "which products should I restock first and why?",
@@ -72,6 +96,28 @@ async function apiPost(path, body) {
   return parseApiResponse(response);
 }
 
+async function optionalApiGet(path) {
+  try {
+    return await apiGet(path);
+  } catch (error) {
+    if (error.status === 404) {
+      return { unavailable: true, endpoint: path, message: error.message };
+    }
+    throw error;
+  }
+}
+
+async function optionalApiPost(path, body) {
+  try {
+    return await apiPost(path, body);
+  } catch (error) {
+    if (error.status === 404) {
+      return { unavailable: true, endpoint: path, message: error.message };
+    }
+    throw error;
+  }
+}
+
 function buildHeaders() {
   return {
     Accept: "application/json",
@@ -85,7 +131,9 @@ async function parseApiResponse(response) {
   const data = text ? JSON.parse(text) : {};
   if (!response.ok) {
     const message = data?.detail?.message || data?.detail?.error || data?.message || response.statusText;
-    throw new Error(`${response.status} ${message}`);
+    const error = new Error(`${response.status} ${message}`);
+    error.status = response.status;
+    throw error;
   }
   return data;
 }
@@ -100,7 +148,11 @@ function printAnswer(label, response) {
     ...(response.cross_sell_product_ids || []),
     ...(response.hits || []).map((hit) => hit.product_id)
   ];
-  console.log(`${label}: hits=${response.total_hits ?? 0}, confidence=${Math.round((response.confidence_score || 0) * 100)}%, trace=${response.trace_id || "none"}`);
+  console.log(
+    `${label}: hits=${response.total_hits ?? 0}, engine=${response.answer_engine || "unknown"}, confidence=${Math.round(
+      (response.confidence_score || 0) * 100
+    )}%, trace=${response.trace_id || "none"}`
+  );
   console.log(`Products: ${Array.from(new Set(productIds)).slice(0, 6).join(", ") || "none"}`);
   console.log(`Answer: ${String(response.answer || "").slice(0, 260)}`);
 }

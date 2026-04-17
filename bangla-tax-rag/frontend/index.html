@@ -68,21 +68,29 @@
               Mode
               <select id="assistantMode">
                 <option value="support">Support</option>
-                <option value="sales">Sales</option>
+                <option value="sales" selected>Sales</option>
               </select>
             </label>
             <label>
               Reply
               <select id="replyStyle">
                 <option value="short">Short</option>
-                <option value="detailed">Detailed</option>
+                <option value="detailed" selected>Detailed</option>
               </select>
             </label>
             <label>
               Path
               <select id="endpointMode">
                 <option value="ask">Normal RAG</option>
-                <option value="agentic">Agentic</option>
+                <option value="agentic" selected>Agentic</option>
+              </select>
+            </label>
+            <label>
+              Engine
+              <select id="answerEngine">
+                <option value="auto" selected>Auto</option>
+                <option value="natural">Natural</option>
+                <option value="deterministic">Deterministic</option>
               </select>
             </label>
           </div>

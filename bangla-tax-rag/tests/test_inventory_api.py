@@ -504,6 +504,33 @@ async def test_inventory_support_mode_handles_small_talk_without_searching(monke
 
 
 @pytest.mark.anyio
+async def test_inventory_agentic_mode_handles_small_talk_without_searching(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/inventory/agentic/ask",
+            json={
+                "question": "hello",
+                "assistant_mode": "sales",
+                "reply_style": "detailed",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["execution_path"] == "inventory_agentic_conversation"
+    assert payload["retrieval_steps_used"] == 0
+    assert payload["total_hits"] == 0
+    assert payload["recommended_product_ids"] == []
+    assert "recommend the right product" in payload["answer"].lower()
+    assert "retrieval and agentic tool use were skipped" in " ".join(payload["reasoning_summary"]).lower()
+
+
+@pytest.mark.anyio
 async def test_inventory_route_prefers_normal_rag_for_direct_catalog_question(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     from app.api import routes_inventory
 

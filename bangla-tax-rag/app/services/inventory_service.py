@@ -942,6 +942,73 @@ class InventoryService:
         trace_id = str(uuid4())
         reasoning_summary: list[str] = []
         missing_facts: list[str] = []
+        conversational_reply = self._build_conversational_reply(
+            question=request.question,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+        )
+        if conversational_reply is not None:
+            reply, confidence_score = conversational_reply
+            reply = self._enrich_reply_plan(
+                reply=reply,
+                question=request.question,
+                filters=request.filters,
+                hits=[],
+                strategy="conversation",
+            )
+            reasoning_summary.append("Handled as conversational small talk; retrieval and agentic tool use were skipped.")
+            response = InventoryAgenticResponse(
+                status="success",
+                question=request.question,
+                answer=reply.answer,
+                assistant_mode=request.assistant_mode,
+                reply_style=request.reply_style,
+                answer_engine="deterministic",
+                execution_path="inventory_agentic_conversation",
+                confidence_score=confidence_score,
+                abstained=False,
+                abstention_reason=None,
+                trace_id=trace_id,
+                reasoning_summary=reasoning_summary,
+                missing_facts=[],
+                retrieval_steps_used=0,
+                total_hits=0,
+                applied_filters=request.filters.model_copy(deep=True),
+                hits=[],
+                recommended_product_ids=reply.recommended_product_ids,
+                cross_sell_product_ids=reply.cross_sell_product_ids,
+                follow_up_question=reply.follow_up_question,
+                answer_plan=reply.answer_plan,
+                verification=reply.verification,
+                memory_resolution=InventoryMemoryResolution(),
+            )
+            trace_payload = {
+                "trace_id": trace_id,
+                "question": request.question,
+                "assistant_mode": request.assistant_mode,
+                "reply_style": request.reply_style,
+                "execution_path": "inventory_agentic_conversation",
+                "reasoning_summary": reasoning_summary,
+                "missing_facts": [],
+                "retrieval_steps": [],
+                "final_answer": response.answer,
+                "confidence_score": confidence_score,
+            }
+            self.trace_store.save(trace_payload)
+            self._save_inventory_chat_trace(
+                trace_id=trace_id,
+                response=response,
+                execution_path="inventory_agentic_conversation",
+                started_at=started_at,
+                requested_answer_engine=request.answer_engine,
+                retrieved_hits=[],
+                reranked_hits=[],
+                reasoning_summary=reasoning_summary,
+                missing_facts=[],
+                retrieval_steps=[],
+            )
+            return response
+
         business_signals = self._load_business_signals()
         business_domains = self._business_domains_available(business_signals)
         available_data_domains = sorted(set(request.available_data_domains).union(business_domains))

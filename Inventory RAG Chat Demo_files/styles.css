@@ -1,0 +1,377 @@
+:root {
+  --ink: #17211b;
+  --muted: #647067;
+  --paper: #fbf7ec;
+  --panel: #fffdf6;
+  --line: #e2dac8;
+  --green: #235d4d;
+  --green-soft: #dff0e4;
+  --gold: #c8892b;
+  --rust: #ad5634;
+  --shadow: 0 24px 80px rgba(40, 47, 34, 0.14);
+  font-family: "Aptos", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(200, 137, 43, 0.18), transparent 28rem),
+    linear-gradient(135deg, #f9f2df 0%, #f3f7ee 52%, #e9f0ec 100%);
+  min-height: 100vh;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  color: white;
+  background: var(--green);
+  padding: 0.78rem 1.1rem;
+  cursor: pointer;
+  font-weight: 700;
+  box-shadow: 0 12px 30px rgba(35, 93, 77, 0.22);
+}
+
+button.secondary {
+  color: var(--green);
+  background: var(--green-soft);
+  box-shadow: none;
+}
+
+button.accent {
+  background: var(--rust);
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 0.8rem 0.95rem;
+  background: white;
+  color: var(--ink);
+  outline: none;
+}
+
+input:focus,
+select:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 4px rgba(35, 93, 77, 0.12);
+}
+
+.shell {
+  width: min(1480px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 32px 0 56px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 360px);
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 22px;
+}
+
+.hero h1 {
+  max-width: 900px;
+  margin: 0;
+  font-size: clamp(2.35rem, 5vw, 5.6rem);
+  line-height: 0.92;
+  letter-spacing: -0.075em;
+}
+
+.hero-copy {
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 1.08rem;
+  line-height: 1.65;
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--rust);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 0.76rem;
+}
+
+.hero-card,
+.panel {
+  background: rgba(255, 253, 246, 0.9);
+  border: 1px solid rgba(226, 218, 200, 0.8);
+  border-radius: 30px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.hero-card {
+  padding: 24px;
+  display: grid;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #9ca39d;
+  box-shadow: 0 0 0 8px rgba(156, 163, 157, 0.16);
+}
+
+.status-dot.good {
+  background: #2f8f58;
+  box-shadow: 0 0 0 8px rgba(47, 143, 88, 0.16);
+}
+
+.status-dot.bad {
+  background: #c54531;
+  box-shadow: 0 0 0 8px rgba(197, 69, 49, 0.16);
+}
+
+.panel {
+  padding: 22px;
+}
+
+.setup-panel {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.1fr) minmax(240px, 0.9fr) auto;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 22px;
+}
+
+.field label,
+.chat-controls label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.warning {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: 22px;
+  margin-bottom: 22px;
+}
+
+.bottom-grid {
+  grid-template-columns: 0.95fr 1.05fr;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.section-title h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  letter-spacing: -0.025em;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  color: var(--green);
+  background: var(--green-soft);
+  padding: 0.42rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.product-list {
+  display: grid;
+  gap: 10px;
+  max-height: 650px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.product-card,
+.hit-card,
+.test-card {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: white;
+  padding: 14px;
+}
+
+.product-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.product-card strong,
+.hit-card strong {
+  display: block;
+}
+
+.product-card small,
+.hit-card small,
+.test-card small {
+  color: var(--muted);
+}
+
+.product-card span {
+  font-weight: 900;
+  color: var(--green);
+  white-space: nowrap;
+}
+
+.chat-panel {
+  min-height: 720px;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+}
+
+.chat-controls {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.messages {
+  min-height: 380px;
+  max-height: 610px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-right: 4px;
+}
+
+.message {
+  max-width: 86%;
+  padding: 15px 16px;
+  border-radius: 22px;
+  line-height: 1.52;
+}
+
+.message.user {
+  align-self: flex-end;
+  color: white;
+  background: var(--green);
+  border-bottom-right-radius: 6px;
+}
+
+.message.bot {
+  align-self: flex-start;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 6px;
+}
+
+.message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.hits {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.hit-card {
+  display: grid;
+  gap: 5px;
+  background: #fdfcf7;
+}
+
+.chat-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.test-results {
+  display: grid;
+  gap: 12px;
+}
+
+.test-card {
+  display: grid;
+  gap: 8px;
+}
+
+.test-card.pass {
+  border-color: rgba(47, 143, 88, 0.4);
+  background: #f5fbf6;
+}
+
+.test-card.fail {
+  border-color: rgba(197, 69, 49, 0.42);
+  background: #fff7f4;
+}
+
+.trace-output {
+  min-height: 460px;
+  max-height: 640px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #17211b;
+  color: #e9f0ec;
+  border-radius: 24px;
+  padding: 18px;
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 980px) {
+  .hero,
+  .grid,
+  .bottom-grid,
+  .setup-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .message {
+    max-width: 100%;
+  }
+}

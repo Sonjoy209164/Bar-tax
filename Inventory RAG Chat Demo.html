@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<!-- saved from url=(0020)http://0.0.0.0:5173/ -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Inventory RAG Chat Demo</title>
+    <link rel="stylesheet" href="./Inventory RAG Chat Demo_files/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Inventory RAG Demo</p>
+          <h1>Test the ecommerce chatbot against a small product JSON.</h1>
+          <p class="hero-copy">
+            Sync sample products into the live RAG API, chat with support or sales mode, run quality checks, and inspect traces without adding a separate backend.
+          </p>
+        </div>
+        <div class="hero-card">
+          <span class="status-dot good" id="connectionDot"></span>
+          <strong id="connectionLabel">Sample JSON synced</strong>
+          <small id="connectionDetail">8 products synced; business signal endpoint unavailable on this server; sync-status endpoint unavailable.</small>
+        </div>
+      </section>
+
+      <section class="panel setup-panel">
+        <div class="field">
+          <label for="apiBaseUrl">RAG API base URL</label>
+          <input id="apiBaseUrl" value="http://localhost:4893" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="apiKey">API key, if enabled</label>
+          <input id="apiKey" type="password" placeholder="X-API-Key" spellcheck="false">
+        </div>
+        <div class="button-row">
+          <button id="saveSettingsButton">Save Settings</button>
+          <button id="checkStatusButton" class="secondary">Check Status</button>
+          <button id="syncCatalogButton" class="accent">Sync Sample JSON</button>
+        </div>
+        <p class="warning">
+          Demo only: this static page calls the RAG API directly, so do not use a production secret here. In production, call RAG through Express.
+        </p>
+      </section>
+
+      <section class="grid">
+        <aside class="panel catalog-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Sample Data</p>
+              <h2>Products</h2>
+            </div>
+            <span class="pill" id="productCount">8 products</span>
+          </div>
+          <div id="productList" class="product-list">
+      <article class="product-card">
+        <div>
+          <strong data-name="">TrailMark Pro Smart Watch</strong>
+          <small data-meta="">Wearables · WAT-TRM-001 · stock 6</small>
+        </div>
+        <span data-price="">USD 219.00</span>
+      </article>
+    
+      <article class="product-card">
+        <div>
+          <strong data-name="">PulseLine Lite Watch</strong>
+          <small data-meta="">Wearables · WAT-PLS-002 · stock 18</small>
+        </div>
+        <span data-price="">USD 129.00</span>
+      </article>
+    
+      <article class="product-card">
+        <div>
+          <strong data-name="">Auralite Flex ANC Headphones</strong>
+          <small data-meta="">Audio · AUD-HP-001 · stock 14</small>
+        </div>
+        <span data-price="">USD 249.00</span>
+      </article>
+    
+      <article class="product-card">
+        <div>
+          <strong data-name="">EchoWave Studio Earbuds</strong>
+          <small data-meta="">Audio · AUD-EB-002 · stock 22</small>
+        </div>
+        <span data-price="">USD 119.00</span>
+      </article>
+    
+      <article class="product-card">
+        <div>
+          <strong data-name="">VoxCast USB Podcast Microphone</strong>
+          <small data-meta="">Audio · AUD-MIC-004 · stock 3</small>
+        </div>
+        <span data-price="">USD 159.00</span>
+      </article>
+    
+      <article class="product-card">
+        <div>
+          <strong data-name="">Nimbus 14 Business Ultrabook</strong>
+          <small data-meta="">Computing · CMP-LTP-014 · stock 9</small>
+        </div>
+        <span data-price="">USD 1199.00</span>
+      </article>
+    
+      <article class="product-card">
+        <div>
+          <strong data-name="">DockHub 4K Triple Display Station</strong>
+          <small data-meta="">Computing · CMP-DCK-004 · stock 11</small>
+        </div>
+        <span data-price="">USD 229.00</span>
+      </article>
+    
+      <article class="product-card">
+        <div>
+          <strong data-name="">ErgoMesh Pro Chair</strong>
+          <small data-meta="">Office · OFF-CHR-004 · stock 4</small>
+        </div>
+        <span data-price="">USD 549.00</span>
+      </article>
+    </div>
+        </aside>
+
+        <section class="panel chat-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Chatbot</p>
+              <h2>Ask Inventory AI</h2>
+            </div>
+            <span class="pill" id="lastTraceId">Trace 52576f91</span>
+          </div>
+
+          <div class="chat-controls">
+            <label>
+              Mode
+              <select id="assistantMode">
+                <option value="support">Support</option>
+                <option value="sales" selected="">Sales</option>
+              </select>
+            </label>
+            <label>
+              Reply
+              <select id="replyStyle">
+                <option value="short">Short</option>
+                <option value="detailed" selected="">Detailed</option>
+              </select>
+            </label>
+            <label>
+              Path
+              <select id="endpointMode">
+                <option value="ask">Normal RAG</option>
+                <option value="agentic" selected="">Agentic</option>
+              </select>
+            </label>
+            <label>
+              Engine
+              <select id="answerEngine">
+                <option value="auto" selected="">Auto</option>
+                <option value="natural">Natural</option>
+                <option value="deterministic">Deterministic</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="messages" class="messages"><article class="message bot"><div>Load the sample JSON into the RAG API, then ask me about watches, headphones, bundles, stockout risk, or margins.</div></article><article class="message user"><div>hello</div></article><article class="message bot"><div>I would start by recommending Auralite Flex ANC Headphones. It is the strongest overall match from the current catalog. The current price is USD 249.00. It currently has 14 unit(s) in stock. It sits in Audio under Auralite. The product description highlights Wireless over-ear headphones with active noise cancellation for focused office calls and travel. Structured details include connectivity: Bluetooth 5.3; battery life: 35 hours; use case: office calls. If the customer wants an alternative, I would show Auralite Flex ANC Headphones next at USD 249.00. I am keeping this recommendation grounded in the current catalog only, so I am not claiming anything that is not in the stored product data. Are we selling into Audio? Also tell me whether the buyer cares more about budget, premium feel, or immediate availability.</div><div class="message-meta">
+      <span class="pill">deterministic</span>
+      <span class="pill">confidence 80%</span>
+      
+      <span class="pill">trace 8657c37d</span>
+    </div><div class="hits"><article class="hit-card">
+    <strong>Auralite Flex ANC Headphones</strong>
+    <small>AUD-HP-001 · Audio · stock 14</small>
+    <small>USD 249.00 · match 61%</small>
+  </article><article class="hit-card">
+    <strong>Auralite Flex ANC Headphones</strong>
+    <small>AUD-HP-001 · Audio · stock 14</small>
+    <small>USD 249.00 · match 61%</small>
+  </article><article class="hit-card">
+    <strong>TrailMark Pro Smart Watch</strong>
+    <small>WAT-TRM-001 · Wearables · stock 6</small>
+    <small>USD 219.00 · match 59%</small>
+  </article><article class="hit-card">
+    <strong>PulseLine Lite Watch</strong>
+    <small>WAT-PLS-002 · Wearables · stock 18</small>
+    <small>USD 129.00 · match 58%</small>
+  </article></div></article><article class="message user"><div>hello</div></article><article class="message bot"><div>I found 5 matching product(s). The strongest matches are Auralite Flex ANC Headphones (USD 249.00, 14 in stock, Auralite), Auralite Flex ANC Headphones (USD 249.00, 14 in stock, Auralite), and TrailMark Pro Smart Watch (USD 219.00, 6 in stock, TrailMark). There are 2 more relevant option(s) behind those. Are you looking for Audio and Wearables? If you also tell me your budget or preferred brand, I can narrow it down.</div><div class="message-meta">
+      <span class="pill">deterministic</span>
+      <span class="pill">confidence 80%</span>
+      
+      <span class="pill">trace 52576f91</span>
+    </div><div class="hits"><article class="hit-card">
+    <strong>Auralite Flex ANC Headphones</strong>
+    <small>AUD-HP-001 · Audio · stock 14</small>
+    <small>USD 249.00 · match 61%</small>
+  </article><article class="hit-card">
+    <strong>Auralite Flex ANC Headphones</strong>
+    <small>AUD-HP-001 · Audio · stock 14</small>
+    <small>USD 249.00 · match 61%</small>
+  </article><article class="hit-card">
+    <strong>TrailMark Pro Smart Watch</strong>
+    <small>WAT-TRM-001 · Wearables · stock 6</small>
+    <small>USD 219.00 · match 59%</small>
+  </article><article class="hit-card">
+    <strong>PulseLine Lite Watch</strong>
+    <small>WAT-PLS-002 · Wearables · stock 18</small>
+    <small>USD 129.00 · match 58%</small>
+  </article></div></article></div>
+
+          <form id="chatForm" class="chat-form">
+            <input id="questionInput" placeholder="Ask about watches, headphones, restock, margins..." autocomplete="off">
+            <button type="submit">Ask</button>
+          </form>
+        </section>
+      </section>
+
+      <section class="grid bottom-grid">
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Quality Page</p>
+              <h2>Run Test Questions</h2>
+            </div>
+            <button id="runTestsButton" class="secondary">Run Tests</button>
+          </div>
+          <div id="testResults" class="test-results"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Debug</p>
+              <h2>Trace Inspector</h2>
+            </div>
+            <button id="loadTraceButton" class="secondary">Load Last Trace</button>
+          </div>
+          <pre id="traceOutput" class="trace-output">{
+  "upsertCatalog": {
+    "status": "success",
+    "upserted_count": 8,
+    "rag_enabled_count": 8,
+    "total_items": 68,
+    "namespace": "inventory",
+    "catalog_path": "data/inventory/catalog.jsonl"
+  },
+  "upsertBusiness": {
+    "status": "unavailable",
+    "unavailable": true,
+    "endpoint": "/inventory/business/signals/upsert",
+    "message": "404 Not Found"
+  },
+  "syncStatus": {
+    "status": "unavailable",
+    "unavailable": true,
+    "endpoint": "/inventory/sync/status",
+    "message": "404 Not Found"
+  }
+}</pre>
+        </section>
+      </section>
+    </main>
+
+    <template id="productTemplate"></template>
+
+    <script type="module" src="./Inventory RAG Chat Demo_files/app.js"></script>
+  
+
+</body></html>

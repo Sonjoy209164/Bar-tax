@@ -25,6 +25,8 @@ Open:
 http://localhost:5173
 ```
 
+Do not test from a browser-saved `Inventory RAG Chat Demo.html` file. That is only a snapshot and can keep old JavaScript and old chat messages. Use the local server URL above and hard refresh after code changes.
+
 Use the RAG API base URL:
 
 ```text
@@ -67,6 +69,22 @@ node frontend/smoke-test.mjs
 ```
 
 It checks API status, syncs the sample JSON, asks one normal chat question, and asks one agentic business question.
+If the deployed API does not expose newer helper endpoints such as business signals or sync status yet, the smoke test skips those steps and still validates catalog chat.
+
+## Best Chat Settings
+
+For product recommendations like "which one should I buy?", use:
+
+```text
+Mode: Sales
+Reply: Detailed
+Path: Agentic
+Engine: Auto
+```
+
+Use `Engine: Natural` only when the RAG server has a working LLM generation provider. If the response badge still says `deterministic`, the server is falling back to rule-based answers.
+
+The page now keeps recent product context and sends `focused_product_ids` plus `filters.product_ids` when it detects pasted SKUs/product names, so follow-ups like "which one should I buy?" stay scoped to the products currently being discussed.
 
 ## Data Format
 

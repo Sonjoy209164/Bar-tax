@@ -90,13 +90,13 @@ These look attractive but will not solve the core intelligence problem yet:
 
 ## Phase 1: Measurement First
 
-- [ ] Create `evaluation/commerce_questions.jsonl`.
-- [ ] Add 100 seed questions across key categories.
-- [ ] Add expected primary product IDs.
-- [ ] Add acceptable alternative product IDs.
-- [ ] Add forbidden product IDs.
-- [ ] Add `must_abstain` labels.
-- [ ] Add required metadata fields.
+- [x] Create `evaluation/commerce_questions.jsonl`.
+- [x] Add 100 seed questions across key categories.
+- [x] Add expected primary product IDs.
+- [x] Add acceptable alternative product IDs.
+- [x] Add forbidden product IDs.
+- [x] Add `must_abstain` labels.
+- [x] Add required metadata fields.
 - [ ] Create `evaluation/run_inventory_eval.py`.
 - [ ] Create `evaluation/metrics.py`.
 - [ ] Track wrong-category recommendation rate.
@@ -526,9 +526,9 @@ Every bad answer can be debugged from retrieval to final response.
 - [x] Move catalog mirror away from JSONL for production.
 - [x] Use Postgres mirror table or durable document store.
 - [x] Use Qdrant/Milvus/Pinecone for vector retrieval.
-- [ ] Add rate limiting.
+- [x] Add rate limiting.
 - [ ] Add HTTPS.
-- [ ] Add key rotation.
+- [x] Add key rotation.
 - [ ] Add streaming response support.
 - [ ] Add model timeout fallback strategy.
 - [ ] Add generated TypeScript client from OpenAPI.

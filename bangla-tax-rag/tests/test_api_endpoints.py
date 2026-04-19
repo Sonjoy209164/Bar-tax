@@ -12,6 +12,21 @@ def _configure_api_key(monkeypatch: pytest.MonkeyPatch, api_key: str = "test-api
     return api_key
 
 
+def _configure_rotated_api_keys(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    primary_key: str = "primary-key",
+    rotated_keys: str = "legacy-key,next-key",
+) -> tuple[str, str, str]:
+    from app.core.settings import get_settings
+
+    monkeypatch.setenv("API_ACCESS_KEY", primary_key)
+    monkeypatch.setenv("API_ACCESS_KEYS", rotated_keys)
+    get_settings.cache_clear()
+    legacy_key, next_key = [value.strip() for value in rotated_keys.split(",")]
+    return primary_key, legacy_key, next_key
+
+
 @pytest.mark.anyio
 async def test_health_endpoint() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -172,6 +187,46 @@ async def test_protected_routes_require_api_key_when_configured(monkeypatch: pyt
     assert config_forbidden.status_code == 403
     assert query_forbidden.status_code == 403
     assert config_allowed.status_code == 200
+
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_protected_routes_accept_rotated_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.settings import get_settings
+
+    primary_key, legacy_key, next_key = _configure_rotated_api_keys(monkeypatch)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        legacy_response = await client.get("/config", headers={"X-API-Key": legacy_key})
+        primary_response = await client.get("/config", headers={"X-API-Key": primary_key})
+        next_response = await client.get("/config", headers={"X-API-Key": next_key})
+
+    assert legacy_response.status_code == 200
+    assert primary_response.status_code == 200
+    assert next_response.status_code == 200
+
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_protected_routes_rate_limit_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.settings import get_settings
+
+    api_key = _configure_api_key(monkeypatch)
+    monkeypatch.setenv("API_RATE_LIMIT_REQUESTS", "2")
+    monkeypatch.setenv("API_RATE_LIMIT_WINDOW_SECONDS", "60")
+    get_settings.cache_clear()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first_response = await client.get("/config", headers={"X-API-Key": api_key})
+        second_response = await client.get("/config", headers={"X-API-Key": api_key})
+        third_response = await client.get("/config", headers={"X-API-Key": api_key})
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert third_response.status_code == 429
+    assert third_response.json()["detail"]["error"] == "rate_limited"
+    assert third_response.json()["detail"]["retry_after_seconds"] >= 1
 
     get_settings.cache_clear()
 

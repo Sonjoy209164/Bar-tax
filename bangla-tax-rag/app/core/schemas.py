@@ -315,6 +315,10 @@ class BuildIndexResponse(BaseModel):
 class ConfigResponse(BaseModel):
     app_name: str
     app_env: str
+    api_auth_enabled: bool = False
+    api_key_rotation_enabled: bool = False
+    api_rate_limit_requests: int = 0
+    api_rate_limit_window_seconds: int = 60
     raw_data_dir: str
     processed_data_dir: str
     sparse_index_dir: str

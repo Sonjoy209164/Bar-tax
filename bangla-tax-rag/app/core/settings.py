@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     app_port: int = Field(default=4893, alias="APP_PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     api_access_key: str | None = Field(default=None, alias="API_ACCESS_KEY")
+    api_access_keys_raw: str | None = Field(default=None, alias="API_ACCESS_KEYS")
+    api_rate_limit_requests: int = Field(default=0, alias="API_RATE_LIMIT_REQUESTS")
+    api_rate_limit_window_seconds: int = Field(default=60, alias="API_RATE_LIMIT_WINDOW_SECONDS")
     config_path: str = Field(default="config/config.dev.yaml", alias="CONFIG_PATH")
     raw_data_dir: str = Field(default="data/raw", alias="RAW_DATA_DIR")
     processed_data_dir: str = Field(default="data/processed", alias="PROCESSED_DATA_DIR")
@@ -80,10 +83,31 @@ class Settings(BaseSettings):
         with config_file.open("r", encoding="utf-8") as handle:
             return yaml.safe_load(handle) or {}
 
+    def accepted_api_keys(self) -> tuple[str, ...]:
+        keys: list[str] = []
+
+        for raw_value in (self.api_access_key, self.api_access_keys_raw):
+            if not raw_value:
+                continue
+
+            normalized_candidates = raw_value.replace("\n", ",").split(",")
+
+            for candidate in normalized_candidates:
+                normalized = candidate.strip()
+                if normalized and normalized not in keys:
+                    keys.append(normalized)
+
+        return tuple(keys)
+
     def non_secret_config(self) -> dict:
+        accepted_api_keys = self.accepted_api_keys()
         return {
             "app_name": self.app_name,
             "app_env": self.app_env,
+            "api_auth_enabled": bool(accepted_api_keys),
+            "api_key_rotation_enabled": len(accepted_api_keys) > 1,
+            "api_rate_limit_requests": self.api_rate_limit_requests,
+            "api_rate_limit_window_seconds": self.api_rate_limit_window_seconds,
             "raw_data_dir": self.raw_data_dir,
             "processed_data_dir": self.processed_data_dir,
             "agentic_store_dir": self.agentic_store_dir,

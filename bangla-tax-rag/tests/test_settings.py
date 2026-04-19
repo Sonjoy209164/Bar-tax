@@ -44,3 +44,19 @@ vector_store:
     assert settings.top_k == 9
     assert settings.vector_db == "local"
     get_settings.cache_clear()
+
+
+def test_settings_support_rotated_api_keys(monkeypatch) -> None:
+    monkeypatch.setenv("API_ACCESS_KEY", "primary-key")
+    monkeypatch.setenv("API_ACCESS_KEYS", "legacy-key, next-key, primary-key\nfuture-key")
+    get_settings.cache_clear()
+
+    settings = get_settings()
+
+    assert settings.accepted_api_keys() == (
+        "primary-key",
+        "legacy-key",
+        "next-key",
+        "future-key",
+    )
+    get_settings.cache_clear()

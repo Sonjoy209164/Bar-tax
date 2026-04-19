@@ -75,6 +75,7 @@ const agenticAnswer = await apiPost("/inventory/agentic/ask", {
   ]
 });
 printAnswer("Agentic chat", agenticAnswer);
+await printTraceProbe("Agentic trace", agenticAnswer.trace_id, "inventory_agentic");
 
 async function readJson(url) {
   return JSON.parse(await readFile(url, "utf-8"));
@@ -105,6 +106,52 @@ async function optionalApiGet(path) {
     }
     throw error;
   }
+}
+
+async function printTraceProbe(label, traceId, traceHint) {
+  if (!traceId) {
+    console.log(`${label}: no trace id returned`);
+    return;
+  }
+  const result = await apiGetFirstAvailableTrace(traceId, traceHint);
+  if (result.unavailable) {
+    console.log(`${label}: unavailable`);
+    return;
+  }
+  console.log(`${label}: loaded from ${result.endpoint}`);
+}
+
+async function apiGetFirstAvailableTrace(traceId, traceHint) {
+  const candidateEndpoints = buildTraceEndpointCandidates(traceId, traceHint);
+  let lastUnavailable = null;
+  for (const endpoint of candidateEndpoints) {
+    const payload = await optionalApiGet(endpoint);
+    if (!payload.unavailable) {
+      return { endpoint, payload, unavailable: false };
+    }
+    lastUnavailable = payload;
+  }
+  return {
+    unavailable: true,
+    message: lastUnavailable?.message || "no trace endpoint available"
+  };
+}
+
+function buildTraceEndpointCandidates(traceId, traceHint) {
+  const encodedTraceId = encodeURIComponent(traceId);
+  const preferAgentic =
+    String(traceHint || "").includes("inventory_agentic") ||
+    String(traceHint || "").includes("agentic") ||
+    traceHint === "agentic";
+  return preferAgentic
+    ? [
+        `/inventory/agentic/trace/${encodedTraceId}`,
+        `/inventory/chat/trace/${encodedTraceId}`
+      ]
+    : [
+        `/inventory/chat/trace/${encodedTraceId}`,
+        `/inventory/agentic/trace/${encodedTraceId}`
+      ];
 }
 
 async function optionalApiPost(path, body) {

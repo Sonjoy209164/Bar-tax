@@ -3,6 +3,7 @@ const state = {
   apiKey: sessionStorage.getItem("inventoryDemo.apiKey") || "",
   sampleData: null,
   lastTraceId: null,
+  lastTraceHint: null,
   recentHits: [],
   conversationHistory: [],
   focusedProductIds: [],
@@ -211,6 +212,7 @@ async function askQuestion({ question, endpoint, assistant_mode, reply_style, an
     const response = await apiPost(path, payload);
     response.demo_scope = requestContext;
     state.lastTraceId = response.trace_id || null;
+    state.lastTraceHint = response.execution_path || (endpoint === "agentic" ? "inventory_agentic" : "inventory_ask");
     elements.lastTraceId.textContent = state.lastTraceId ? `Trace ${shortId(state.lastTraceId)}` : "No trace";
     if (render) {
       addMessage("bot", response.answer, response);
@@ -249,10 +251,44 @@ async function loadTrace(traceId, options = {}) {
     }
     return;
   }
-  await withBusy(async () => {
-    const trace = await apiGet(`/inventory/chat/trace/${encodeURIComponent(traceId)}`);
-    elements.traceOutput.textContent = JSON.stringify(trace, null, 2);
-  }, "Trace load failed", options);
+  if (state.busy) {
+    return;
+  }
+
+  state.busy = true;
+  setButtonsDisabled(true);
+  try {
+    const traceResult = await apiGetFirstAvailableTrace(
+      traceId,
+      options.traceHint || state.lastTraceHint || elements.endpointMode.value
+    );
+    if (traceResult.unavailable) {
+      if (!options.quiet) {
+        setConnection("neutral", "Trace unavailable", traceResult.message);
+        elements.traceOutput.textContent = traceResult.message;
+      }
+      return;
+    }
+    if (!options.quiet) {
+      setConnection("good", "Trace loaded", `Loaded from ${traceResult.endpoint}.`);
+    }
+    elements.traceOutput.textContent = JSON.stringify(
+      {
+        loaded_from_endpoint: traceResult.endpoint,
+        payload: traceResult.payload
+      },
+      null,
+      2
+    );
+  } catch (error) {
+    setConnection("bad", "Trace load failed", error.message);
+    if (!options.quiet) {
+      elements.traceOutput.textContent = `Trace load failed: ${error.message}`;
+    }
+  } finally {
+    state.busy = false;
+    setButtonsDisabled(false);
+  }
 }
 
 function renderProducts() {
@@ -536,6 +572,22 @@ async function apiPost(path, body) {
   return parseApiResponse(response);
 }
 
+async function apiGetFirstAvailableTrace(traceId, traceHint) {
+  const candidateEndpoints = buildTraceEndpointCandidates(traceId, traceHint);
+  let lastUnavailable = null;
+  for (const endpoint of candidateEndpoints) {
+    const payload = await optionalApiGet(endpoint);
+    if (!payload.unavailable) {
+      return { endpoint, payload, unavailable: false };
+    }
+    lastUnavailable = payload;
+  }
+  return {
+    unavailable: true,
+    message: lastUnavailable?.message || "This deployed server does not expose a compatible trace endpoint for this response yet."
+  };
+}
+
 async function optionalApiGet(path) {
   try {
     return await apiGet(path);
@@ -545,6 +597,24 @@ async function optionalApiGet(path) {
     }
     throw error;
   }
+}
+
+function buildTraceEndpointCandidates(traceId, traceHint) {
+  const encodedTraceId = encodeURIComponent(traceId);
+  const preferAgentic =
+    String(traceHint || "").includes("inventory_agentic") ||
+    String(traceHint || "").includes("agentic") ||
+    traceHint === "agentic";
+  const ordered = preferAgentic
+    ? [
+        `/inventory/agentic/trace/${encodedTraceId}`,
+        `/inventory/chat/trace/${encodedTraceId}`
+      ]
+    : [
+        `/inventory/chat/trace/${encodedTraceId}`,
+        `/inventory/agentic/trace/${encodedTraceId}`
+      ];
+  return dedupe(ordered);
 }
 
 async function optionalApiPost(path, body) {

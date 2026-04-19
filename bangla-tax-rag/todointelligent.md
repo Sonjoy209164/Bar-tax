@@ -474,7 +474,7 @@ Add endpoints:
 
 - [x] `GET /inventory/sync/status`
 - [x] `POST /inventory/sync/validate`
-- [ ] `POST /inventory/sync/rebuild`
+- [x] `POST /inventory/sync/rebuild`
 
 Validation:
 
@@ -530,7 +530,7 @@ Every bad answer can be debugged from retrieval to final response.
 - [ ] Add HTTPS.
 - [x] Add key rotation.
 - [ ] Add streaming response support.
-- [ ] Add model timeout fallback strategy.
+- [x] Add model timeout fallback strategy.
 - [ ] Add generated TypeScript client from OpenAPI.
 
 Success criteria:

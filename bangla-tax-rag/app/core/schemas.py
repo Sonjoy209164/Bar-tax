@@ -495,6 +495,24 @@ class InventorySyncValidateResponse(BaseModel):
     issues: list[InventorySyncIssue] = Field(default_factory=list)
 
 
+class InventorySyncRebuildResponse(BaseModel):
+    status: str
+    ready: bool
+    rebuilt_count: int
+    deleted_vector_count: int
+    catalog_count: int
+    rag_enabled_count: int
+    vector_record_count: int
+    vector_ids_available: bool
+    vector_synced: bool | None = None
+    missing_vector_ids: list[str] = Field(default_factory=list)
+    stale_vector_ids: list[str] = Field(default_factory=list)
+    invalid_catalog_product_ids: list[str] = Field(default_factory=list)
+    issues: list[InventorySyncIssue] = Field(default_factory=list)
+    namespace: str
+    catalog_path: str
+
+
 class InventoryBusinessSignalRecord(BaseModel):
     product_id: str = Field(..., description="Stable product identifier from PostgreSQL/source of truth.")
     period_start: str | None = Field(default=None, description="Start of the metric window.")

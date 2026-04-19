@@ -10,6 +10,7 @@ from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
+import httpx
 from pydantic import BaseModel, Field
 
 from app.core.schemas import (
@@ -42,6 +43,7 @@ from app.core.schemas import (
     InventorySearchRequest,
     InventorySearchResponse,
     InventoryStatusResponse,
+    InventorySyncRebuildResponse,
     InventorySyncIssue,
     InventorySyncStatusResponse,
     InventorySyncValidateRequest,
@@ -654,6 +656,42 @@ class InventoryService:
             issues=issues,
         )
 
+    def sync_rebuild(self) -> InventorySyncRebuildResponse:
+        catalog = self._load_catalog()
+        rag_enabled_items = [item for item in catalog.values() if item.include_in_rag]
+        rag_enabled_ids = {item.product_id for item in rag_enabled_items}
+        vector_ids = self._vector_record_ids()
+
+        deleted_vector_ids = {item.product_id for item in catalog.values() if not item.include_in_rag}
+        if vector_ids is not None:
+            deleted_vector_ids.update(vector_ids - rag_enabled_ids)
+
+        records_to_upsert = [self._build_vector_record(item) for item in rag_enabled_items]
+        deleted_vector_id_list = sorted(deleted_vector_ids)
+        if deleted_vector_id_list:
+            self.vector_store.delete(deleted_vector_id_list, namespace=self.config.namespace)
+        if records_to_upsert:
+            self.vector_store.upsert(records_to_upsert, namespace=self.config.namespace)
+
+        rebuilt_status = self.sync_status()
+        return InventorySyncRebuildResponse(
+            status="success",
+            ready=rebuilt_status.ready,
+            rebuilt_count=len(records_to_upsert),
+            deleted_vector_count=len(deleted_vector_id_list),
+            catalog_count=rebuilt_status.catalog_count,
+            rag_enabled_count=rebuilt_status.rag_enabled_count,
+            vector_record_count=rebuilt_status.vector_record_count,
+            vector_ids_available=rebuilt_status.vector_ids_available,
+            vector_synced=rebuilt_status.vector_synced,
+            missing_vector_ids=rebuilt_status.missing_vector_ids,
+            stale_vector_ids=rebuilt_status.stale_vector_ids,
+            invalid_catalog_product_ids=rebuilt_status.invalid_catalog_product_ids,
+            issues=rebuilt_status.issues,
+            namespace=self.config.namespace,
+            catalog_path=str(self._catalog_path()),
+        )
+
     def business_status(self) -> InventoryBusinessStatusResponse:
         signals = self._load_business_signals()
         return InventoryBusinessStatusResponse(
@@ -851,7 +889,7 @@ class InventoryService:
             question=request.question,
             hits=ordered_hits,
         )
-        reply, answer_engine, abstained, abstention_reason = self._finalize_inventory_reply(
+        reply, answer_engine, abstained, abstention_reason, fallback_reason = self._finalize_inventory_reply(
             question=request.question,
             assistant_mode=request.assistant_mode,
             reply_style=request.reply_style,
@@ -894,6 +932,7 @@ class InventoryService:
             requested_answer_engine=request.answer_engine,
             retrieved_hits=search_response.hits,
             reranked_hits=ordered_hits,
+            fallback_reason_override=fallback_reason,
         )
         return response
 
@@ -1177,7 +1216,7 @@ class InventoryService:
             answer_plan=final_reply.answer_plan,
             verification=final_reply.verification,
         )
-        composed_reply, answer_engine, abstained, abstention_reason = self._finalize_inventory_reply(
+        composed_reply, answer_engine, abstained, abstention_reason, fallback_reason = self._finalize_inventory_reply(
             question=request.question,
             assistant_mode=request.assistant_mode,
             reply_style=request.reply_style,
@@ -1244,6 +1283,7 @@ class InventoryService:
             reasoning_summary=reasoning_summary,
             missing_facts=missing_facts,
             retrieval_steps=retrieval_steps,
+            fallback_reason_override=fallback_reason,
         )
         return response
 
@@ -1272,13 +1312,16 @@ class InventoryService:
         reasoning_summary: list[str] | None = None,
         missing_facts: list[str] | None = None,
         retrieval_steps: list[InventoryAgenticStep] | None = None,
+        fallback_reason_override: str | None = None,
     ) -> None:
         latency_ms = round((perf_counter() - started_at) * 1000, 3)
         intent = response.answer_plan.detected_intent or response.answer_plan.intent
-        fallback_reason = self._trace_fallback_reason(
-            requested_answer_engine=requested_answer_engine,
-            response=response,
-        )
+        fallback_reason = fallback_reason_override
+        if fallback_reason is None:
+            fallback_reason = self._trace_fallback_reason(
+                requested_answer_engine=requested_answer_engine,
+                response=response,
+            )
         payload = {
             "trace_id": trace_id,
             "request_id": trace_id,
@@ -2339,7 +2382,7 @@ class InventoryService:
         reasoning_summary: list[str] | None = None,
         missing_facts: list[str] | None = None,
         memory_resolution: InventoryMemoryResolution | None = None,
-    ) -> tuple[InventoryReply, str, bool, str | None]:
+    ) -> tuple[InventoryReply, str, bool, str | None, str | None]:
         abstained = abstention_reason is not None
         answer_engine = self._resolve_inventory_answer_engine(
             requested_answer_engine=requested_answer_engine,
@@ -2350,15 +2393,15 @@ class InventoryService:
         if answer_engine != "natural":
             verified_base_reply = self._with_final_answer_verification(reply=base_reply, hits=hits)
             if verified_base_reply.verification.passed:
-                return verified_base_reply, "deterministic", abstained, abstention_reason
+                return verified_base_reply, "deterministic", abstained, abstention_reason, None
             safe_reply = self._build_safe_final_answer_reply(
                 base_reply=verified_base_reply,
                 hits=hits,
                 reason="The deterministic answer did not pass final answer verification.",
             )
-            return safe_reply, "deterministic", True, safe_reply.answer_plan.abstention_reason
+            return safe_reply, "deterministic", True, safe_reply.answer_plan.abstention_reason, None
 
-        synthesized_reply = self._synthesize_inventory_reply(
+        synthesized_reply, natural_fallback_reason = self._synthesize_inventory_reply(
             question=question,
             assistant_mode=assistant_mode,
             reply_style=reply_style,
@@ -2372,9 +2415,21 @@ class InventoryService:
             missing_facts=missing_facts or [],
             memory_resolution=memory_resolution,
         )
-        if synthesized_reply is None or synthesized_reply.abstained or not synthesized_reply.answer.strip():
+        if synthesized_reply is None:
             verified_base_reply = self._with_final_answer_verification(reply=base_reply, hits=hits)
-            return verified_base_reply, "deterministic", abstained, abstention_reason
+            return (
+                verified_base_reply,
+                "deterministic",
+                abstained,
+                abstention_reason,
+                natural_fallback_reason or "Natural answer model failed; deterministic fallback was used.",
+            )
+        if synthesized_reply.abstained or not synthesized_reply.answer.strip():
+            verified_base_reply = self._with_final_answer_verification(reply=base_reply, hits=hits)
+            fallback_reason = synthesized_reply.abstention_reason or (
+                "Natural answer model returned no usable content; deterministic fallback was used."
+            )
+            return verified_base_reply, "deterministic", abstained, abstention_reason, fallback_reason
 
         natural_reply = InventoryReply(
             answer=synthesized_reply.answer.strip(),
@@ -2386,7 +2441,7 @@ class InventoryService:
         )
         verified_natural_reply = self._with_final_answer_verification(reply=natural_reply, hits=hits)
         if verified_natural_reply.verification.passed:
-            return verified_natural_reply, "natural", False, None
+            return verified_natural_reply, "natural", False, None, None
 
         logger.warning(
             "Inventory natural answer failed final verification; falling back to deterministic answer. issues=%s",
@@ -2394,14 +2449,26 @@ class InventoryService:
         )
         verified_base_reply = self._with_final_answer_verification(reply=base_reply, hits=hits)
         if verified_base_reply.verification.passed:
-            return verified_base_reply, "deterministic", abstained, abstention_reason
+            return (
+                verified_base_reply,
+                "deterministic",
+                abstained,
+                abstention_reason,
+                "Natural answer failed final answer verification; deterministic fallback was used.",
+            )
 
         safe_reply = self._build_safe_final_answer_reply(
             base_reply=verified_base_reply,
             hits=hits,
             reason="Both natural and deterministic answers failed final answer verification.",
         )
-        return safe_reply, "deterministic", True, safe_reply.answer_plan.abstention_reason
+        return (
+            safe_reply,
+            "deterministic",
+            True,
+            safe_reply.answer_plan.abstention_reason,
+            "Both natural and deterministic answers failed final answer verification.",
+        )
 
     def _with_final_answer_verification(
         self,
@@ -2503,7 +2570,7 @@ class InventoryService:
         reasoning_summary: list[str],
         missing_facts: list[str],
         memory_resolution: InventoryMemoryResolution | None,
-    ) -> InventoryNaturalAnswer | None:
+    ) -> tuple[InventoryNaturalAnswer | None, str | None]:
         try:
             raw_output = self._run_inventory_answer_model(
                 question=question,
@@ -2519,10 +2586,28 @@ class InventoryService:
                 missing_facts=missing_facts,
                 memory_resolution=memory_resolution,
             )
-            return self._parse_inventory_answer_model_output(raw_output)
+        except httpx.TimeoutException:
+            reason = (
+                f"Natural answer model timed out after {self.config.natural_answer_timeout_seconds:g}s; "
+                "deterministic fallback was used."
+            )
+            logger.warning(reason)
+            return None, reason
+        except httpx.HTTPError as exc:
+            reason = "Natural answer model request failed; deterministic fallback was used."
+            logger.warning("%s error=%s", reason, exc)
+            return None, reason
         except Exception:
-            logger.exception("Inventory natural answer synthesis failed; falling back to deterministic reply.")
-            return None
+            reason = "Natural answer synthesis failed; deterministic fallback was used."
+            logger.exception(reason)
+            return None, reason
+
+        parsed_reply = self._parse_inventory_answer_model_output(raw_output)
+        if parsed_reply is None:
+            reason = "Natural answer model returned invalid structured output; deterministic fallback was used."
+            logger.warning(reason)
+            return None, reason
+        return parsed_reply, None
 
     def _build_inventory_answer_messages(
         self,

@@ -22,6 +22,7 @@ from app.core.schemas import (
     InventorySearchRequest,
     InventorySearchResponse,
     InventoryStatusResponse,
+    InventorySyncRebuildResponse,
     InventorySyncStatusResponse,
     InventorySyncValidateRequest,
     InventorySyncValidateResponse,
@@ -66,6 +67,17 @@ async def validate_inventory_sync(request: InventorySyncValidateRequest) -> Inve
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "inventory_sync_validation_failed", "message": str(exc)},
+        ) from exc
+
+
+@router.post("/sync/rebuild", response_model=InventorySyncRebuildResponse)
+async def rebuild_inventory_sync() -> InventorySyncRebuildResponse:
+    try:
+        return get_inventory_service().sync_rebuild()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "inventory_sync_rebuild_failed", "message": str(exc)},
         ) from exc
 
 

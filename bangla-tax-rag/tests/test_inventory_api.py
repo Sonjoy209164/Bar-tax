@@ -1,5 +1,5 @@
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, ReadTimeout
 
 from app.core.schemas import InventoryAnswerPlan, InventoryAnswerVerification, InventorySearchHit
 from app.main import app
@@ -9,6 +9,7 @@ from app.retrieval import (
     EmbeddingProvider,
     LocalVectorStore,
     TextEmbedder,
+    VectorRecord,
     VectorStoreConfig,
     VectorStoreProvider,
 )
@@ -1103,6 +1104,7 @@ async def test_inventory_routes_are_present_in_openapi(monkeypatch: pytest.Monke
     assert "/inventory/route" in paths
     assert "/inventory/sync/status" in paths
     assert "/inventory/sync/validate" in paths
+    assert "/inventory/sync/rebuild" in paths
     assert "/inventory/production/status" in paths
     assert "/inventory/business/status" in paths
     assert "/inventory/business/signals" in paths
@@ -1515,6 +1517,73 @@ async def test_inventory_sync_status_and_validate_endpoints(monkeypatch: pytest.
 
 
 @pytest.mark.anyio
+async def test_inventory_sync_rebuild_repairs_vector_drift(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                        "updated_at": "2026-04-15T10:00:00Z",
+                    }
+                ]
+            },
+        )
+
+        service.vector_store.delete(["prod-watch"], namespace=service.config.namespace)
+        service.vector_store.upsert(
+            [
+                VectorRecord(
+                    record_id="stale-vector",
+                    vector=[0.0] * 10,
+                    metadata={"product_id": "stale-vector"},
+                    text="stale record",
+                    namespace=service.config.namespace,
+                )
+            ],
+            namespace=service.config.namespace,
+        )
+
+        drift_response = await client.get("/inventory/sync/status")
+        rebuild_response = await client.post("/inventory/sync/rebuild")
+
+    assert drift_response.status_code == 200
+    drift_payload = drift_response.json()
+    assert drift_payload["vector_synced"] is False
+    assert drift_payload["missing_vector_ids"] == ["prod-watch"]
+    assert drift_payload["stale_vector_ids"] == ["stale-vector"]
+
+    assert rebuild_response.status_code == 200
+    rebuild_payload = rebuild_response.json()
+    assert rebuild_payload["ready"] is True
+    assert rebuild_payload["rebuilt_count"] == 1
+    assert rebuild_payload["deleted_vector_count"] == 1
+    assert rebuild_payload["vector_synced"] is True
+    assert rebuild_payload["missing_vector_ids"] == []
+    assert rebuild_payload["stale_vector_ids"] == []
+    assert rebuild_payload["catalog_count"] == 1
+    assert rebuild_payload["rag_enabled_count"] == 1
+    assert rebuild_payload["namespace"] == service.config.namespace
+
+
+@pytest.mark.anyio
 async def test_inventory_sync_status_reports_catalog_quality_issues(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -1735,6 +1804,69 @@ async def test_inventory_ask_falls_back_when_natural_answer_fails_final_verifica
     assert "USD 999.00" not in payload["answer"]
     assert payload["verification"]["checked_final_answer"] is True
     assert payload["verification"]["passed"] is True
+
+
+@pytest.mark.anyio
+async def test_inventory_ask_falls_back_when_natural_answer_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    service.config.natural_answers_enabled = True
+    service.config.natural_answer_min_confidence = 0.0
+    service.config.natural_answer_timeout_seconds = 7.0
+    monkeypatch.setattr(
+        service,
+        "_run_inventory_answer_model",
+        lambda **kwargs: (_ for _ in ()).throw(ReadTimeout("timed out")),
+    )
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    }
+                ]
+            },
+        )
+        ask_response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "show me some watches",
+                "assistant_mode": "support",
+                "answer_engine": "natural",
+            },
+        )
+        trace_id = ask_response.json()["trace_id"]
+        trace_response = await client.get(f"/inventory/chat/trace/{trace_id}")
+
+    assert ask_response.status_code == 200
+    ask_payload = ask_response.json()
+    assert ask_payload["answer_engine"] == "deterministic"
+    assert ask_payload["abstained"] is False
+    assert "TrailMark Smart Watch" in ask_payload["answer"]
+
+    assert trace_response.status_code == 200
+    trace_payload = trace_response.json()
+    assert trace_payload["answer_engine"] == "deterministic"
+    assert trace_payload["fallback_reason"] == "Natural answer model timed out after 7s; deterministic fallback was used."
 
 
 @pytest.mark.anyio

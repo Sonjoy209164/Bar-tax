@@ -1,7 +1,13 @@
 import pytest
 from httpx import ASGITransport, AsyncClient, ReadTimeout
 
-from app.core.schemas import InventoryAnswerPlan, InventoryAnswerVerification, InventorySearchHit
+from app.core.schemas import (
+    InventoryAnswerPlan,
+    InventoryAnswerVerification,
+    InventoryAskRequest,
+    InventoryItemRecord,
+    InventorySearchHit,
+)
 from app.main import app
 from app.retrieval import (
     EmbedderConfig,
@@ -1099,6 +1105,7 @@ async def test_inventory_routes_are_present_in_openapi(monkeypatch: pytest.Monke
     assert "/inventory/status" in paths
     assert "/inventory/agentic/status" in paths
     assert "/inventory/agentic/ask" in paths
+    assert "/inventory/agentic/ask/stream" in paths
     assert "/inventory/items/upsert" in paths
     assert "/inventory/search" in paths
     assert "/inventory/route" in paths
@@ -1111,6 +1118,57 @@ async def test_inventory_routes_are_present_in_openapi(monkeypatch: pytest.Monke
     assert "/inventory/business/signals/upsert" in paths
     assert "/inventory/chat/trace/{trace_id}" in paths
     assert "/inventory/ask" in paths
+    assert "/inventory/ask/stream" in paths
+
+
+@pytest.mark.anyio
+async def test_inventory_ask_stream_returns_sse_events(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="prod-watch",
+                sku="WAT-001",
+                name="TrailMark Smart Watch",
+                category="Wearables",
+                brand="TrailMark",
+                short_description="Smart watch for fitness tracking",
+                price=199.0,
+                currency="USD",
+                stock=7,
+                status="Active",
+                tags=["watch", "wearable"],
+                include_in_rag=True,
+            )
+        ]
+    )
+
+    response = await routes_inventory.ask_inventory_stream(
+        InventoryAskRequest(
+            question="Tell me about the TrailMark watch",
+            assistant_mode="sales",
+            reply_style="short",
+            answer_engine="deterministic",
+            top_k=3,
+        )
+    )
+    body_chunks: list[str] = []
+    async for chunk in response.body_iterator:
+        body_chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+    body = "".join(body_chunks)
+
+    assert response.media_type == "text/event-stream"
+    assert response.headers["cache-control"] == "no-cache"
+    assert "event: status" in body
+    assert "event: metadata" in body
+    assert "event: answer_delta" in body
+    assert "event: final" in body
+    assert "TrailMark Smart Watch" in body
+    assert '"trace_id"' in body
 
 
 @pytest.mark.anyio

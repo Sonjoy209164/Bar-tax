@@ -7,8 +7,12 @@ It uses:
 - `frontend/data/products.json` as the sample ecommerce catalog.
 - `POST /inventory/items/upsert` to sync products into the RAG mirror.
 - `POST /inventory/business/signals/upsert` to sync operational business signals.
-- `POST /inventory/ask` for normal chatbot answers.
-- `POST /inventory/agentic/ask` for business/restock reasoning.
+- `POST /inventory/sync/rebuild` to force a full vector rebuild from the mirrored catalog.
+- `GET /inventory/items` to pull the current backend catalog instead of relying only on bundled sample JSON.
+- `POST /inventory/route` to let the backend choose between normal RAG and agentic execution.
+- `POST /inventory/ask` and `POST /inventory/ask/stream` for normal chatbot answers.
+- `POST /inventory/agentic/ask` and `POST /inventory/agentic/ask/stream` for business/restock reasoning.
+- `GET /health`, `GET /config`, `GET /inventory/status`, `GET /inventory/sync/status`, `GET /inventory/business/status`, and `GET /inventory/production/status` for runtime diagnostics.
 - `GET /inventory/chat/trace/{trace_id}` to inspect why an answer behaved the way it did.
 
 ## Run
@@ -78,13 +82,26 @@ For product recommendations like "which one should I buy?", use:
 ```text
 Mode: Sales
 Reply: Detailed
-Path: Agentic
+Path: Auto Route
 Engine: Auto
+Delivery: Streaming
 ```
 
 Use `Engine: Natural` only when the RAG server has a working LLM generation provider. If the response badge still says `deterministic`, the server is falling back to rule-based answers.
 
-The page now keeps recent product context and sends `focused_product_ids` plus `filters.product_ids` when it detects pasted SKUs/product names, so follow-ups like "which one should I buy?" stay scoped to the products currently being discussed.
+The page now keeps recent product context, lets you manually focus products from the catalog column, sends `focused_product_ids` plus `filters.product_ids`, and can ask the backend router to choose the right execution path before sending the actual chat request.
+
+## What This Frontend Now Tests Well
+
+- direct status and health checks against the live backend
+- sample catalog sync plus business-signal sync
+- full sync rebuild behavior
+- backend catalog loading
+- normal RAG answers
+- agentic answers
+- backend route decisions
+- streaming SSE responses
+- trace inspection for both normal and agentic paths
 
 ## Data Format
 

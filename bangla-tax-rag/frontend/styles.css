@@ -75,32 +75,33 @@ select:focus {
 }
 
 .shell {
-  width: min(1480px, calc(100vw - 32px));
+  width: min(1560px, calc(100vw - 32px));
   margin: 0 auto;
   padding: 32px 0 56px;
 }
 
 .hero {
   display: grid;
-  grid-template-columns: 1fr minmax(260px, 360px);
+  grid-template-columns: 1.4fr minmax(260px, 360px);
   gap: 24px;
   align-items: end;
   margin-bottom: 22px;
 }
 
 .hero h1 {
-  max-width: 900px;
+  max-width: 980px;
   margin: 0;
-  font-size: clamp(2.35rem, 5vw, 5.6rem);
-  line-height: 0.92;
-  letter-spacing: -0.075em;
+  font-size: clamp(2.35rem, 5vw, 5.2rem);
+  line-height: 0.95;
+  letter-spacing: -0.055em;
 }
 
 .hero-copy {
-  max-width: 760px;
+  max-width: 860px;
+  margin: 1rem 0 0;
   color: var(--muted);
-  font-size: 1.08rem;
-  line-height: 1.65;
+  font-size: 1.04rem;
+  line-height: 1.7;
 }
 
 .eyebrow {
@@ -151,7 +152,7 @@ select:focus {
 
 .setup-panel {
   display: grid;
-  grid-template-columns: minmax(240px, 1.1fr) minmax(240px, 0.9fr) auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 0.85fr) minmax(260px, 1.2fr) auto;
   gap: 16px;
   align-items: end;
   margin-bottom: 22px;
@@ -172,11 +173,37 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.button-row.compact {
+  justify-content: flex-end;
+}
+
 .warning {
   grid-column: 1 / -1;
   color: var(--muted);
   margin: 0;
   font-size: 0.92rem;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.status-card {
+  padding: 18px 20px;
+  display: grid;
+  gap: 8px;
+}
+
+.status-card strong {
+  font-size: 1.08rem;
+}
+
+.status-card small {
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .grid {
@@ -204,6 +231,13 @@ select:focus {
   letter-spacing: -0.025em;
 }
 
+.title-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -215,17 +249,51 @@ select:focus {
   font-weight: 800;
 }
 
+.catalog-panel {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  min-height: 760px;
+}
+
+.focus-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.focus-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 40px;
+}
+
+.focus-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  background: rgba(35, 93, 77, 0.08);
+  color: var(--green);
+  padding: 0.45rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .product-list {
   display: grid;
   gap: 10px;
-  max-height: 650px;
+  max-height: 670px;
   overflow: auto;
   padding-right: 4px;
 }
 
 .product-card,
 .hit-card,
-.test-card {
+.test-card,
+.diagnostic-block {
   border: 1px solid var(--line);
   border-radius: 22px;
   background: white;
@@ -236,6 +304,22 @@ select:focus {
   display: flex;
   justify-content: space-between;
   gap: 14px;
+  cursor: pointer;
+  transition:
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.product-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(35, 93, 77, 0.3);
+}
+
+.product-card.active {
+  border-color: rgba(35, 93, 77, 0.5);
+  box-shadow: 0 14px 28px rgba(35, 93, 77, 0.12);
+  background: #f8fcf8;
 }
 
 .product-card strong,
@@ -245,7 +329,8 @@ select:focus {
 
 .product-card small,
 .hit-card small,
-.test-card small {
+.test-card small,
+.diagnostic-block small {
   color: var(--muted);
 }
 
@@ -256,16 +341,64 @@ select:focus {
 }
 
 .chat-panel {
-  min-height: 720px;
+  min-height: 760px;
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto auto auto auto 1fr auto;
 }
 
 .chat-controls {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
+  margin-bottom: 14px;
+}
+
+.toggle-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.55rem 0.85rem;
+  background: white;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.toggle-pill input {
+  width: auto;
+  margin: 0;
+}
+
+.route-summary {
+  display: grid;
+  gap: 6px;
   margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 22px;
+  background: rgba(35, 93, 77, 0.08);
+  border: 1px solid rgba(35, 93, 77, 0.16);
+}
+
+.route-summary.hidden {
+  display: none;
+}
+
+.route-summary strong {
+  font-size: 0.98rem;
+}
+
+.route-summary small {
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .messages {
@@ -279,10 +412,10 @@ select:focus {
 }
 
 .message {
-  max-width: 86%;
+  max-width: 88%;
   padding: 15px 16px;
   border-radius: 22px;
-  line-height: 1.52;
+  line-height: 1.56;
 }
 
 .message.user {
@@ -299,6 +432,20 @@ select:focus {
   border-bottom-left-radius: 6px;
 }
 
+.message.pending {
+  opacity: 0.9;
+}
+
+.message.streaming .message-body::after {
+  content: "▋";
+  margin-left: 4px;
+  animation: blink 1s infinite;
+}
+
+.message-body {
+  white-space: pre-wrap;
+}
+
 .message-meta {
   display: flex;
   flex-wrap: wrap;
@@ -306,16 +453,33 @@ select:focus {
   margin-top: 12px;
 }
 
-.hits {
+.message-content {
+  display: grid;
+  gap: 12px;
+}
+
+.hits,
+.message-diagnostics {
   display: grid;
   gap: 8px;
   margin-top: 12px;
 }
 
-.hit-card {
+.hit-card,
+.diagnostic-block {
   display: grid;
   gap: 5px;
   background: #fdfcf7;
+}
+
+.diagnostic-block strong {
+  font-size: 0.92rem;
+}
+
+.diagnostic-list {
+  margin: 0;
+  padding-left: 1rem;
+  color: var(--muted);
 }
 
 .chat-form {
@@ -347,7 +511,7 @@ select:focus {
 
 .trace-output {
   min-height: 460px;
-  max-height: 640px;
+  max-height: 660px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
@@ -359,16 +523,45 @@ select:focus {
   line-height: 1.55;
 }
 
+@keyframes blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 1280px) {
+  .chat-controls {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 980px) {
   .hero,
   .grid,
   .bottom-grid,
-  .setup-panel {
+  .setup-panel,
+  .status-grid {
     grid-template-columns: 1fr;
   }
 
   .chat-controls {
     grid-template-columns: 1fr;
+  }
+
+  .focus-toolbar,
+  .title-pills {
+    align-items: flex-start;
+    justify-content: flex-start;
   }
 
   .message {

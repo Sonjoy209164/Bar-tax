@@ -1,4 +1,8 @@
+import json
+from collections.abc import AsyncIterator, Callable
+
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from app.core.schemas import (
     InventoryAgenticRequest,
@@ -32,6 +36,77 @@ from app.core.schemas import (
 from app.services.inventory_service import get_inventory_service
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
+
+_STREAMING_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+def _sse_event(event: str, payload: object) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=True)}\n\n"
+
+
+def _chunk_text(text: str, *, chunk_size: int = 160) -> list[str]:
+    if not text:
+        return [""]
+
+    chunks: list[str] = []
+    cursor = 0
+    while cursor < len(text):
+        next_cursor = min(cursor + chunk_size, len(text))
+        if next_cursor < len(text):
+            split_index = text.rfind(" ", cursor, next_cursor)
+            if split_index > cursor:
+                next_cursor = split_index + 1
+        chunks.append(text[cursor:next_cursor])
+        cursor = next_cursor
+    return chunks
+
+
+def _stream_metadata(response: InventoryAskResponse | InventoryAgenticResponse) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "trace_id": response.trace_id,
+        "answer_engine": response.answer_engine,
+        "confidence_score": response.confidence_score,
+        "abstained": response.abstained,
+        "abstention_reason": response.abstention_reason,
+        "follow_up_question": response.follow_up_question,
+        "recommended_product_ids": response.recommended_product_ids,
+        "cross_sell_product_ids": response.cross_sell_product_ids,
+        "total_hits": response.total_hits,
+    }
+    if isinstance(response, InventoryAgenticResponse):
+        metadata["execution_path"] = response.execution_path
+        metadata["retrieval_steps_used"] = response.retrieval_steps_used
+    return metadata
+
+
+async def _stream_inventory_response(
+    responder: Callable[[], InventoryAskResponse | InventoryAgenticResponse],
+) -> AsyncIterator[str]:
+    yield _sse_event("status", {"status": "started"})
+
+    try:
+        response = responder()
+    except ValueError as exc:
+        yield _sse_event(
+            "error",
+            {"error": "invalid_inventory_stream_request", "message": str(exc)},
+        )
+        return
+    except Exception as exc:
+        yield _sse_event(
+            "error",
+            {"error": "inventory_stream_failed", "message": str(exc)},
+        )
+        return
+
+    yield _sse_event("metadata", _stream_metadata(response))
+    for index, chunk in enumerate(_chunk_text(response.answer), start=1):
+        yield _sse_event("answer_delta", {"index": index, "delta": chunk})
+    yield _sse_event("final", response.model_dump(mode="json"))
 
 
 @router.get("/status", response_model=InventoryStatusResponse)
@@ -200,6 +275,15 @@ async def ask_inventory_agentic(request: InventoryAgenticRequest) -> InventoryAg
         ) from exc
 
 
+@router.post("/agentic/ask/stream")
+async def ask_inventory_agentic_stream(request: InventoryAgenticRequest) -> StreamingResponse:
+    return StreamingResponse(
+        _stream_inventory_response(lambda: get_inventory_service().agentic_ask(request)),
+        media_type="text/event-stream",
+        headers=_STREAMING_HEADERS,
+    )
+
+
 @router.get("/agentic/trace/{trace_id}", response_model=InventoryAgenticTraceResponse)
 async def read_inventory_agentic_trace(trace_id: str) -> InventoryAgenticTraceResponse:
     trace = get_inventory_service().get_agentic_trace(trace_id)
@@ -236,3 +320,12 @@ async def ask_inventory(request: InventoryAskRequest) -> InventoryAskResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "inventory_question_failed", "message": str(exc)},
         ) from exc
+
+
+@router.post("/ask/stream")
+async def ask_inventory_stream(request: InventoryAskRequest) -> StreamingResponse:
+    return StreamingResponse(
+        _stream_inventory_response(lambda: get_inventory_service().ask(request)),
+        media_type="text/event-stream",
+        headers=_STREAMING_HEADERS,
+    )

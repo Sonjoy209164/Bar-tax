@@ -529,7 +529,7 @@ Every bad answer can be debugged from retrieval to final response.
 - [x] Add rate limiting.
 - [ ] Add HTTPS.
 - [x] Add key rotation.
-- [ ] Add streaming response support.
+- [x] Add streaming response support.
 - [x] Add model timeout fallback strategy.
 - [ ] Add generated TypeScript client from OpenAPI.
 

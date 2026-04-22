@@ -943,6 +943,73 @@ async def test_inventory_agentic_trace_and_status_endpoints(monkeypatch: pytest.
 
 
 @pytest.mark.anyio
+async def test_inventory_agentic_short_circuits_no_match_or_abstain_questions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    }
+                ]
+            },
+        )
+        ask_response = await client.post(
+            "/inventory/agentic/ask",
+            json={
+                "question": "budget",
+                "assistant_mode": "support",
+                "reply_style": "detailed",
+            },
+        )
+        trace_id = ask_response.json()["trace_id"]
+        trace_response = await client.get(f"/inventory/agentic/trace/{trace_id}")
+        chat_trace_response = await client.get(f"/inventory/chat/trace/{trace_id}")
+
+    assert ask_response.status_code == 200
+    ask_payload = ask_response.json()
+    assert ask_payload["execution_path"] == "inventory_agentic_no_match_or_abstain"
+    assert ask_payload["retrieval_steps_used"] == 0
+    assert ask_payload["total_hits"] == 0
+    assert ask_payload["hits"] == []
+    assert ask_payload["abstained"] is True
+    assert "grounded catalog evidence" in (ask_payload["abstention_reason"] or "").lower()
+
+    assert trace_response.status_code == 200
+    trace_payload = trace_response.json()
+    assert trace_payload["execution_path"] == "inventory_agentic_no_match_or_abstain"
+    assert trace_payload["route_decision"]["signals"]["question_family"] == "no_match_or_abstain"
+    assert trace_payload["retrieval_steps"] == []
+
+    assert chat_trace_response.status_code == 200
+    chat_trace_payload = chat_trace_response.json()
+    assert chat_trace_payload["execution_path"] == "inventory_agentic_no_match_or_abstain"
+    assert chat_trace_payload["route_decision"]["signals"]["question_family"] == "no_match_or_abstain"
+    assert chat_trace_payload["retrieved_product_ids"] == []
+    assert chat_trace_payload["reranked_product_ids"] == []
+
+
+@pytest.mark.anyio
 async def test_inventory_support_mode_summarizes_matches_naturally(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     from app.api import routes_inventory
 
@@ -1125,6 +1192,137 @@ async def test_inventory_support_mode_rejects_unmatched_exact_lookup_queries(mon
     assert payload["answer_plan"]["detected_intent"] == "product_search"
     assert payload["answer_plan"]["product_type"] == "bike"
     assert payload["answer_plan"]["abstain"] is True
+
+
+@pytest.mark.anyio
+async def test_inventory_support_mode_clarifies_no_match_route_questions(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-dock",
+                        "sku": "CMP-DK-004",
+                        "name": "DockHub 4K Triple Display Station",
+                        "category": "Computing",
+                        "brand": "DockHub",
+                        "short_description": "USB-C docking station for laptop fleets and multi-monitor office desks",
+                        "price": 229.0,
+                        "currency": "USD",
+                        "stock": 5,
+                        "status": "Low Stock",
+                        "tags": ["computing", "dock", "usb-c", "workstation"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "budget",
+                "assistant_mode": "support",
+                "reply_style": "detailed",
+                "top_k": 5,
+            },
+        )
+        payload = response.json()
+        trace_response = await client.get(f"/inventory/chat/trace/{payload['trace_id']}")
+
+    assert response.status_code == 200
+    assert payload["abstained"] is False
+    assert payload["total_hits"] == 0
+    assert payload["hits"] == []
+    assert payload["answer_plan"]["intent"] == "support_no_match"
+    assert "i need one more detail" in payload["answer"].lower()
+    assert payload["follow_up_question"] is not None
+    assert "budget or preferred brand" in payload["follow_up_question"].lower()
+
+    assert trace_response.status_code == 200
+    trace_payload = trace_response.json()
+    assert trace_payload["route_decision"]["question_family"] == "no_match_or_abstain"
+    assert trace_payload["total_hits"] == 0
+    assert trace_payload["retrieved_product_ids"] == ["prod-watch", "prod-dock"]
+
+
+@pytest.mark.anyio
+async def test_inventory_support_mode_abstains_for_non_inventory_no_match_questions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-watch",
+                        "sku": "ACC-WAT-001",
+                        "name": "TrailMark Smart Watch",
+                        "category": "Wearables",
+                        "brand": "TrailMark",
+                        "short_description": "Fitness watch with heart-rate and GPS tracking",
+                        "price": 199.0,
+                        "currency": "USD",
+                        "stock": 10,
+                        "status": "Active",
+                        "tags": ["watch", "wearable", "fitness"],
+                        "include_in_rag": True,
+                    }
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/ask",
+            json={
+                "question": "write me a poem about rain",
+                "assistant_mode": "support",
+                "reply_style": "short",
+                "top_k": 5,
+            },
+        )
+        payload = response.json()
+        trace_response = await client.get(f"/inventory/chat/trace/{payload['trace_id']}")
+
+    assert response.status_code == 200
+    assert payload["abstained"] is True
+    assert payload["total_hits"] == 0
+    assert payload["hits"] == []
+    assert payload["follow_up_question"] is None
+    assert "supported inventory question" in payload["answer"].lower()
+    assert "supported inventory question" in (payload["abstention_reason"] or "").lower()
+    assert payload["answer_plan"]["intent"] == "support_no_match"
+    assert payload["answer_plan"]["abstain"] is True
+
+    assert trace_response.status_code == 200
+    trace_payload = trace_response.json()
+    assert trace_payload["route_decision"]["question_family"] == "no_match_or_abstain"
+    assert trace_payload["abstained"] is True
 
 
 @pytest.mark.anyio

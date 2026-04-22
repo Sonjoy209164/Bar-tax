@@ -74,7 +74,7 @@ Implementation tasks:
 - [x] Detect recommendation language such as `best`, `recommend`, `which should I buy`.
 - [x] Detect diagnosis language such as `why`, `root cause`, `what went wrong`.
 - [x] Detect workflow/planning language such as `restock`, `bundle`, `what should we do next`.
-- [ ] Detect when the request is underspecified and should move to abstain or follow-up.
+- [x] Detect when the request is underspecified and should move to abstain or follow-up.
 - [x] Return route confidence.
 - [x] Persist route decision in trace metadata.
 - [x] Add tests for route classification.

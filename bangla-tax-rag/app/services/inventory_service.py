@@ -865,6 +865,10 @@ class InventoryService:
             filters=resolved_memory.filters,
             low_stock_threshold=request.low_stock_threshold,
         )
+        route_signals = self._build_route_signals(
+            question=request.question,
+            filters=effective_filters,
+        )
         search_response = self.search(
             InventorySearchRequest(
                 query_text=request.question,
@@ -879,26 +883,42 @@ class InventoryService:
             low_stock_threshold=request.low_stock_threshold,
             assistant_mode=request.assistant_mode,
         )
-        reply = self._build_answer(
+        guarded_no_match = self._build_no_match_or_abstain_reply(
             question=request.question,
-            hits=ordered_hits,
-            filters=effective_filters,
-            low_stock_threshold=request.low_stock_threshold,
             assistant_mode=request.assistant_mode,
             reply_style=request.reply_style,
-        )
-        confidence_score = self._estimate_confidence(ordered_hits)
-        abstention_reason = self._build_abstention_reason(
-            question=request.question,
+            filters=effective_filters,
             hits=ordered_hits,
+            route_signals=route_signals,
         )
+        if guarded_no_match is not None:
+            reply, response_hits, confidence_score, abstention_reason = guarded_no_match
+            finalize_hits: list[InventorySearchHit] = []
+            response_total_hits = 0
+        else:
+            reply = self._build_answer(
+                question=request.question,
+                hits=ordered_hits,
+                filters=effective_filters,
+                low_stock_threshold=request.low_stock_threshold,
+                assistant_mode=request.assistant_mode,
+                reply_style=request.reply_style,
+            )
+            response_hits = ordered_hits
+            finalize_hits = ordered_hits
+            response_total_hits = search_response.total_hits
+            confidence_score = self._estimate_confidence(ordered_hits)
+            abstention_reason = self._build_abstention_reason(
+                question=request.question,
+                hits=ordered_hits,
+            )
         reply, answer_engine, abstained, abstention_reason, fallback_reason = self._finalize_inventory_reply(
             question=request.question,
             assistant_mode=request.assistant_mode,
             reply_style=request.reply_style,
             requested_answer_engine=request.answer_engine,
             confidence_score=confidence_score,
-            hits=ordered_hits,
+            hits=finalize_hits,
             base_reply=reply,
             conversation_history=request.conversation_history,
             conversation_summary=request.conversation_summary,
@@ -917,9 +937,9 @@ class InventoryService:
             trace_id=trace_id,
             abstained=abstained,
             abstention_reason=abstention_reason,
-            total_hits=search_response.total_hits,
+            total_hits=response_total_hits,
             applied_filters=effective_filters,
-            hits=ordered_hits,
+            hits=response_hits,
             recommended_product_ids=reply.recommended_product_ids,
             cross_sell_product_ids=reply.cross_sell_product_ids,
             follow_up_question=reply.follow_up_question,
@@ -1097,6 +1117,90 @@ class InventoryService:
             filters=resolved_memory.filters.model_copy(deep=True),
             low_stock_threshold=request.low_stock_threshold,
         )
+        guarded_no_match = self._build_no_match_or_abstain_reply(
+            question=request.question,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+            filters=effective_filters,
+            hits=[],
+            route_signals=route_response.signals,
+        )
+        if guarded_no_match is not None:
+            final_reply, safe_hits, confidence_score, abstention_reason = guarded_no_match
+            reasoning_summary.append(
+                "Short-circuited before agentic retrieval because the question was classified as a clarification or abstain case."
+            )
+            final_reply, answer_engine, abstained, abstention_reason, fallback_reason = self._finalize_inventory_reply(
+                question=request.question,
+                assistant_mode=request.assistant_mode,
+                reply_style=request.reply_style,
+                requested_answer_engine=request.answer_engine,
+                confidence_score=confidence_score,
+                hits=safe_hits,
+                base_reply=final_reply,
+                conversation_history=request.conversation_history,
+                conversation_summary=request.conversation_summary,
+                abstention_reason=abstention_reason,
+                execution_path="inventory_agentic",
+                reasoning_summary=reasoning_summary,
+                missing_facts=missing_facts,
+                memory_resolution=resolved_memory.resolution,
+            )
+            response = InventoryAgenticResponse(
+                status="success",
+                question=request.question,
+                answer=final_reply.answer,
+                assistant_mode=request.assistant_mode,
+                reply_style=request.reply_style,
+                answer_engine=answer_engine,
+                execution_path="inventory_agentic_no_match_or_abstain",
+                confidence_score=confidence_score,
+                abstained=abstained,
+                abstention_reason=abstention_reason,
+                trace_id=trace_id,
+                reasoning_summary=reasoning_summary,
+                missing_facts=missing_facts,
+                retrieval_steps_used=0,
+                total_hits=0,
+                applied_filters=effective_filters,
+                hits=safe_hits,
+                recommended_product_ids=final_reply.recommended_product_ids,
+                cross_sell_product_ids=final_reply.cross_sell_product_ids,
+                follow_up_question=final_reply.follow_up_question,
+                answer_plan=final_reply.answer_plan,
+                verification=final_reply.verification,
+                memory_resolution=resolved_memory.resolution,
+            )
+            trace_payload = {
+                "trace_id": trace_id,
+                "question": request.question,
+                "assistant_mode": request.assistant_mode,
+                "reply_style": request.reply_style,
+                "execution_path": "inventory_agentic_no_match_or_abstain",
+                "route_decision": self._serialize_route_response(route_response),
+                "reasoning_summary": reasoning_summary,
+                "missing_facts": missing_facts,
+                "retrieval_steps": [],
+                "final_answer": final_reply.answer,
+                "confidence_score": confidence_score,
+            }
+            self.trace_store.save(trace_payload)
+            self._save_inventory_chat_trace(
+                trace_id=trace_id,
+                response=response,
+                execution_path="inventory_agentic_no_match_or_abstain",
+                started_at=started_at,
+                requested_answer_engine=request.answer_engine,
+                retrieved_hits=[],
+                reranked_hits=[],
+                reasoning_summary=reasoning_summary,
+                missing_facts=missing_facts,
+                retrieval_steps=[],
+                fallback_reason_override=fallback_reason,
+                route_decision_override=self._serialize_route_response(route_response),
+            )
+            return response
+
         search_requests = self._build_agentic_search_requests(
             question=request.question,
             filters=effective_filters,
@@ -2560,6 +2664,115 @@ class InventoryService:
         if hits:
             return None
         return self._build_exact_no_match_answer(question=question) or "No reliable catalog evidence was found for this request."
+
+    def _build_no_match_or_abstain_reply(
+        self,
+        *,
+        question: str,
+        assistant_mode: str,
+        reply_style: str,
+        filters: InventorySearchFilters,
+        hits: list[InventorySearchHit],
+        route_signals: InventoryRouteSignals,
+    ) -> tuple[InventoryReply, list[InventorySearchHit], float, str | None] | None:
+        if route_signals.question_family != "no_match_or_abstain":
+            return None
+
+        normalized = self._normalize_conversation_text(question)
+        inventory_like = self._looks_like_inventory_request(normalized)
+        clarification_question = self._build_clarification_question(
+            question=question,
+            assistant_mode=assistant_mode,
+            hits=hits,
+            filters=filters,
+        )
+        has_structured_constraints = any(
+            (
+                filters.product_ids,
+                filters.categories,
+                filters.brands,
+                filters.tags,
+                filters.min_stock is not None,
+                filters.max_stock is not None,
+                filters.min_price is not None,
+                filters.max_price is not None,
+            )
+        )
+        top_hit = hits[0] if hits else None
+        weak_top_hit = top_hit is None or top_hit.score < 0.6 or self._quality_score(top_hit) < 5
+        base_reason = route_signals.family_reasons[0] if route_signals.family_reasons else (
+            "Question was classified as a clarification or abstain case before answer generation."
+        )
+
+        should_clarify = clarification_question is not None and (
+            self._should_prioritize_clarification(question=question, filters=filters)
+            or (inventory_like and (not has_structured_constraints or weak_top_hit))
+        )
+        if should_clarify:
+            if assistant_mode == "sales":
+                answer = "I can help with that, but I need one more detail before I make a grounded recommendation."
+            else:
+                answer = "I can help with that, but I need one more detail before I narrow the inventory down safely."
+            answer += f" {clarification_question}"
+            reasoning_steps = [
+                base_reason,
+                "Held back weak retrieval guesses until the question includes a clearer product, category, budget, or brand constraint.",
+            ]
+            plan = self._build_inventory_answer_plan(
+                intent=f"{assistant_mode}_no_match",
+                primary=None,
+                abstain=False,
+                reasoning_steps=reasoning_steps,
+            )
+            reply = self._enrich_reply_plan(
+                reply=InventoryReply(
+                    answer=answer,
+                    follow_up_question=clarification_question,
+                    answer_plan=plan,
+                    verification=self._verify_answer_plan(answer_plan=plan, hits=[]),
+                ),
+                question=question,
+                filters=filters,
+                hits=[],
+                strategy="no_match_or_abstain",
+            )
+            return reply, [], 0.42, None
+
+        exact_no_match = self._build_exact_no_match_answer(question=question)
+        if exact_no_match:
+            abstention_reason = exact_no_match
+        elif inventory_like:
+            abstention_reason = "I do not have enough grounded catalog evidence to answer that safely yet."
+        else:
+            abstention_reason = "That does not map cleanly to a supported inventory question I can answer from the current catalog."
+
+        answer = abstention_reason
+        if reply_style == "detailed" and clarification_question and inventory_like:
+            answer += f" {clarification_question}"
+        reasoning_steps = [
+            base_reason,
+            "Returned abstain behavior because the request could not be grounded in a reliable inventory answer path.",
+        ]
+        plan = self._build_inventory_answer_plan(
+            intent=f"{assistant_mode}_no_match",
+            primary=None,
+            abstain=True,
+            abstention_reason=abstention_reason,
+            reasoning_steps=reasoning_steps,
+        )
+        reply = self._enrich_reply_plan(
+            reply=InventoryReply(
+                answer=answer,
+                follow_up_question=clarification_question if inventory_like else None,
+                answer_plan=plan,
+                verification=self._verify_answer_plan(answer_plan=plan, hits=[]),
+            ),
+            question=question,
+            filters=filters,
+            hits=[],
+            strategy="no_match_or_abstain",
+        )
+        return reply, [], 0.24, abstention_reason
 
     def _finalize_inventory_reply(
         self,

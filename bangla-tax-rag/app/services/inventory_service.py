@@ -1553,6 +1553,7 @@ class InventoryService:
             "lexical_pool_candidates": 0,
             "merged_pool_candidates": 0,
             "type_gated_candidates": 0,
+            "category_gated_candidates": 0,
             "exact_lookup_candidates": 0,
             "lexical_anchor_candidates": 0,
             "browse_candidates": 0,
@@ -1693,10 +1694,26 @@ class InventoryService:
                 candidates = exact_type_candidates
             elif related_type_candidates and not exact_lookup:
                 candidates = related_type_candidates
-            elif exact_lookup:
+            elif exact_lookup or preference_profile.confidence >= 0.28:
                 retrieval_stage_counts["type_gated_candidates"] = 0
                 return [], retrieval_stage_counts
         retrieval_stage_counts["type_gated_candidates"] = len(candidates)
+
+        requested_category = self._resolve_explicit_requested_category(
+            query_text=query_text,
+            filters=filters,
+            catalog=catalog,
+            preference_profile=preference_profile,
+        )
+        if requested_category:
+            category_matched_candidates = [
+                candidate
+                for candidate in candidates
+                if candidate[0].category and candidate[0].category.casefold() == requested_category.casefold()
+            ]
+            if category_matched_candidates:
+                candidates = category_matched_candidates
+        retrieval_stage_counts["category_gated_candidates"] = len(candidates)
 
         if exact_lookup:
             max_coverage = max(coverage for _, _, _, coverage, _ in candidates)
@@ -1732,11 +1749,35 @@ class InventoryService:
         max_lexical_score = max((lexical_score for _, lexical_score, _, _, _ in candidates), default=0.0)
         scored_candidates: list[tuple[InventorySearchHit, float, float, int, int, float]] = []
         for hit, lexical_score, vector_score, coverage, relation_score in candidates:
+            exact_name_match, exact_sku_match = self._exact_reference_match_signals(
+                query_text=query_text,
+                query_terms=query_terms,
+                subject_phrase=subject_phrase,
+                item=InventoryItemRecord(
+                    product_id=hit.product_id,
+                    sku=hit.sku,
+                    name=hit.name,
+                    category=hit.category,
+                    brand=hit.brand,
+                    short_description=hit.snippet,
+                    price=hit.price,
+                    currency=hit.currency or "USD",
+                    stock=hit.stock or 0,
+                    status=hit.status,
+                    tags=list(hit.tags),
+                    attributes=dict(hit.attributes),
+                    metadata=dict(hit.metadata),
+                    include_in_rag=True,
+                    updated_at=hit.updated_at,
+                ),
+            )
             evidence_score = self.ecommerce_reranker.score_product(
                 hit,
                 preferences=preference_profile,
                 semantic_score=(vector_score / max_vector_score) if max_vector_score > 0 else 0.0,
                 lexical_score=(lexical_score / max_lexical_score) if max_lexical_score > 0 else 0.0,
+                exact_name_match=exact_name_match,
+                exact_sku_match=exact_sku_match,
             )
             scored_hit = hit.model_copy(
                 update={
@@ -5386,10 +5427,10 @@ class InventoryService:
             subject = normalized.split(phrase, 1)[1].strip()
             if not subject:
                 return None
-            subject_terms = self._extract_query_terms(subject)
-            if not subject_terms:
+            normalized_subject = self._normalize_search_text(subject)
+            if not normalized_subject:
                 return None
-            return " ".join(subject_terms)
+            return normalized_subject
         return None
 
     def _is_detail_request(self, text: str) -> bool:
@@ -5569,6 +5610,91 @@ class InventoryService:
         if detail_request or subject_phrase:
             return True
         return len(query_terms) <= 3
+
+    def _resolve_explicit_requested_category(
+        self,
+        *,
+        query_text: str,
+        filters: InventorySearchFilters,
+        catalog: dict[str, InventoryItemRecord],
+        preference_profile: InventoryPreferenceProfile,
+    ) -> str | None:
+        if filters.categories:
+            return filters.categories[0]
+
+        normalized_query = self._normalize_search_text(query_text)
+        if not normalized_query:
+            return None
+
+        category_candidates: dict[str, str] = {}
+        for item in catalog.values():
+            if item.category:
+                category_candidates.setdefault(self._normalize_search_text(item.category), item.category)
+        for category in self.product_ontology.DEFAULT_CATEGORY_BY_TYPE.values():
+            category_candidates.setdefault(self._normalize_search_text(category), category)
+
+        matched_categories = [
+            category
+            for normalized_category, category in category_candidates.items()
+            if normalized_category
+            and self._contains_normalized_phrase(normalized_query, normalized_category)
+        ]
+        if matched_categories:
+            return max(matched_categories, key=lambda category: len(category.strip()))
+
+        if preference_profile.category and not preference_profile.product_type:
+            normalized_category = self._normalize_search_text(preference_profile.category)
+            if normalized_category and self._contains_normalized_phrase(normalized_query, normalized_category):
+                return preference_profile.category
+        return None
+
+    @staticmethod
+    def _contains_normalized_phrase(text: str, phrase: str) -> bool:
+        return bool(re.search(rf"\b{re.escape(phrase)}\b", text))
+
+    def _exact_reference_match_signals(
+        self,
+        *,
+        query_text: str,
+        query_terms: list[str],
+        subject_phrase: str | None,
+        item: InventoryItemRecord,
+    ) -> tuple[float, float]:
+        candidate_texts: list[str] = []
+        normalized_query = self._normalize_search_text(query_text)
+        if normalized_query:
+            candidate_texts.append(normalized_query)
+        if query_terms:
+            candidate_texts.append(" ".join(query_terms))
+        if subject_phrase:
+            normalized_subject = self._normalize_search_text(subject_phrase)
+            if normalized_subject:
+                candidate_texts.append(normalized_subject)
+
+        exact_name_targets = {
+            normalized
+            for normalized in (
+                self._normalize_search_text(item.name),
+            )
+            if normalized
+        }
+        exact_sku_targets = {
+            normalized
+            for normalized in (
+                self._normalize_search_text(item.sku),
+            )
+            if normalized
+        }
+        compact_name_targets = {target.replace(" ", "") for target in exact_name_targets if len(target.replace(" ", "")) >= 4}
+        compact_sku_targets = {target.replace(" ", "") for target in exact_sku_targets if len(target.replace(" ", "")) >= 4}
+
+        for candidate_text in candidate_texts:
+            compact_candidate = candidate_text.replace(" ", "")
+            if candidate_text in exact_sku_targets or compact_candidate in compact_sku_targets:
+                return 0.0, 1.0
+            if candidate_text in exact_name_targets or compact_candidate in compact_name_targets:
+                return 1.0, 0.0
+        return 0.0, 0.0
 
     def _is_strong_product_reference(
         self,

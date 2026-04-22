@@ -312,6 +312,63 @@ def test_inventory_search_recovers_compact_sku_aliases_for_exact_lookup(tmp_path
     assert response.hits[0].sku == "CMP-LTP-901"
 
 
+def test_inventory_search_boosts_exact_name_and_sku_matches_in_reranking(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="creator-pro",
+                sku="CMP-LTP-901",
+                name="CreatorCraft 16 Pro",
+                category="Computing",
+                brand="CreatorCraft",
+                short_description="16 inch creator laptop with dedicated graphics.",
+                price=1699.0,
+                currency="USD",
+                stock=4,
+                status="Active",
+                tags=["laptop", "creator", "premium"],
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="creator-air",
+                sku="CMP-LTP-902",
+                name="CreatorCraft 16 Air",
+                category="Computing",
+                brand="CreatorCraft",
+                short_description="16 inch creator laptop with long battery life.",
+                price=1499.0,
+                currency="USD",
+                stock=9,
+                status="Active",
+                tags=["laptop", "creator", "premium"],
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    name_response = service.search(
+        InventorySearchRequest(
+            query_text="tell me about CreatorCraft 16 Pro",
+            top_k=3,
+        )
+    )
+
+    assert name_response.hits[0].product_id == "creator-pro"
+    assert name_response.hits[0].evidence_scores["exact_name_match"] == pytest.approx(1.0)
+    assert name_response.hits[0].evidence_scores["exact_sku_match"] == pytest.approx(0.0)
+
+    sku_response = service.search(
+        InventorySearchRequest(
+            query_text="CMP-LTP-901",
+            top_k=3,
+        )
+    )
+
+    assert sku_response.hits[0].product_id == "creator-pro"
+    assert sku_response.hits[0].evidence_scores["exact_sku_match"] == pytest.approx(1.0)
+
+
 def test_inventory_search_combines_dense_and_lexical_candidate_pools_before_reranking(tmp_path) -> None:  # type: ignore[no-untyped-def]
     service = _build_inventory_service(tmp_path)
     service.upsert_items(
@@ -361,6 +418,115 @@ def test_inventory_search_combines_dense_and_lexical_candidate_pools_before_rera
     assert retrieval_stage_counts["merged_pool_candidates"] >= 1
     assert retrieval_stage_counts["reranked_candidates"] >= response.total_hits
     assert retrieval_stage_counts["returned_hits"] == response.total_hits
+
+
+def test_inventory_search_applies_explicit_category_gate_before_reranking(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="chair-1",
+                sku="OFF-CHR-001",
+                name="Executive Office Chair",
+                category="Office",
+                brand="WorkComfort",
+                short_description="Premium office chair with padded lumbar support.",
+                price=349.0,
+                currency="USD",
+                stock=8,
+                status="Active",
+                tags=["office", "premium", "chair"],
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="desk-1",
+                sku="OFF-DSK-010",
+                name="Executive Office Desk",
+                category="Office",
+                brand="WorkComfort",
+                short_description="Premium office desk for focused executive setups.",
+                price=599.0,
+                currency="USD",
+                stock=5,
+                status="Active",
+                tags=["office", "premium", "desk"],
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="laptop-1",
+                sku="CMP-LTP-500",
+                name="OfficePower Laptop",
+                category="Computing",
+                brand="OfficePower",
+                short_description="Premium office laptop for executive workflows.",
+                price=1399.0,
+                currency="USD",
+                stock=7,
+                status="Active",
+                tags=["office", "premium", "laptop"],
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    response, retrieval_stage_counts = service._search_with_diagnostics(
+        InventorySearchRequest(
+            query_text="show premium office products",
+            top_k=5,
+        )
+    )
+
+    assert response.total_hits == 2
+    assert {hit.category for hit in response.hits} == {"Office"}
+    assert retrieval_stage_counts["merged_pool_candidates"] >= 3
+    assert retrieval_stage_counts["category_gated_candidates"] == 2
+
+
+def test_inventory_search_returns_no_hits_when_type_request_has_no_viable_family_matches(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="bag-1",
+                sku="ACC-BAG-001",
+                name="Meeting Carry Bag",
+                category="Accessories",
+                brand="CarryAll",
+                short_description="Office carry bag for meeting essentials.",
+                price=79.0,
+                currency="USD",
+                stock=12,
+                status="Active",
+                tags=["office", "bag"],
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="laptop-1",
+                sku="CMP-LTP-800",
+                name="MeetingPro Laptop",
+                category="Computing",
+                brand="OfficeCore",
+                short_description="Office laptop for meetings and collaboration.",
+                price=1299.0,
+                currency="USD",
+                stock=6,
+                status="Active",
+                tags=["office", "laptop"],
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    response, retrieval_stage_counts = service._search_with_diagnostics(
+        InventorySearchRequest(
+            query_text="recommend an office camera",
+            top_k=5,
+        )
+    )
+
+    assert response.total_hits == 0
+    assert retrieval_stage_counts["merged_pool_candidates"] >= 1
+    assert retrieval_stage_counts["type_gated_candidates"] == 0
 
 
 def test_inventory_ask_uses_explicit_product_aliases_for_detail_requests(tmp_path) -> None:  # type: ignore[no-untyped-def]

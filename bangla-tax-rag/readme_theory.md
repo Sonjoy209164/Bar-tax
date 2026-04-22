@@ -133,6 +133,29 @@ Why it matters:
   - did type gating over-prune?
   - did reranking collapse a good merged pool into a weak final shortlist?
 
+### Phase 2 Next Slice: Exact Reference Boosting And Stronger Gating
+
+Implemented in:
+
+- `app/services/inventory_service.py`
+- `app/inventory/reranker.py`
+- `tests/test_inventory_api.py`
+
+What changed:
+
+- exact product-name matches now get explicit reranker credit
+- exact SKU matches now get explicit reranker credit
+- clear product-type requests no longer fall through to unrelated categories when no viable same-type or same-family candidates exist
+- clear category requests now narrow the candidate pool before reranking
+- retrieval traces now also expose `category_gated_candidates`
+
+Why it matters:
+
+- lexical recovery finds candidates, but candidate recovery and final ranking are not the same thing
+- without explicit exact-reference boosting, the right item can still tie too closely with a near-match sibling
+- without stronger gating, a query like `office camera` can drift into bags or laptops simply because they share soft lexical context
+- this keeps the retriever honest: exact requests should favor exact items, and explicit type/category requests should not be diluted by nearby but wrong inventory
+
 ## Design Choices We Are Following
 
 ### Clarify Before Recommending

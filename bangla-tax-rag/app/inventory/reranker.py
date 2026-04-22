@@ -11,6 +11,8 @@ from app.inventory.preferences import InventoryPreferenceProfile
 class ProductEvidenceScore:
     semantic_score: float = 0.0
     lexical_score: float = 0.0
+    exact_name_match: float = 0.0
+    exact_sku_match: float = 0.0
     category_match: float = 0.0
     brand_match: float = 0.0
     product_type_match: float = 0.0
@@ -29,6 +31,8 @@ class ProductEvidenceScore:
         return {
             "semantic_score": self.semantic_score,
             "lexical_score": self.lexical_score,
+            "exact_name_match": self.exact_name_match,
+            "exact_sku_match": self.exact_sku_match,
             "category_match": self.category_match,
             "brand_match": self.brand_match,
             "product_type_match": self.product_type_match,
@@ -78,10 +82,14 @@ class EcommerceReranker:
         preferences: InventoryPreferenceProfile,
         semantic_score: float,
         lexical_score: float,
+        exact_name_match: float = 0.0,
+        exact_sku_match: float = 0.0,
         assistant_mode: str = "support",
     ) -> ProductEvidenceScore:
         normalized_semantic = self._clamp(semantic_score)
         normalized_lexical = self._clamp(lexical_score)
+        normalized_exact_name = self._clamp(exact_name_match)
+        normalized_exact_sku = self._clamp(exact_sku_match)
         product_type = self.ontology.detect_product_type(product=product)
         product_family = self.ontology.product_family(product_type)
         searchable_text = self._product_text(product)
@@ -114,6 +122,8 @@ class EcommerceReranker:
         raw_score = (
             (normalized_semantic * 0.18)
             + (normalized_lexical * 0.2)
+            + (normalized_exact_name * 0.12)
+            + (normalized_exact_sku * 0.14)
             + (product_type_match * 0.2)
             + (family_match * 0.1)
             + (category_match * 0.08)
@@ -131,6 +141,8 @@ class EcommerceReranker:
         return ProductEvidenceScore(
             semantic_score=round(normalized_semantic, 4),
             lexical_score=round(normalized_lexical, 4),
+            exact_name_match=round(normalized_exact_name, 4),
+            exact_sku_match=round(normalized_exact_sku, 4),
             category_match=round(category_match, 4),
             brand_match=round(brand_match, 4),
             product_type_match=round(product_type_match, 4),
@@ -145,6 +157,8 @@ class EcommerceReranker:
             final_score=final_score,
             reasons=self._build_reasons(
                 preferences=preferences,
+                exact_name_match=normalized_exact_name,
+                exact_sku_match=normalized_exact_sku,
                 product_type=product_type,
                 product_family=product_family,
                 category_match=category_match,
@@ -160,6 +174,8 @@ class EcommerceReranker:
         self,
         *,
         preferences: InventoryPreferenceProfile,
+        exact_name_match: float,
+        exact_sku_match: float,
         product_type: str | None,
         product_family: str | None,
         category_match: float,
@@ -170,6 +186,10 @@ class EcommerceReranker:
         unrelated_category_penalty: float,
     ) -> tuple[str, ...]:
         reasons: list[str] = []
+        if exact_sku_match >= 1.0:
+            reasons.append("exact sku match")
+        elif exact_name_match >= 1.0:
+            reasons.append("exact product name match")
         if preferences.product_type and product_type == preferences.product_type:
             reasons.append(f"exact product type match: {product_type}")
         elif preferences.product_family and product_family == preferences.product_family:

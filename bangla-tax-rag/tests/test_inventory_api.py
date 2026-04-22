@@ -265,6 +265,104 @@ def test_inventory_search_uses_normalized_spec_aliases_for_vector_matches(tmp_pa
     ]
 
 
+def test_inventory_search_recovers_compact_sku_aliases_for_exact_lookup(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="creator-1tb",
+                sku="CMP-LTP-901",
+                name="CreatorCraft 16 Pro",
+                category="Computing",
+                brand="CreatorCraft",
+                short_description="16 inch creator laptop.",
+                price=1699.0,
+                currency="USD",
+                stock=4,
+                status="Active",
+                tags=["laptop", "creator"],
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="creator-512gb",
+                sku="CMP-LTP-902",
+                name="CreatorCraft 16 Air",
+                category="Computing",
+                brand="CreatorCraft",
+                short_description="16 inch creator laptop.",
+                price=1499.0,
+                currency="USD",
+                stock=9,
+                status="Active",
+                tags=["laptop", "creator"],
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    response = service.search(
+        InventorySearchRequest(
+            query_text="cmpltp901",
+            top_k=3,
+        )
+    )
+
+    assert response.total_hits >= 1
+    assert response.hits[0].product_id == "creator-1tb"
+    assert response.hits[0].sku == "CMP-LTP-901"
+
+
+def test_inventory_ask_uses_explicit_product_aliases_for_detail_requests(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="creator-1tb",
+                sku="CMP-LTP-901",
+                name="CreatorCraft 16 Pro",
+                category="Computing",
+                brand="CreatorCraft",
+                short_description="16 inch creator laptop.",
+                price=1699.0,
+                currency="USD",
+                stock=4,
+                status="Active",
+                tags=["laptop", "creator"],
+                metadata={"search_aliases": ["cc16 pro", "creator 16"]},
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="creator-512gb",
+                sku="CMP-LTP-902",
+                name="CreatorCraft 16 Air",
+                category="Computing",
+                brand="CreatorCraft",
+                short_description="16 inch creator laptop.",
+                price=1499.0,
+                currency="USD",
+                stock=9,
+                status="Active",
+                tags=["laptop", "creator"],
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    response = service.ask(
+        InventoryAskRequest(
+            question="tell me about cc16 pro",
+            assistant_mode="support",
+            reply_style="detailed",
+            top_k=5,
+        )
+    )
+
+    assert response.abstained is False
+    assert response.total_hits >= 1
+    assert response.hits[0].product_id == "creator-1tb"
+    assert response.answer.startswith("CreatorCraft 16 Pro is")
+
+
 def test_inventory_natural_prompt_uses_writer_contract_and_plan_fields(tmp_path) -> None:  # type: ignore[no-untyped-def]
     service = _build_inventory_service(tmp_path)
     hit = InventorySearchHit(

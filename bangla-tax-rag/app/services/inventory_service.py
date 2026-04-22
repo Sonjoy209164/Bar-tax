@@ -4111,6 +4111,7 @@ class InventoryService:
         attribute_text = " ".join(f"{key} {value}" for key, value in sorted(item.attributes.items()))
         metadata_text = " ".join(f"{key} {value}" for key, value in sorted(item.metadata.items()))
         curated_metadata_text = self._build_curated_search_text(curated_metadata)
+        alias_text = " ".join(self._search_alias_texts(item))
         fields = [
             item.name,
             item.sku,
@@ -4123,6 +4124,7 @@ class InventoryService:
             attribute_text,
             metadata_text,
             curated_metadata_text,
+            alias_text,
         ]
         return " ".join(value.strip() for value in fields if isinstance(value, str) and value.strip())
 
@@ -4234,6 +4236,68 @@ class InventoryService:
         for key, value in item.attributes.items():
             source.setdefault(key, value)
         return source
+
+    def _search_alias_texts(self, item: InventoryItemRecord) -> list[str]:
+        alias_texts: list[str] = []
+        seen: set[str] = set()
+
+        def add_alias(value: object) -> None:
+            if value is None:
+                return
+            normalized = self._normalize_search_text(str(value))
+            if len(normalized) < 2:
+                return
+            if normalized not in seen:
+                seen.add(normalized)
+                alias_texts.append(normalized)
+            compact = normalized.replace(" ", "")
+            if len(compact) >= 4 and compact != normalized and compact not in seen:
+                seen.add(compact)
+                alias_texts.append(compact)
+
+        alias_sources = (
+            item.metadata,
+            self._attribute_metadata_source(item),
+        )
+        alias_keys = (
+            "aliases",
+            "alias",
+            "search_aliases",
+            "product_aliases",
+            "name_aliases",
+            "alternate_names",
+            "alternative_names",
+            "alternate_name",
+            "alternative_name",
+            "aka",
+            "sku_aliases",
+            "model",
+            "model_number",
+            "part_number",
+        )
+        for source in alias_sources:
+            for key in alias_keys:
+                value = source.get(key)
+                if value is None:
+                    continue
+                if isinstance(value, (list, tuple, set)):
+                    for entry in value:
+                        add_alias(entry)
+                    continue
+                add_alias(value)
+
+        name_tokens = self._normalize_search_text(item.name).split()
+        sku_tokens = self._normalize_search_text(item.sku).split()
+        if len(sku_tokens) > 1:
+            add_alias("".join(sku_tokens))
+        if len(name_tokens) > 1:
+            add_alias("".join(name_tokens))
+            max_window = min(3, len(name_tokens))
+            for window_size in range(2, max_window + 1):
+                for index in range(len(name_tokens) - window_size + 1):
+                    add_alias("".join(name_tokens[index:index + window_size]))
+
+        return alias_texts
 
     @staticmethod
     def _first_metadata_value(source: dict[str, object], aliases: tuple[str, ...]) -> object | None:
@@ -5271,9 +5335,14 @@ class InventoryService:
         status_text = self._normalize_search_text(item.status)
         tag_text = self._normalize_search_text(" ".join(item.tags))
         snippet_text = self._normalize_search_text(item.short_description or item.full_description)
+        alias_texts = self._search_alias_texts(item)
+        alias_token_sets = [set(alias.split()) for alias in alias_texts]
+        alias_tokens = {token for tokens in alias_token_sets for token in tokens}
         all_text = " ".join(
             part for part in (name_text, sku_text, category_text, brand_text, status_text, tag_text, snippet_text) if part
         )
+        compact_subject_phrase = subject_phrase.replace(" ", "") if subject_phrase else None
+        compact_query = "".join(query_terms)
 
         field_tokens = {
             "name": set(name_text.split()),
@@ -5294,6 +5363,15 @@ class InventoryService:
                 score += 11.0
             elif subject_phrase in all_text:
                 score += 8.0
+            if subject_phrase in alias_texts:
+                score += 13.0
+            elif any(subject_phrase in alias for alias in alias_texts):
+                score += 9.5
+        if compact_subject_phrase:
+            if compact_subject_phrase in alias_texts:
+                score += 12.0
+            elif any(compact_subject_phrase in alias for alias in alias_texts):
+                score += 8.5
 
         for term in query_terms:
             if term in field_tokens["name"]:
@@ -5312,11 +5390,19 @@ class InventoryService:
                 score += 2.5
             if term in field_tokens["snippet"]:
                 score += 1.5
+            if term in alias_tokens:
+                score += 4.5
+            elif any(term in alias for alias in alias_texts):
+                score += 3.0
 
         if query_terms and all(term in field_tokens["all"] for term in query_terms):
             score += 5.0
         if query_terms and all(term in field_tokens["name"] for term in query_terms):
             score += 4.0
+        if query_terms and any(all(term in alias_tokens_for_item for term in query_terms) for alias_tokens_for_item in alias_token_sets):
+            score += 5.0
+        if compact_query and compact_query in alias_texts:
+            score += 7.0
         return score
 
     def _query_term_coverage(
@@ -5337,6 +5423,8 @@ class InventoryService:
             | self._tokenize_search_text(item.short_description)
             | self._tokenize_search_text(item.full_description)
         )
+        for alias in self._search_alias_texts(item):
+            searchable_tokens |= self._tokenize_search_text(alias)
         return sum(1 for term in query_terms if term in searchable_tokens)
 
     def _build_exact_no_match_answer(self, *, question: str) -> str | None:
@@ -5378,7 +5466,28 @@ class InventoryService:
         subject_phrase = self._extract_subject_phrase(question)
         name_text = self._normalize_search_text(hit.name)
         sku_text = self._normalize_search_text(hit.sku)
+        alias_texts = self._search_alias_texts(
+            InventoryItemRecord(
+                product_id=hit.product_id,
+                sku=hit.sku,
+                name=hit.name,
+                category=hit.category,
+                brand=hit.brand,
+                short_description=hit.snippet,
+                price=hit.price,
+                currency=hit.currency or "USD",
+                stock=hit.stock or 0,
+                status=hit.status,
+                tags=list(hit.tags),
+                attributes=dict(hit.attributes),
+                metadata=dict(hit.metadata),
+                include_in_rag=True,
+                updated_at=hit.updated_at,
+            )
+        )
         if subject_phrase and (subject_phrase == name_text or subject_phrase in name_text or subject_phrase in sku_text):
+            return True
+        if subject_phrase and any(subject_phrase == alias or subject_phrase in alias for alias in alias_texts):
             return True
         if not query_terms:
             return False
@@ -5390,6 +5499,8 @@ class InventoryService:
             | self._tokenize_search_text(hit.brand)
             | self._tokenize_search_text(" ".join(hit.tags))
         )
+        for alias in alias_texts:
+            searchable_tokens |= self._tokenize_search_text(alias)
         return len(query_term_set.intersection(searchable_tokens)) >= max(1, len(query_term_set) - 1)
 
     @staticmethod

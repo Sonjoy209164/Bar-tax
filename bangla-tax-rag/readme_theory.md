@@ -69,6 +69,36 @@ Why it matters:
 - clarification is better than bluffing
 - abstention is better than pretending an unrelated product is a valid answer
 
+### Phase 2 Start: Lexical Recovery And Exact Alias Handling
+
+Implemented in:
+
+- `app/services/inventory_service.py`
+- `tests/test_inventory_api.py`
+
+What changed:
+
+- retrieval now builds an explicit alias surface for each product
+- alias sources include:
+  - explicit metadata aliases such as `search_aliases`, `alternate_names`, `sku_aliases`, and model identifiers
+  - generated compact SKU variants such as `CMP-LTP-901 -> cmpltp901`
+  - generated compact name variants such as `smart watch -> smartwatch`
+- lexical scoring now rewards exact and near-exact alias matches
+- query-term coverage now counts alias tokens, not just the base name and SKU fields
+- vector search text now also carries alias text so dense retrieval gets the same recovery hints
+
+Why it matters:
+
+- many real catalog questions are not asked with the exact stored name
+- users collapse SKUs, remove punctuation, or use internal nicknames
+- without alias-aware lexical recovery, the system can look smart on generic semantic search while still failing obvious exact lookup requests
+
+What this fixes:
+
+- compact SKU queries like `cmpltp901`
+- explicit alias lookups like `cc16 pro`
+- collapsed name variants like `smartwatch`
+
 ## Design Choices We Are Following
 
 ### Clarify Before Recommending
@@ -111,6 +141,16 @@ Reason:
 - when the system is already uncertain, adding a generative layer usually increases style before it increases truth
 - deterministic guardrails are the right move at this stage
 
+### Recover Exact Candidates Before Semantic Neighbors
+
+For exact-ish product lookup, lexical recovery should win before dense similarity gets to free-associate.
+
+Reason:
+
+- vector similarity is useful for relatedness
+- exact lookup is about identity
+- a retriever that cannot reliably recover identity will always make downstream reasoning fragile
+
 ## What This Means Architecturally
 
 We are not building "just prompt engineering."
@@ -132,12 +172,13 @@ That is the foundation we can later reuse in other domains, even though inventor
 
 The next high-value step is Phase 2 from `todo_retrival.md`:
 
-- multi-stage retrieval
-- lexical recovery
-- exact alias handling
+- combine lexical and dense candidate pools more explicitly
+- exact-match boosting for product names and SKU hits
+- category and product-type gating before final ranking
 - metadata-aware reranking
 
 Reason:
 
 - Phase 1 now decides better when to answer and when not to
-- the next bottleneck is candidate quality, not route awareness
+- the first slice of Phase 2 now recovers more exact candidates
+- the next bottleneck is ranking discipline across mixed candidate pools

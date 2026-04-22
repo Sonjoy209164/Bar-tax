@@ -787,20 +787,34 @@ class InventoryService:
         )
 
     def search(self, request: InventorySearchRequest) -> InventorySearchResponse:
+        response, _ = self._search_with_diagnostics(request)
+        return response
+
+    def _search_with_diagnostics(
+        self,
+        request: InventorySearchRequest,
+    ) -> tuple[InventorySearchResponse, dict[str, int]]:
         catalog = self._load_catalog()
         top_k = min(request.top_k, self.config.max_top_k)
         query_text = (request.query_text or "").strip()
         if query_text:
-            hits = self._semantic_search(query_text=query_text, top_k=top_k, filters=request.filters, catalog=catalog)
+            hits, retrieval_stage_counts = self._semantic_search(
+                query_text=query_text,
+                top_k=top_k,
+                filters=request.filters,
+                catalog=catalog,
+            )
         else:
-            hits = self._browse_items(top_k=top_k, filters=request.filters, catalog=catalog)
-        return InventorySearchResponse(
+            hits, retrieval_stage_counts = self._browse_items(top_k=top_k, filters=request.filters, catalog=catalog)
+        response = InventorySearchResponse(
             status="success",
             query_text=query_text or None,
             total_hits=len(hits),
             applied_filters=request.filters,
             hits=hits,
         )
+        retrieval_stage_counts["search_requests"] = retrieval_stage_counts.get("search_requests", 0) + 1
+        return response, retrieval_stage_counts
 
     def ask(self, request: InventoryAskRequest) -> InventoryAskResponse:
         started_at = perf_counter()
@@ -869,7 +883,7 @@ class InventoryService:
             question=request.question,
             filters=effective_filters,
         )
-        search_response = self.search(
+        search_response, retrieval_stage_counts = self._search_with_diagnostics(
             InventorySearchRequest(
                 query_text=request.question,
                 top_k=request.top_k,
@@ -956,6 +970,7 @@ class InventoryService:
             retrieved_hits=search_response.hits,
             reranked_hits=ordered_hits,
             fallback_reason_override=fallback_reason,
+            retrieval_stage_counts=retrieval_stage_counts,
         )
         return response
 
@@ -1055,6 +1070,7 @@ class InventoryService:
                     filters=request.filters,
                     execution_path="inventory_agentic_conversation",
                 ),
+                "retrieval_stage_counts": {},
                 "reasoning_summary": reasoning_summary,
                 "missing_facts": [],
                 "retrieval_steps": [],
@@ -1070,6 +1086,7 @@ class InventoryService:
                 requested_answer_engine=request.answer_engine,
                 retrieved_hits=[],
                 reranked_hits=[],
+                retrieval_stage_counts={},
                 reasoning_summary=reasoning_summary,
                 missing_facts=[],
                 retrieval_steps=[],
@@ -1178,6 +1195,7 @@ class InventoryService:
                 "reply_style": request.reply_style,
                 "execution_path": "inventory_agentic_no_match_or_abstain",
                 "route_decision": self._serialize_route_response(route_response),
+                "retrieval_stage_counts": {},
                 "reasoning_summary": reasoning_summary,
                 "missing_facts": missing_facts,
                 "retrieval_steps": [],
@@ -1193,6 +1211,7 @@ class InventoryService:
                 requested_answer_engine=request.answer_engine,
                 retrieved_hits=[],
                 reranked_hits=[],
+                retrieval_stage_counts={},
                 reasoning_summary=reasoning_summary,
                 missing_facts=missing_facts,
                 retrieval_steps=[],
@@ -1210,10 +1229,15 @@ class InventoryService:
         )
 
         retrieval_steps: list[InventoryAgenticStep] = []
+        aggregated_retrieval_stage_counts: dict[str, int] = {}
         aggregated_hits: list[InventorySearchHit] = []
         seen_hits: set[str] = set()
         for step_number, search_request in enumerate(search_requests, start=1):
-            search_response = self.search(search_request)
+            search_response, retrieval_stage_counts = self._search_with_diagnostics(search_request)
+            aggregated_retrieval_stage_counts = self._merge_retrieval_stage_counts(
+                aggregated_retrieval_stage_counts,
+                retrieval_stage_counts,
+            )
             selected_hits = search_response.hits[: min(3, len(search_response.hits))]
             for hit in search_response.hits:
                 if hit.product_id in seen_hits:
@@ -1236,6 +1260,7 @@ class InventoryService:
                     total_hits=search_response.total_hits,
                     selected_product_ids=[hit.product_id for hit in selected_hits],
                     observation=observation,
+                    retrieval_stage_counts=retrieval_stage_counts,
                 )
             )
             reasoning_summary.append(observation)
@@ -1358,6 +1383,7 @@ class InventoryService:
             "reply_style": request.reply_style,
             "execution_path": "inventory_agentic",
             "route_decision": self._serialize_route_response(route_response),
+            "retrieval_stage_counts": aggregated_retrieval_stage_counts,
             "reasoning_summary": reasoning_summary,
             "missing_facts": missing_facts,
             "retrieval_steps": [step.model_dump(mode="json") for step in retrieval_steps],
@@ -1398,6 +1424,7 @@ class InventoryService:
             requested_answer_engine=request.answer_engine,
             retrieved_hits=aggregated_hits,
             reranked_hits=ordered_hits,
+            retrieval_stage_counts=aggregated_retrieval_stage_counts,
             reasoning_summary=reasoning_summary,
             missing_facts=missing_facts,
             retrieval_steps=retrieval_steps,
@@ -1428,6 +1455,7 @@ class InventoryService:
         requested_answer_engine: str,
         retrieved_hits: list[InventorySearchHit],
         reranked_hits: list[InventorySearchHit],
+        retrieval_stage_counts: dict[str, int] | None = None,
         reasoning_summary: list[str] | None = None,
         missing_facts: list[str] | None = None,
         retrieval_steps: list[InventoryAgenticStep] | None = None,
@@ -1460,6 +1488,7 @@ class InventoryService:
             "fallback_reason": fallback_reason,
             "intent": intent,
             "route_decision": route_decision,
+            "retrieval_stage_counts": dict(retrieval_stage_counts or {}),
             "preferences": response.answer_plan.preferences,
             "retrieved_product_ids": self._trace_product_ids(retrieved_hits),
             "reranked_product_ids": self._trace_product_ids(reranked_hits),
@@ -1515,14 +1544,40 @@ class InventoryService:
             return "Answer plan verification reported issues."
         return None
 
-    def _semantic_search(
+    @staticmethod
+    def _empty_retrieval_stage_counts() -> dict[str, int]:
+        return {
+            "search_requests": 0,
+            "dense_raw_matches": 0,
+            "dense_pool_candidates": 0,
+            "lexical_pool_candidates": 0,
+            "merged_pool_candidates": 0,
+            "type_gated_candidates": 0,
+            "exact_lookup_candidates": 0,
+            "lexical_anchor_candidates": 0,
+            "browse_candidates": 0,
+            "reranked_candidates": 0,
+            "returned_hits": 0,
+        }
+
+    @staticmethod
+    def _merge_retrieval_stage_counts(
+        base: dict[str, int],
+        delta: dict[str, int],
+    ) -> dict[str, int]:
+        merged = dict(base)
+        for key, value in delta.items():
+            merged[key] = merged.get(key, 0) + int(value)
+        return merged
+
+    def _dense_candidate_scores(
         self,
         *,
         query_text: str,
         top_k: int,
         filters: InventorySearchFilters,
         catalog: dict[str, InventoryItemRecord],
-    ) -> list[InventorySearchHit]:
+    ) -> tuple[dict[str, float], int]:
         query_vector = self.embedder.embed_text(query_text)
         vector_filters = self._build_vector_filters(filters)
         candidate_limit = max(top_k * self.config.search_candidate_multiplier, top_k)
@@ -1532,12 +1587,55 @@ class InventoryService:
             filters=vector_filters or None,
             namespace=self.config.namespace,
         )
-
-        vector_scores = {
+        dense_scores = {
             match.record_id: match.score
             for match in result.matches
             if match.record_id in catalog and self._item_matches_filters(catalog[match.record_id], filters)
         }
+        return dense_scores, len(result.matches)
+
+    def _lexical_candidate_scores(
+        self,
+        *,
+        catalog: dict[str, InventoryItemRecord],
+        filters: InventorySearchFilters,
+        query_terms: list[str],
+        subject_phrase: str | None,
+    ) -> dict[str, tuple[float, int]]:
+        lexical_scores: dict[str, tuple[float, int]] = {}
+        for item in catalog.values():
+            if not self._item_matches_filters(item, filters):
+                continue
+            lexical_score = self._lexical_match_score(
+                item=item,
+                query_terms=query_terms,
+                subject_phrase=subject_phrase,
+            )
+            if lexical_score <= 0:
+                continue
+            lexical_scores[item.product_id] = (
+                lexical_score,
+                self._query_term_coverage(item=item, query_terms=query_terms),
+            )
+        return lexical_scores
+
+    def _semantic_search(
+        self,
+        *,
+        query_text: str,
+        top_k: int,
+        filters: InventorySearchFilters,
+        catalog: dict[str, InventoryItemRecord],
+    ) -> tuple[list[InventorySearchHit], dict[str, int]]:
+        retrieval_stage_counts = self._empty_retrieval_stage_counts()
+        vector_scores, dense_raw_matches = self._dense_candidate_scores(
+            query_text=query_text,
+            top_k=top_k,
+            filters=filters,
+            catalog=catalog,
+        )
+        retrieval_stage_counts["dense_raw_matches"] = dense_raw_matches
+        retrieval_stage_counts["dense_pool_candidates"] = len(vector_scores)
         query_terms = self._extract_query_terms(query_text)
         subject_phrase = self._extract_subject_phrase(query_text)
         detail_request = self._is_detail_request(query_text)
@@ -1558,19 +1656,21 @@ class InventoryService:
         if detail_request and subject_phrase and len(subject_phrase.split()) >= 3:
             requested_product_type = None
 
+        lexical_candidates = self._lexical_candidate_scores(
+            catalog=catalog,
+            filters=filters,
+            query_terms=query_terms,
+            subject_phrase=subject_phrase,
+        )
+        retrieval_stage_counts["lexical_pool_candidates"] = len(lexical_candidates)
+        merged_candidate_ids = list(dict.fromkeys([*lexical_candidates.keys(), *vector_scores.keys()]))
+        retrieval_stage_counts["merged_pool_candidates"] = len(merged_candidate_ids)
+
         candidates: list[tuple[InventorySearchHit, float, float, int, int]] = []
-        for item in catalog.values():
-            if not self._item_matches_filters(item, filters):
-                continue
-            lexical_score = self._lexical_match_score(
-                item=item,
-                query_terms=query_terms,
-                subject_phrase=subject_phrase,
-            )
-            coverage = self._query_term_coverage(item=item, query_terms=query_terms)
-            vector_score = vector_scores.get(item.product_id, 0.0)
-            if lexical_score <= 0 and item.product_id not in vector_scores:
-                continue
+        for product_id in merged_candidate_ids:
+            item = catalog[product_id]
+            lexical_score, coverage = lexical_candidates.get(product_id, (0.0, 0))
+            vector_score = vector_scores.get(product_id, 0.0)
             confidence_score = max(vector_score, min(1.0, lexical_score / 12.0))
             relation_score = self.product_ontology.relation_score(requested_product_type, item)
             candidates.append(
@@ -1584,7 +1684,7 @@ class InventoryService:
             )
 
         if not candidates:
-            return []
+            return [], retrieval_stage_counts
 
         if requested_product_type:
             exact_type_candidates = [candidate for candidate in candidates if candidate[4] >= 3]
@@ -1594,18 +1694,23 @@ class InventoryService:
             elif related_type_candidates and not exact_lookup:
                 candidates = related_type_candidates
             elif exact_lookup:
-                return []
+                retrieval_stage_counts["type_gated_candidates"] = 0
+                return [], retrieval_stage_counts
+        retrieval_stage_counts["type_gated_candidates"] = len(candidates)
 
         if exact_lookup:
             max_coverage = max(coverage for _, _, _, coverage, _ in candidates)
             if max_coverage <= 0:
-                return []
+                retrieval_stage_counts["exact_lookup_candidates"] = 0
+                return [], retrieval_stage_counts
             coverage_threshold = len(query_terms) if len(query_terms) <= 2 else max(1, len(query_terms) - 1)
             exact_candidates = [candidate for candidate in candidates if candidate[3] >= coverage_threshold]
             if exact_candidates:
                 candidates = exact_candidates
             else:
-                return []
+                retrieval_stage_counts["exact_lookup_candidates"] = 0
+                return [], retrieval_stage_counts
+        retrieval_stage_counts["exact_lookup_candidates"] = len(candidates)
 
         best_lexical_score = max(lexical_score for _, lexical_score, _, _, _ in candidates)
         anchor_to_lexical = self._should_anchor_to_lexical(
@@ -1621,6 +1726,7 @@ class InventoryService:
             ]
             if anchored_candidates:
                 candidates = anchored_candidates
+        retrieval_stage_counts["lexical_anchor_candidates"] = len(candidates)
 
         max_vector_score = max((vector_score for _, _, vector_score, _, _ in candidates), default=0.0)
         max_lexical_score = max((lexical_score for _, lexical_score, _, _, _ in candidates), default=0.0)
@@ -1663,7 +1769,10 @@ class InventoryService:
                 candidate[0].name.casefold(),
             ),
         )
-        return [hit for hit, _, _, _, _, _ in ranked_candidates[:top_k]]
+        retrieval_stage_counts["reranked_candidates"] = len(ranked_candidates)
+        returned_hits = [hit for hit, _, _, _, _, _ in ranked_candidates[:top_k]]
+        retrieval_stage_counts["returned_hits"] = len(returned_hits)
+        return returned_hits, retrieval_stage_counts
 
     def _browse_items(
         self,
@@ -1671,13 +1780,18 @@ class InventoryService:
         top_k: int,
         filters: InventorySearchFilters,
         catalog: dict[str, InventoryItemRecord],
-    ) -> list[InventorySearchHit]:
+    ) -> tuple[list[InventorySearchHit], dict[str, int]]:
         items = [
             item
             for item in sorted(catalog.values(), key=self._catalog_sort_key, reverse=True)
             if self._item_matches_filters(item, filters)
         ]
-        return [self._build_search_hit(item=item, score=0.0) for item in items[:top_k]]
+        retrieval_stage_counts = self._empty_retrieval_stage_counts()
+        retrieval_stage_counts["browse_candidates"] = len(items)
+        retrieval_stage_counts["reranked_candidates"] = len(items)
+        hits = [self._build_search_hit(item=item, score=0.0) for item in items[:top_k]]
+        retrieval_stage_counts["returned_hits"] = len(hits)
+        return hits, retrieval_stage_counts
 
     def _merge_question_filters(
         self,

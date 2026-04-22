@@ -99,6 +99,40 @@ What this fixes:
 - explicit alias lookups like `cc16 pro`
 - collapsed name variants like `smartwatch`
 
+### Phase 2 Next Slice: Explicit Pool Combination And Trace Diagnostics
+
+Implemented in:
+
+- `app/services/inventory_service.py`
+- `app/core/schemas.py`
+- `tests/test_inventory_api.py`
+
+What changed:
+
+- dense and lexical candidates are now generated as separate pools first
+- those pools are then merged explicitly before type gating and reranking
+- retrieval traces now record stage counts such as:
+  - `dense_pool_candidates`
+  - `lexical_pool_candidates`
+  - `merged_pool_candidates`
+  - `type_gated_candidates`
+  - `exact_lookup_candidates`
+  - `lexical_anchor_candidates`
+  - `reranked_candidates`
+  - `returned_hits`
+- agentic retrieval steps now also carry their own per-step stage counts
+
+Why it matters:
+
+- before this, lexical and dense evidence were effectively mixed inside one loop
+- that worked, but it hid where candidate quality was being won or lost
+- once retrieval starts getting more sophisticated, hidden mixing becomes a debugging tax
+- explicit pool accounting makes it much easier to answer:
+  - did dense retrieval miss?
+  - did lexical recovery save the lookup?
+  - did type gating over-prune?
+  - did reranking collapse a good merged pool into a weak final shortlist?
+
 ## Design Choices We Are Following
 
 ### Clarify Before Recommending
@@ -151,6 +185,16 @@ Reason:
 - exact lookup is about identity
 - a retriever that cannot reliably recover identity will always make downstream reasoning fragile
 
+### Make Retrieval Stages Observable
+
+If retrieval has multiple stages, those stages need visible counts.
+
+Reason:
+
+- otherwise we only see the final hits and guess what happened upstream
+- stage counts turn retrieval into an inspectable system instead of a black box
+- this is especially important before adding heavier reranking and evaluation
+
 ## What This Means Architecturally
 
 We are not building "just prompt engineering."
@@ -172,7 +216,6 @@ That is the foundation we can later reuse in other domains, even though inventor
 
 The next high-value step is Phase 2 from `todo_retrival.md`:
 
-- combine lexical and dense candidate pools more explicitly
 - exact-match boosting for product names and SKU hits
 - category and product-type gating before final ranking
 - metadata-aware reranking
@@ -180,5 +223,5 @@ The next high-value step is Phase 2 from `todo_retrival.md`:
 Reason:
 
 - Phase 1 now decides better when to answer and when not to
-- the first slice of Phase 2 now recovers more exact candidates
-- the next bottleneck is ranking discipline across mixed candidate pools
+- the first slices of Phase 2 now recover and expose more candidates correctly
+- the next bottleneck is ranking discipline after the pools are merged

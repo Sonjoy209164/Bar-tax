@@ -1102,6 +1102,7 @@ class InventoryAgenticStep(BaseModel):
     total_hits: int = 0
     selected_product_ids: list[str] = Field(default_factory=list)
     observation: str
+    retrieval_stage_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class InventoryAgenticStatusResponse(BaseModel):
@@ -1149,6 +1150,7 @@ class InventoryAgenticTraceResponse(BaseModel):
     reply_style: str
     execution_path: str
     route_decision: dict[str, Any] = Field(default_factory=dict)
+    retrieval_stage_counts: dict[str, int] = Field(default_factory=dict)
     reasoning_summary: list[str] = Field(default_factory=list)
     missing_facts: list[str] = Field(default_factory=list)
     retrieval_steps: list[InventoryAgenticStep] = Field(default_factory=list)
@@ -1169,6 +1171,7 @@ class InventoryChatTraceResponse(BaseModel):
     fallback_reason: str | None = None
     intent: str | None = None
     route_decision: dict[str, Any] = Field(default_factory=dict)
+    retrieval_stage_counts: dict[str, int] = Field(default_factory=dict)
     preferences: dict[str, Any] = Field(default_factory=dict)
     retrieved_product_ids: list[str] = Field(default_factory=list)
     reranked_product_ids: list[str] = Field(default_factory=list)

@@ -99,14 +99,14 @@ Target retrieval stages:
 Implementation tasks:
 
 - [x] Add lexical-first recovery for exact and near-exact product lookups.
-- [ ] Combine lexical and dense candidate pools before reranking.
+- [x] Combine lexical and dense candidate pools before reranking.
 - [ ] Use normalized vector metadata for hard filters on specs and constraints.
 - [x] Add product alias handling for name variants, SKU variants, and spec aliases like `1TB` vs `1024GB`.
 - [ ] Add exact-match boosting for product names and SKU hits.
 - [ ] Add category and product-type gating before final ranking.
 - [ ] Add metadata-aware reranking for spec-heavy queries.
 - [ ] Add business-signal-aware reranking for operational queries.
-- [ ] Record per-stage candidate counts in traces.
+- [x] Record per-stage candidate counts in traces.
 - [ ] Add evals for lexical miss recovery and alias recovery.
 
 Success criteria:

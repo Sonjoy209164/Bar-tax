@@ -312,6 +312,57 @@ def test_inventory_search_recovers_compact_sku_aliases_for_exact_lookup(tmp_path
     assert response.hits[0].sku == "CMP-LTP-901"
 
 
+def test_inventory_search_combines_dense_and_lexical_candidate_pools_before_reranking(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="prod-headphones",
+                sku="AUD-HP-001",
+                name="Wireless Headphones Pro",
+                category="Audio",
+                brand="AudioTech",
+                short_description="Premium wireless headphones with noise cancellation",
+                price=299.99,
+                currency="USD",
+                stock=45,
+                status="Active",
+                tags=["wireless", "audio", "premium"],
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="prod-bag",
+                sku="BAG-003",
+                name="Travel Laptop Bag",
+                category="Accessories",
+                brand="CarryAll",
+                short_description="Water-resistant bag for laptops and accessories",
+                price=79.99,
+                currency="USD",
+                stock=20,
+                status="Active",
+                tags=["bag", "travel"],
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    response, retrieval_stage_counts = service._search_with_diagnostics(
+        InventorySearchRequest(
+            query_text="wireless headphones",
+            top_k=3,
+        )
+    )
+
+    assert response.hits[0].product_id == "prod-headphones"
+    assert retrieval_stage_counts["search_requests"] == 1
+    assert retrieval_stage_counts["dense_pool_candidates"] >= 1
+    assert retrieval_stage_counts["lexical_pool_candidates"] >= 1
+    assert retrieval_stage_counts["merged_pool_candidates"] >= 1
+    assert retrieval_stage_counts["reranked_candidates"] >= response.total_hits
+    assert retrieval_stage_counts["returned_hits"] == response.total_hits
+
+
 def test_inventory_ask_uses_explicit_product_aliases_for_detail_requests(tmp_path) -> None:  # type: ignore[no-untyped-def]
     service = _build_inventory_service(tmp_path)
     service.upsert_items(
@@ -1019,7 +1070,10 @@ async def test_inventory_agentic_trace_and_status_endpoints(monkeypatch: pytest.
     assert trace_payload["execution_path"] == "inventory_agentic"
     assert trace_payload["route_decision"]["recommended_path"] == "normal_rag"
     assert trace_payload["route_decision"]["signals"]["question_family"] == "exact_lookup"
+    assert trace_payload["retrieval_stage_counts"]["search_requests"] >= 1
     assert trace_payload["retrieval_steps"]
+    assert trace_payload["retrieval_steps"][0]["retrieval_stage_counts"]["search_requests"] == 1
+    assert trace_payload["retrieval_steps"][0]["retrieval_stage_counts"]["returned_hits"] >= 1
     assert "VoxCast USB Podcast Microphone" in trace_payload["final_answer"]
 
     assert chat_trace_response.status_code == 200
@@ -1028,6 +1082,7 @@ async def test_inventory_agentic_trace_and_status_endpoints(monkeypatch: pytest.
     assert chat_trace_payload["execution_path"] == "inventory_agentic"
     assert chat_trace_payload["route_decision"]["recommended_path"] == "normal_rag"
     assert chat_trace_payload["route_decision"]["signals"]["question_family"] == "exact_lookup"
+    assert chat_trace_payload["retrieval_stage_counts"]["search_requests"] >= 1
     assert chat_trace_payload["retrieval_steps"]
     assert chat_trace_payload["reasoning_summary"]
     assert chat_trace_payload["retrieved_product_ids"] == ["prod-mic"]
@@ -1978,6 +2033,9 @@ async def test_inventory_ask_returns_debuggable_chat_trace(monkeypatch: pytest.M
     assert trace_payload["latency_ms"] >= 0
     assert trace_payload["intent"] in {"exact_lookup", "product_detail", "product_search"}
     assert trace_payload["preferences"]["product_type"] == "microphone"
+    assert trace_payload["retrieval_stage_counts"]["search_requests"] == 1
+    assert trace_payload["retrieval_stage_counts"]["merged_pool_candidates"] >= 1
+    assert trace_payload["retrieval_stage_counts"]["returned_hits"] == 1
     assert trace_payload["retrieved_product_ids"] == ["prod-mic"]
     assert trace_payload["reranked_product_ids"] == ["prod-mic"]
     assert trace_payload["answer_plan"]["primary_product_id"] == "prod-mic"

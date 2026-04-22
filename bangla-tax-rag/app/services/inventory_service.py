@@ -1030,6 +1030,11 @@ class InventoryService:
                 "assistant_mode": request.assistant_mode,
                 "reply_style": request.reply_style,
                 "execution_path": "inventory_agentic_conversation",
+                "route_decision": self._build_route_trace_metadata(
+                    question=request.question,
+                    filters=request.filters,
+                    execution_path="inventory_agentic_conversation",
+                ),
                 "reasoning_summary": reasoning_summary,
                 "missing_facts": [],
                 "retrieval_steps": [],
@@ -1048,6 +1053,11 @@ class InventoryService:
                 reasoning_summary=reasoning_summary,
                 missing_facts=[],
                 retrieval_steps=[],
+                route_decision_override=self._build_route_trace_metadata(
+                    question=request.question,
+                    filters=request.filters,
+                    execution_path="inventory_agentic_conversation",
+                ),
             )
             return response
 
@@ -1243,6 +1253,7 @@ class InventoryService:
             "assistant_mode": request.assistant_mode,
             "reply_style": request.reply_style,
             "execution_path": "inventory_agentic",
+            "route_decision": self._serialize_route_response(route_response),
             "reasoning_summary": reasoning_summary,
             "missing_facts": missing_facts,
             "retrieval_steps": [step.model_dump(mode="json") for step in retrieval_steps],
@@ -1287,6 +1298,7 @@ class InventoryService:
             missing_facts=missing_facts,
             retrieval_steps=retrieval_steps,
             fallback_reason_override=fallback_reason,
+            route_decision_override=self._serialize_route_response(route_response),
         )
         return response
 
@@ -1316,9 +1328,15 @@ class InventoryService:
         missing_facts: list[str] | None = None,
         retrieval_steps: list[InventoryAgenticStep] | None = None,
         fallback_reason_override: str | None = None,
+        route_decision_override: dict[str, object] | None = None,
     ) -> None:
         latency_ms = round((perf_counter() - started_at) * 1000, 3)
         intent = response.answer_plan.detected_intent or response.answer_plan.intent
+        route_decision = route_decision_override or self._build_route_trace_metadata(
+            question=response.question,
+            filters=response.applied_filters,
+            execution_path=execution_path,
+        )
         fallback_reason = fallback_reason_override
         if fallback_reason is None:
             fallback_reason = self._trace_fallback_reason(
@@ -1337,6 +1355,7 @@ class InventoryService:
             "latency_ms": latency_ms,
             "fallback_reason": fallback_reason,
             "intent": intent,
+            "route_decision": route_decision,
             "preferences": response.answer_plan.preferences,
             "retrieved_product_ids": self._trace_product_ids(retrieved_hits),
             "reranked_product_ids": self._trace_product_ids(reranked_hits),
@@ -1735,6 +1754,10 @@ class InventoryService:
         question: str,
         filters: InventorySearchFilters,
     ) -> InventoryRouteSignals:
+        intent_result, question_family, family_confidence, family_reasons = self._classify_route_question_family(
+            question=question,
+            filters=filters,
+        )
         normalized = self._normalize_conversation_text(question)
         is_small_talk = (
             not self._looks_like_inventory_request(normalized)
@@ -1752,11 +1775,14 @@ class InventoryService:
         )
         needs_historical_data = self._has_any_phrase(normalized, _HISTORICAL_DATA_HINTS)
         needs_cross_system_data = self._has_any_phrase(normalized, _CROSS_SYSTEM_HINTS)
-        needs_root_cause_reasoning = self._has_any_phrase(normalized, _ROOT_CAUSE_HINTS) and not is_small_talk
-        needs_workflow_action = self._has_any_phrase(normalized, _WORKFLOW_ACTION_HINTS) or (
+        needs_root_cause_reasoning = (
+            question_family == "diagnosis_root_cause"
+            or (self._has_any_phrase(normalized, _ROOT_CAUSE_HINTS) and not is_small_talk)
+        )
+        needs_workflow_action = question_family == "planning_agentic_workflow" or self._has_any_phrase(normalized, _WORKFLOW_ACTION_HINTS) or (
             "should we" in normalized or "should i" in normalized
         )
-        needs_multi_step_reasoning = self._has_any_phrase(normalized, _MULTI_STEP_REASONING_HINTS)
+        needs_multi_step_reasoning = question_family in {"comparison", "diagnosis_root_cause", "planning_agentic_workflow"} or self._has_any_phrase(normalized, _MULTI_STEP_REASONING_HINTS)
         if sum(
             (
                 int(needs_historical_data),
@@ -1777,7 +1803,9 @@ class InventoryService:
                 )
             )
             and (
-                has_explicit_product_reference
+                question_family in {"exact_lookup", "comparison", "recommendation", "no_match_or_abstain"}
+                or question_family == "small_talk"
+                or has_explicit_product_reference
                 or self._looks_like_inventory_request(normalized)
                 or bool(_UNDER_PRICE_PATTERN.search(question))
                 or bool(_OVER_PRICE_PATTERN.search(question))
@@ -1796,6 +1824,12 @@ class InventoryService:
             )
         )
         return InventoryRouteSignals(
+            detected_intent=intent_result.intent,
+            intent_confidence=intent_result.confidence,
+            intent_reasons=list(intent_result.reasons),
+            question_family=question_family,
+            family_confidence=family_confidence,
+            family_reasons=family_reasons,
             is_small_talk=is_small_talk,
             has_explicit_product_reference=has_explicit_product_reference,
             simple_catalog_lookup=simple_catalog_lookup,
@@ -1805,6 +1839,137 @@ class InventoryService:
             needs_workflow_action=needs_workflow_action,
             needs_multi_step_reasoning=needs_multi_step_reasoning,
         )
+
+    def _classify_route_question_family(
+        self,
+        *,
+        question: str,
+        filters: InventorySearchFilters,
+    ) -> tuple[InventoryIntentResult, str, float, list[str]]:
+        intent_result = self.intent_classifier.classify(question, filters=filters)
+        normalized = self._normalize_conversation_text(question)
+        has_explicit_product_reference = bool(filters.product_ids) or self._is_detail_request(question) or bool(
+            re.search(r"\b[A-Za-z]{2,}(?:-[A-Za-z0-9]+)+\b", question)
+        )
+        has_root_cause_signal = self._has_any_phrase(normalized, _ROOT_CAUSE_HINTS)
+        has_workflow_signal = self._has_any_phrase(normalized, _WORKFLOW_ACTION_HINTS) or (
+            "should we" in normalized or "should i" in normalized
+        )
+
+        family = "no_match_or_abstain"
+        confidence = max(0.5, intent_result.confidence)
+        reasons = list(intent_result.reasons)
+
+        if intent_result.intent == "small_talk":
+            return intent_result, "small_talk", 0.98, ["Detected conversational small talk."]
+
+        if has_workflow_signal and (
+            intent_result.intent in {"restock", "business_analysis", "cross_sell"}
+            or has_root_cause_signal
+        ):
+            family = "planning_agentic_workflow"
+            confidence = max(confidence, 0.9)
+            reasons.append("Question includes workflow or action-planning language.")
+            if has_root_cause_signal:
+                reasons.append("Question also includes diagnosis or root-cause language.")
+            return intent_result, family, confidence, self._dedupe_route_reasons(reasons)
+
+        if intent_result.intent == "comparison" or self._has_any_phrase(
+            normalized,
+            ("compare", "vs", "versus", "difference between", "which is better"),
+        ):
+            family = "comparison"
+            confidence = max(confidence, 0.9)
+            reasons.append("Question asks for side-by-side product comparison.")
+            return intent_result, family, confidence, self._dedupe_route_reasons(reasons)
+
+        if has_root_cause_signal and intent_result.intent in {"business_analysis", "unknown"}:
+            family = "diagnosis_root_cause"
+            confidence = max(confidence, 0.84)
+            reasons.append("Question asks why something happened and likely needs diagnosis.")
+            return intent_result, family, confidence, self._dedupe_route_reasons(reasons)
+
+        if intent_result.intent in {
+            "recommendation",
+            "price_objection",
+            "availability_objection",
+            "quality_objection",
+            "cross_sell",
+        }:
+            family = "recommendation"
+            confidence = max(confidence, 0.86)
+            reasons.append("Question is asking for a recommendation, objection handling, or add-on guidance.")
+            return intent_result, family, confidence, self._dedupe_route_reasons(reasons)
+
+        if intent_result.intent in {"exact_lookup", "product_detail", "product_search"}:
+            family = "exact_lookup"
+            confidence = max(confidence, 0.78 if has_explicit_product_reference else 0.72)
+            if has_explicit_product_reference:
+                reasons.append("Question includes an explicit product or SKU reference.")
+            else:
+                reasons.append("Question looks like a direct catalog lookup.")
+            return intent_result, family, confidence, self._dedupe_route_reasons(reasons)
+
+        if intent_result.intent == "restock" or has_workflow_signal:
+            family = "planning_agentic_workflow"
+            confidence = max(confidence, 0.82)
+            reasons.append("Question is asking what action to take next.")
+            return intent_result, family, confidence, self._dedupe_route_reasons(reasons)
+
+        if intent_result.intent == "business_analysis":
+            family = "diagnosis_root_cause"
+            confidence = max(confidence, 0.76)
+            reasons.append("Question needs operational diagnosis instead of a simple lookup.")
+            return intent_result, family, confidence, self._dedupe_route_reasons(reasons)
+
+        if self._looks_like_inventory_request(normalized):
+            family = "no_match_or_abstain"
+            confidence = max(confidence, 0.58)
+            reasons.append("Question looks inventory-related but lacks a strong direct lookup or workflow signature.")
+            return intent_result, family, confidence, self._dedupe_route_reasons(reasons)
+
+        reasons.append("Question does not map cleanly to a retrieval family and may need clarification or abstain behavior.")
+        return intent_result, family, confidence, self._dedupe_route_reasons(reasons)
+
+    def _build_route_trace_metadata(
+        self,
+        *,
+        question: str,
+        filters: InventorySearchFilters,
+        execution_path: str,
+    ) -> dict[str, object]:
+        signals = self._build_route_signals(question=question, filters=filters)
+        return {
+            "execution_path": execution_path,
+            "detected_intent": signals.detected_intent,
+            "intent_confidence": signals.intent_confidence,
+            "question_family": signals.question_family,
+            "family_confidence": signals.family_confidence,
+            "family_reasons": list(signals.family_reasons),
+            "signals": signals.model_dump(mode="json"),
+        }
+
+    @staticmethod
+    def _serialize_route_response(route_response: InventoryRouteResponse) -> dict[str, object]:
+        return {
+            "recommended_path": route_response.recommended_path,
+            "fallback_path": route_response.fallback_path,
+            "decision_confidence": route_response.decision_confidence,
+            "reason_summary": route_response.reason_summary,
+            "decision_factors": list(route_response.decision_factors),
+            "required_data_domains": list(route_response.required_data_domains),
+            "missing_data_domains": list(route_response.missing_data_domains),
+            "signals": route_response.signals.model_dump(mode="json"),
+        }
+
+    @staticmethod
+    def _dedupe_route_reasons(reasons: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for reason in reasons:
+            if not reason or reason in deduped:
+                continue
+            deduped.append(reason)
+        return deduped
 
     def _required_data_domains_for_route(
         self,
@@ -1854,6 +2019,24 @@ class InventoryService:
     ) -> tuple[str, float, list[str]]:
         decision_factors: list[str] = []
         agentic_score = 0
+
+        if signals.question_family == "planning_agentic_workflow":
+            agentic_score += 3
+            decision_factors.append("Classified as a workflow or action-planning question.")
+        elif signals.question_family == "diagnosis_root_cause":
+            agentic_score += 3
+            decision_factors.append("Classified as a diagnosis or root-cause question.")
+        elif signals.question_family == "comparison":
+            agentic_score += 1
+            decision_factors.append("Classified as a comparison question that may need structured side-by-side reasoning.")
+        elif signals.question_family == "recommendation":
+            decision_factors.append("Classified as a recommendation question.")
+        elif signals.question_family == "exact_lookup":
+            agentic_score -= 2
+            decision_factors.append("Classified as a direct lookup question.")
+        elif signals.question_family == "no_match_or_abstain":
+            agentic_score -= 1
+            decision_factors.append("Looks underspecified enough that clarification or abstain may be safer than deeper escalation.")
 
         if signals.needs_historical_data:
             agentic_score += 3
@@ -1923,6 +2106,12 @@ class InventoryService:
         if recommended_path == "normal_rag":
             if signals.is_small_talk:
                 return "Use normal RAG because this is conversational and does not need deep multi-step reasoning."
+            if signals.question_family == "comparison":
+                return "Use normal RAG because this is a direct comparison question that the mirrored catalog should handle without agentic overhead."
+            if signals.question_family == "recommendation":
+                return "Use normal RAG because this recommendation can be grounded in the mirrored catalog without deeper workflow analysis."
+            if signals.question_family == "no_match_or_abstain":
+                return "Use normal RAG first because this looks like a clarification or abstain case rather than a workflow problem."
             if signals.has_explicit_product_reference:
                 return "Use normal RAG because this looks like a direct product-level question that should be answered from the mirrored catalog."
             return (
@@ -1936,6 +2125,10 @@ class InventoryService:
                 "Escalate to agentic handling because the question needs deeper cross-system or historical reasoning, "
                 f"but the current context is still missing {self._natural_join(missing_data_domains)}."
             )
+        if signals.question_family == "planning_agentic_workflow":
+            return "Escalate to agentic handling because this question is asking for a concrete workflow or planning decision."
+        if signals.question_family == "diagnosis_root_cause":
+            return "Escalate to agentic handling because this question needs diagnosis and multi-step reasoning beyond direct catalog retrieval."
         return "Escalate to agentic handling because the question needs multi-step reasoning beyond straightforward catalog retrieval."
 
     def _build_agentic_search_requests(

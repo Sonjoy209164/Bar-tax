@@ -68,16 +68,16 @@ Question families to support:
 
 Implementation tasks:
 
-- [ ] Add deterministic routing rules for question family classification.
-- [ ] Detect exact product reference vs category intent vs planning intent.
-- [ ] Detect compare language such as `compare`, `vs`, `difference`, `better`.
-- [ ] Detect recommendation language such as `best`, `recommend`, `which should I buy`.
-- [ ] Detect diagnosis language such as `why`, `root cause`, `what went wrong`.
-- [ ] Detect workflow/planning language such as `restock`, `bundle`, `what should we do next`.
+- [x] Add deterministic routing rules for question family classification.
+- [x] Detect exact product reference vs category intent vs planning intent.
+- [x] Detect compare language such as `compare`, `vs`, `difference`, `better`.
+- [x] Detect recommendation language such as `best`, `recommend`, `which should I buy`.
+- [x] Detect diagnosis language such as `why`, `root cause`, `what went wrong`.
+- [x] Detect workflow/planning language such as `restock`, `bundle`, `what should we do next`.
 - [ ] Detect when the request is underspecified and should move to abstain or follow-up.
-- [ ] Return route confidence.
-- [ ] Persist route decision in trace metadata.
-- [ ] Add tests for route classification.
+- [x] Return route confidence.
+- [x] Persist route decision in trace metadata.
+- [x] Add tests for route classification.
 
 Success criteria:
 

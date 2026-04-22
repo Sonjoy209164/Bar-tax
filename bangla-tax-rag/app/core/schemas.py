@@ -960,6 +960,12 @@ class InventoryRouteRequest(BaseModel):
 
 
 class InventoryRouteSignals(BaseModel):
+    detected_intent: str = "unknown"
+    intent_confidence: float | None = Field(default=None, ge=0, le=1)
+    intent_reasons: list[str] = Field(default_factory=list)
+    question_family: str = "unknown"
+    family_confidence: float | None = Field(default=None, ge=0, le=1)
+    family_reasons: list[str] = Field(default_factory=list)
     is_small_talk: bool = False
     has_explicit_product_reference: bool = False
     simple_catalog_lookup: bool = False
@@ -1142,6 +1148,7 @@ class InventoryAgenticTraceResponse(BaseModel):
     assistant_mode: str
     reply_style: str
     execution_path: str
+    route_decision: dict[str, Any] = Field(default_factory=dict)
     reasoning_summary: list[str] = Field(default_factory=list)
     missing_facts: list[str] = Field(default_factory=list)
     retrieval_steps: list[InventoryAgenticStep] = Field(default_factory=list)
@@ -1161,6 +1168,7 @@ class InventoryChatTraceResponse(BaseModel):
     latency_ms: float
     fallback_reason: str | None = None
     intent: str | None = None
+    route_decision: dict[str, Any] = Field(default_factory=dict)
     preferences: dict[str, Any] = Field(default_factory=dict)
     retrieved_product_ids: list[str] = Field(default_factory=list)
     reranked_product_ids: list[str] = Field(default_factory=list)

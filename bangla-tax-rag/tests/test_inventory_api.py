@@ -745,6 +745,9 @@ async def test_inventory_route_prefers_normal_rag_for_direct_catalog_question(mo
     assert payload["normal_rag_contract"]["implementation_status"] == "implemented"
     assert payload["agentic_contract"]["implementation_status"] == "implemented"
     assert payload["agentic_contract"]["endpoint"] == "/inventory/agentic/ask"
+    assert payload["signals"]["detected_intent"] == "product_search"
+    assert payload["signals"]["question_family"] == "exact_lookup"
+    assert payload["signals"]["family_confidence"] >= 0.78
     assert payload["signals"]["simple_catalog_lookup"] is True
     assert "catalog/support question" in payload["reason_summary"].lower()
 
@@ -770,12 +773,41 @@ async def test_inventory_route_escalates_complex_internal_question_to_agentic(mo
     assert response.status_code == 200
     payload = response.json()
     assert payload["recommended_path"] == "agentic"
+    assert payload["signals"]["question_family"] == "planning_agentic_workflow"
+    assert payload["signals"]["family_confidence"] >= 0.9
     assert payload["signals"]["needs_historical_data"] is True
     assert payload["signals"]["needs_cross_system_data"] is True
     assert payload["signals"]["needs_root_cause_reasoning"] is True
     assert payload["signals"]["needs_workflow_action"] is True
     assert payload["agentic_contract"]["endpoint"] == "/inventory/agentic/ask"
     assert payload["missing_data_domains"] == []
+
+
+@pytest.mark.anyio
+async def test_inventory_route_classifies_diagnosis_question_family(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/inventory/route",
+            json={
+                "question": "Why are premium earbud returns increasing this quarter?",
+                "audience": "manager",
+                "prefer_fast_response": False,
+                "available_data_domains": ["catalog", "returns", "sales"],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recommended_path"] == "agentic"
+    assert payload["signals"]["question_family"] == "diagnosis_root_cause"
+    assert payload["signals"]["detected_intent"] == "business_analysis"
+    assert payload["signals"]["family_confidence"] >= 0.84
+    assert payload["signals"]["needs_root_cause_reasoning"] is True
 
 
 @pytest.mark.anyio
@@ -887,6 +919,8 @@ async def test_inventory_agentic_trace_and_status_endpoints(monkeypatch: pytest.
     trace_payload = trace_response.json()
     assert trace_payload["trace_id"] == trace_id
     assert trace_payload["execution_path"] == "inventory_agentic"
+    assert trace_payload["route_decision"]["recommended_path"] == "normal_rag"
+    assert trace_payload["route_decision"]["signals"]["question_family"] == "exact_lookup"
     assert trace_payload["retrieval_steps"]
     assert "VoxCast USB Podcast Microphone" in trace_payload["final_answer"]
 
@@ -894,6 +928,8 @@ async def test_inventory_agentic_trace_and_status_endpoints(monkeypatch: pytest.
     chat_trace_payload = chat_trace_response.json()
     assert chat_trace_payload["trace_id"] == trace_id
     assert chat_trace_payload["execution_path"] == "inventory_agentic"
+    assert chat_trace_payload["route_decision"]["recommended_path"] == "normal_rag"
+    assert chat_trace_payload["route_decision"]["signals"]["question_family"] == "exact_lookup"
     assert chat_trace_payload["retrieval_steps"]
     assert chat_trace_payload["reasoning_summary"]
     assert chat_trace_payload["retrieved_product_ids"] == ["prod-mic"]

@@ -6,6 +6,7 @@ from app.core.schemas import (
     InventoryAnswerVerification,
     InventoryAskRequest,
     InventoryItemRecord,
+    InventorySearchRequest,
     InventorySearchHit,
 )
 from app.main import app
@@ -34,6 +35,36 @@ class KeywordEmbedder(TextEmbedder):
         "premium",
         "noise",
         "stock",
+    ]
+
+    def embed_texts(self, texts: list[str]) -> EmbeddingBatch:
+        vectors: list[list[float]] = []
+        for text in texts:
+            lowered = text.casefold()
+            vectors.append([float(lowered.count(token)) for token in self._VOCAB])
+        return EmbeddingBatch(
+            vectors=vectors,
+            model_name=self.config.model_name,
+            provider=self.provider,
+            dimensions=len(self._VOCAB),
+        )
+
+
+class SpecKeywordEmbedder(TextEmbedder):
+    _VOCAB = [
+        "16",
+        "32",
+        "1024",
+        "512",
+        "gb",
+        "ram",
+        "storage",
+        "inch",
+        "screen",
+        "laptop",
+        "creator",
+        "business",
+        "ultrabook",
     ]
 
     def embed_texts(self, texts: list[str]) -> EmbeddingBatch:
@@ -79,6 +110,159 @@ def _build_inventory_service(tmp_path, *, storage_backend: str = "jsonl") -> Inv
             inventory_sqlite_path=str(tmp_path / "inventory_mirror.sqlite3"),
         ),
     )
+
+
+def _build_spec_inventory_service(tmp_path, *, storage_backend: str = "jsonl") -> InventoryService:  # type: ignore[no-untyped-def]
+    vector_store = LocalVectorStore(
+        VectorStoreConfig(
+            provider=VectorStoreProvider.LOCAL,
+            local_store_path=str(tmp_path / "inventory_vectors_specs.jsonl"),
+            namespace="inventory-spec-test",
+            dimensions=len(SpecKeywordEmbedder._VOCAB),
+        )
+    )
+    embedder = SpecKeywordEmbedder(
+        EmbedderConfig(
+            provider=EmbeddingProvider.DETERMINISTIC,
+            model_name="spec-keyword-embedder",
+            dimensions=len(SpecKeywordEmbedder._VOCAB),
+            normalize=False,
+        )
+    )
+    return InventoryService(
+        embedder=embedder,
+        vector_store=vector_store,
+        config=InventoryServiceConfig(
+            catalog_path=str(tmp_path / "inventory_catalog_specs.jsonl"),
+            namespace="inventory-spec-test",
+            low_stock_threshold=10,
+            agentic_trace_dir=str(tmp_path / "inventory_agentic_traces_specs"),
+            business_signal_path=str(tmp_path / "inventory_business_signals_specs.jsonl"),
+            inventory_storage_backend=storage_backend,
+            inventory_sqlite_path=str(tmp_path / "inventory_mirror_specs.sqlite3"),
+        ),
+    )
+
+
+def test_inventory_vector_record_normalizes_curated_spec_metadata(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+    item = InventoryItemRecord(
+        product_id="prod-creator-laptop",
+        sku="CMP-LTP-900",
+        name="CreatorCraft 16",
+        category="Computing",
+        brand="CreatorCraft",
+        short_description="Performance laptop for creative work.",
+        price=1699.0,
+        currency="USD",
+        stock=5,
+        status="Active",
+        tags=["laptop", "creator", "premium"],
+        attributes={
+            "ram": "32GB",
+            "storage": "1TB SSD",
+            "display": "16 inch OLED",
+            "connectivity": "Wi-Fi 6 and Bluetooth",
+            "water_resistance": "10ATM",
+            "gps": "multi-band",
+            "stylus_support": "yes",
+        },
+        metadata={
+            "raw_attributes": {
+                "ram": "32GB",
+                "storage": "1TB SSD",
+                "display": "16 inch OLED",
+                "connectivity": "Wi-Fi 6 and Bluetooth",
+                "water_resistance": "10ATM",
+                "gps": "multi-band",
+                "stylus_support": True,
+            }
+        },
+        include_in_rag=True,
+    )
+
+    record = service._build_vector_record(item)
+
+    assert record.metadata["ram_gb"] == 32
+    assert record.metadata["storage_gb"] == 1024
+    assert record.metadata["screen_size_inch"] == 16
+    assert record.metadata["connectivity"] == "wi fi 6 and bluetooth"
+    assert record.metadata["water_resistance"] == "10atm"
+    assert record.metadata["gps_support"] is True
+    assert record.metadata["gps_mode"] == "multi band"
+    assert record.metadata["stylus_support"] is True
+    assert "32 gb ram" in (record.text or "")
+    assert "1024 gb storage" in (record.text or "")
+    assert "16 inch screen" in (record.text or "")
+
+
+def test_inventory_search_uses_normalized_spec_aliases_for_vector_matches(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_spec_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="creator-1tb",
+                sku="CMP-LTP-901",
+                name="CreatorCraft 16 Pro",
+                category="Computing",
+                brand="CreatorCraft",
+                short_description="16 inch creator laptop.",
+                price=1699.0,
+                currency="USD",
+                stock=4,
+                status="Active",
+                tags=["laptop", "creator"],
+                attributes={"ram": "32GB", "storage": "1TB SSD", "display": "16 inch OLED"},
+                metadata={"raw_attributes": {"ram": "32GB", "storage": "1TB SSD", "display": "16 inch OLED"}},
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="creator-512gb",
+                sku="CMP-LTP-902",
+                name="CreatorCraft 16 Air",
+                category="Computing",
+                brand="CreatorCraft",
+                short_description="16 inch creator laptop.",
+                price=1499.0,
+                currency="USD",
+                stock=9,
+                status="Active",
+                tags=["laptop", "creator"],
+                attributes={"ram": "32GB", "storage": "512GB SSD", "display": "16 inch OLED"},
+                metadata={"raw_attributes": {"ram": "32GB", "storage": "512GB SSD", "display": "16 inch OLED"}},
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="business-14",
+                sku="CMP-LTP-903",
+                name="BusinessFlow 14 Ultrabook",
+                category="Computing",
+                brand="BusinessFlow",
+                short_description="14 inch business ultrabook.",
+                price=1199.0,
+                currency="USD",
+                stock=11,
+                status="Active",
+                tags=["laptop", "business", "ultrabook"],
+                attributes={"ram_gb": "16", "storage_gb": "512", "screen_size": "14 inch"},
+                metadata={"raw_attributes": {"ram_gb": 16, "storage_gb": 512, "screen_size": "14 inch"}},
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    response = service.search(
+        InventorySearchRequest(
+            query_text="recommend a 16 inch laptop with 32GB RAM and 1024GB storage",
+            top_k=3,
+        )
+    )
+
+    assert [hit.product_id for hit in response.hits[:3]] == [
+        "creator-1tb",
+        "creator-512gb",
+        "business-14",
+    ]
 
 
 def test_inventory_natural_prompt_uses_writer_contract_and_plan_fields(tmp_path) -> None:  # type: ignore[no-untyped-def]

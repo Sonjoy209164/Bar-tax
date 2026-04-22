@@ -81,6 +81,9 @@ _HELP_PHRASES = ["help", "what can you do", "how can you help", "can you help"]
 _IDENTITY_PHRASES = ["who are you", "what are you", "what is your role", "what do you do"]
 _CLOSING_PHRASES = ["bye", "goodbye", "see you", "talk later"]
 _DETAIL_REQUEST_PHRASES = ["tell me about", "details on", "detail on", "more about", "what about"]
+_FIRST_NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
+_BOOLEAN_TRUE_VALUES = {"1", "true", "yes", "y", "on", "supported", "available", "included"}
+_BOOLEAN_FALSE_VALUES = {"0", "false", "no", "n", "off", "none", "unsupported", "not supported"}
 _EXACT_LOOKUP_PHRASES = [
     "do you have",
     "have any",
@@ -3666,9 +3669,11 @@ class InventoryService:
         return None
 
     def _build_vector_record(self, item: InventoryItemRecord) -> VectorRecord:
+        curated_metadata = self._build_curated_vector_metadata(item)
+        search_text = self._build_search_text(item, curated_metadata=curated_metadata)
         return VectorRecord(
             record_id=item.product_id,
-            vector=self.embedder.embed_text(self._build_search_text(item)),
+            vector=self.embedder.embed_text(search_text),
             metadata={
                 "product_id": item.product_id,
                 "sku": item.sku,
@@ -3683,14 +3688,23 @@ class InventoryService:
                 "currency": item.currency,
                 "include_in_rag": item.include_in_rag,
                 "updated_at": item.updated_at,
+                **curated_metadata,
             },
-            text=self._build_search_text(item),
+            text=search_text,
             namespace=self.config.namespace,
         )
 
-    def _build_search_text(self, item: InventoryItemRecord) -> str:
+    def _build_search_text(
+        self,
+        item: InventoryItemRecord,
+        *,
+        curated_metadata: dict[str, object] | None = None,
+    ) -> str:
+        if curated_metadata is None:
+            curated_metadata = self._build_curated_vector_metadata(item)
         attribute_text = " ".join(f"{key} {value}" for key, value in sorted(item.attributes.items()))
         metadata_text = " ".join(f"{key} {value}" for key, value in sorted(item.metadata.items()))
+        curated_metadata_text = self._build_curated_search_text(curated_metadata)
         fields = [
             item.name,
             item.sku,
@@ -3702,8 +3716,183 @@ class InventoryService:
             " ".join(item.tags),
             attribute_text,
             metadata_text,
+            curated_metadata_text,
         ]
         return " ".join(value.strip() for value in fields if isinstance(value, str) and value.strip())
+
+    def _build_curated_vector_metadata(self, item: InventoryItemRecord) -> dict[str, object]:
+        source = self._attribute_metadata_source(item)
+        metadata: dict[str, object] = {}
+
+        numeric_aliases = {
+            "ram_gb": ("ram_gb", "ram"),
+            "storage_gb": ("storage_gb", "storage"),
+            "battery_hours": ("battery_hours",),
+            "battery_days": ("battery_days",),
+            "battery_mah": ("battery_mah",),
+            "screen_size_inch": ("screen_size_inch", "display_size_inch", "screen_size", "display"),
+            "refresh_rate_hz": ("refresh_rate_hz", "refresh_rate"),
+            "capacity_tb": ("capacity_tb",),
+            "coverage_sqft": ("coverage_sqft",),
+        }
+        for target_key, aliases in numeric_aliases.items():
+            value = self._normalize_numeric_attribute_value(
+                self._first_metadata_value(source, aliases),
+                target_key=target_key,
+            )
+            if value is not None:
+                metadata[target_key] = value
+
+        text_aliases = {
+            "connectivity": ("connectivity",),
+            "water_resistance": ("water_resistance",),
+            "processor": ("processor",),
+            "operating_system": ("operating_system",),
+            "panel_type": ("panel_type", "panel"),
+            "smart_platform": ("smart_platform",),
+            "wifi_standard": ("wifi_standard",),
+            "use_case": ("use_case",),
+        }
+        for target_key, aliases in text_aliases.items():
+            value = self._normalize_text_attribute_value(self._first_metadata_value(source, aliases))
+            if value:
+                metadata[target_key] = value
+
+        boolean_aliases = {
+            "gps_support": ("gps",),
+            "stylus_support": ("stylus_support",),
+            "voice_support": ("voice_support",),
+        }
+        for target_key, aliases in boolean_aliases.items():
+            value = self._normalize_boolean_attribute_value(self._first_metadata_value(source, aliases))
+            if value is not None:
+                metadata[target_key] = value
+
+        gps_value = self._normalize_text_attribute_value(self._first_metadata_value(source, ("gps",)))
+        if gps_value and gps_value not in {"none", "no"}:
+            metadata["gps_mode"] = gps_value
+
+        return metadata
+
+    def _build_curated_search_text(self, curated_metadata: dict[str, object]) -> str:
+        fragments: list[str] = []
+        if (ram_gb := curated_metadata.get("ram_gb")) is not None:
+            fragments.append(f"{self._format_search_number(ram_gb)} gb ram")
+        if (storage_gb := curated_metadata.get("storage_gb")) is not None:
+            fragments.append(f"{self._format_search_number(storage_gb)} gb storage")
+        if (battery_hours := curated_metadata.get("battery_hours")) is not None:
+            fragments.append(f"{self._format_search_number(battery_hours)} hour battery")
+        if (battery_days := curated_metadata.get("battery_days")) is not None:
+            fragments.append(f"{self._format_search_number(battery_days)} day battery")
+        if (battery_mah := curated_metadata.get("battery_mah")) is not None:
+            fragments.append(f"{self._format_search_number(battery_mah)} mah battery")
+        if (screen_size := curated_metadata.get("screen_size_inch")) is not None:
+            fragments.append(f"{self._format_search_number(screen_size)} inch screen")
+        if (refresh_rate := curated_metadata.get("refresh_rate_hz")) is not None:
+            fragments.append(f"{self._format_search_number(refresh_rate)} hz refresh rate")
+        if (capacity_tb := curated_metadata.get("capacity_tb")) is not None:
+            fragments.append(f"{self._format_search_number(capacity_tb)} tb capacity")
+        if (coverage_sqft := curated_metadata.get("coverage_sqft")) is not None:
+            fragments.append(f"{self._format_search_number(coverage_sqft)} sqft coverage")
+
+        for key in (
+            "connectivity",
+            "water_resistance",
+            "processor",
+            "operating_system",
+            "panel_type",
+            "smart_platform",
+            "wifi_standard",
+            "use_case",
+            "gps_mode",
+        ):
+            value = curated_metadata.get(key)
+            if isinstance(value, str) and value:
+                fragments.append(value)
+
+        if curated_metadata.get("gps_support") is True:
+            fragments.append("gps")
+        if curated_metadata.get("stylus_support") is True:
+            fragments.append("stylus support")
+        if curated_metadata.get("voice_support") is True:
+            fragments.append("voice support")
+
+        return " ".join(fragments)
+
+    @staticmethod
+    def _attribute_metadata_source(item: InventoryItemRecord) -> dict[str, object]:
+        source: dict[str, object] = {}
+        raw_attributes = item.metadata.get("raw_attributes")
+        if isinstance(raw_attributes, dict):
+            source.update(raw_attributes)
+        for key, value in item.attributes.items():
+            source.setdefault(key, value)
+        return source
+
+    @staticmethod
+    def _first_metadata_value(source: dict[str, object], aliases: tuple[str, ...]) -> object | None:
+        for alias in aliases:
+            value = source.get(alias)
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            return value
+        return None
+
+    def _normalize_numeric_attribute_value(self, value: object | None, *, target_key: str) -> int | float | None:
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            number = float(value)
+        else:
+            text = str(value).strip().casefold()
+            match = _FIRST_NUMBER_PATTERN.search(text)
+            if not match:
+                return None
+            number = float(match.group())
+            if target_key in {"storage_gb", "ram_gb"} and "tb" in text and "gb" not in text:
+                number *= 1024
+            if target_key == "capacity_tb" and "gb" in text and "tb" not in text:
+                number /= 1024
+        if target_key in {
+            "ram_gb",
+            "storage_gb",
+            "battery_hours",
+            "battery_days",
+            "battery_mah",
+            "refresh_rate_hz",
+            "coverage_sqft",
+        }:
+            return int(round(number))
+        rounded = round(number, 2)
+        return int(rounded) if float(rounded).is_integer() else rounded
+
+    def _normalize_text_attribute_value(self, value: object | None) -> str | None:
+        if value is None:
+            return None
+        return self._normalize_search_text(str(value)) or None
+
+    @staticmethod
+    def _normalize_boolean_attribute_value(value: object | None) -> bool | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        normalized = str(value).strip().casefold()
+        if not normalized:
+            return None
+        if normalized in _BOOLEAN_FALSE_VALUES:
+            return False
+        if normalized in _BOOLEAN_TRUE_VALUES:
+            return True
+        return True
+
+    @staticmethod
+    def _format_search_number(value: object) -> str:
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
 
     def _vector_record_ids(self) -> set[str] | None:
         record_ids = getattr(self.vector_store, "record_ids", None)

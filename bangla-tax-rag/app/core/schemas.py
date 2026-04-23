@@ -231,6 +231,27 @@ class EvalResponse(BaseModel):
     metrics_summary: dict[str, Any]
 
 
+class InventoryEvalRequest(BaseModel):
+    case_ids: list[str] = Field(default_factory=list)
+    output_dir: str | None = None
+
+    @field_validator("case_ids")
+    @classmethod
+    def normalize_case_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for case_id in value:
+            stripped = case_id.strip()
+            if not stripped:
+                continue
+            lowered = stripped.casefold()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(stripped)
+        return normalized
+
+
 class AnnotationCandidate(BaseModel):
     question_id: str
     source_chunk_id: str

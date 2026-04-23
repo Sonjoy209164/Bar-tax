@@ -247,15 +247,15 @@ The system reaches the same ranking decision reliably even when the wording laye
 Before returning the final answer:
 
 - [x] verify claims
-- [ ] verify product-fit
+- [x] verify product-fit
 - [x] detect unsupported conclusions
-- [ ] force abstain when evidence is weak
+- [x] force abstain when evidence is weak
 
 Implementation tasks:
 
-- [ ] Check that recommended products satisfy the asked constraints.
-- [ ] Check that price, stock, and spec claims exist in evidence.
-- [ ] Reject category mismatch recommendations.
+- [x] Check that recommended products satisfy the asked constraints.
+- [x] Check that price, stock, and spec claims exist in evidence.
+- [x] Reject category mismatch recommendations.
 - [x] Reject weak substitutions that are really cross-sell items.
 - [x] Detect when no exact match exists.
 - [x] Detect when the answer should ask a follow-up instead of pretending certainty.
@@ -272,23 +272,23 @@ The bot fails safely when evidence is incomplete instead of producing a polished
 Track these failure modes:
 
 - [ ] wrong product type
-- [ ] missed exact match
+- [x] missed exact match
 - [ ] bad comparison
-- [ ] false in-stock claim
-- [ ] false price claim
-- [ ] false spec claim
-- [ ] weak abstain behavior
+- [x] false in-stock claim
+- [x] false price claim
+- [x] false spec claim
+- [x] weak abstain behavior
 - [ ] bad cross-sell
 - [ ] hallucinated business rationale
 
 Implementation tasks:
 
-- [ ] Build an eval runner for complex reasoning questions.
+- [x] Build an eval runner for complex reasoning questions.
 - [ ] Add labeled cases for lookup, compare, recommend, diagnose, bundle, and restock.
-- [ ] Track per-question-family quality, not only global accuracy.
-- [ ] Track retrieval-stage misses separately from answer-stage misses.
-- [ ] Track latency by route type.
-- [ ] Track deterministic vs natural-answer fallback rates.
+- [x] Track per-question-family quality, not only global accuracy.
+- [x] Track retrieval-stage misses separately from answer-stage misses.
+- [x] Track latency by route type.
+- [x] Track deterministic vs natural-answer fallback rates.
 - [ ] Add a simple report showing what improved and what regressed.
 
 Success criteria:
@@ -321,8 +321,8 @@ When the system fails, we can tell whether the problem came from classification,
 - [x] Phase 3: Structured fact retrieval
 - [x] Phase 4: Query decomposition
 - [x] Phase 5: Evidence contract
-- [ ] Phase 6: Deterministic reasoning
-- [ ] Phase 7: Verification and abstain
+- [x] Phase 6: Deterministic reasoning
+- [x] Phase 7: Verification and abstain
 - [ ] Phase 8: Evaluation and failure tracking
 - [ ] Phase 9: Observability and debugging
 

@@ -282,6 +282,56 @@ def test_inventory_search_uses_normalized_spec_aliases_for_vector_matches(tmp_pa
     ]
 
 
+def test_inventory_search_keeps_partial_spec_matches_as_fallbacks_when_top_k_allows(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_spec_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="laptop-exact",
+                sku="CMP-LTP-901",
+                name="CreatorCraft 16 Pro",
+                category="Computing",
+                brand="CreatorCraft",
+                short_description="16 inch creator laptop.",
+                price=1699.0,
+                currency="USD",
+                stock=4,
+                status="Active",
+                tags=["laptop", "creator"],
+                attributes={"ram": "32GB", "storage": "1TB SSD"},
+                metadata={"raw_attributes": {"ram": "32GB", "storage": "1TB SSD"}},
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="laptop-partial",
+                sku="CMP-LTP-902",
+                name="CreatorCraft 16 Air",
+                category="Computing",
+                brand="CreatorCraft",
+                short_description="16 inch creator laptop.",
+                price=1499.0,
+                currency="USD",
+                stock=9,
+                status="Active",
+                tags=["laptop", "creator"],
+                attributes={"ram": "32GB", "storage": "512GB SSD"},
+                metadata={"raw_attributes": {"ram": "32GB", "storage": "512GB SSD"}},
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    response = service.search(
+        InventorySearchRequest(
+            query_text="recommend a laptop with 32GB RAM and 1TB storage",
+            top_k=2,
+        )
+    )
+
+    assert [hit.product_id for hit in response.hits] == ["laptop-exact", "laptop-partial"]
+    assert response.hits[0].evidence_scores["structured_spec_match"] > response.hits[1].evidence_scores["structured_spec_match"]
+
+
 def test_inventory_search_uses_structured_specs_for_battery_life_reranking(tmp_path) -> None:  # type: ignore[no-untyped-def]
     service = _build_spec_inventory_service(tmp_path)
     service.upsert_items(
@@ -394,7 +444,8 @@ def test_inventory_search_hard_filters_numeric_spec_requirements_before_rerankin
         )
     )
 
-    assert [hit.product_id for hit in response.hits] == ["laptop-16-1tb"]
+    assert response.hits[0].product_id == "laptop-16-1tb"
+    assert "laptop-16-512" in [hit.product_id for hit in response.hits]
     assert retrieval_stage_counts["spec_filtered_candidates"] == 1
 
 

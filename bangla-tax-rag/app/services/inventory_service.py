@@ -1696,17 +1696,26 @@ class InventoryService:
             return [], retrieval_stage_counts
 
         if preference_profile.spec_requirements:
-            spec_matched_candidates = [
-                candidate
+            spec_match_scores = [
+                self._hit_spec_match_score(candidate[0], preference_profile.spec_requirements)
                 for candidate in candidates
-                if self._hit_satisfies_spec_requirements(candidate[0], preference_profile.spec_requirements)
             ]
-            if spec_matched_candidates:
-                candidates = spec_matched_candidates
-            else:
+            exact_spec_candidates = [
+                candidate
+                for candidate, score in zip(candidates, spec_match_scores, strict=False)
+                if score >= 1.0
+            ]
+            retrieval_stage_counts["spec_filtered_candidates"] = len(exact_spec_candidates)
+            strict_spec_requirements = all(
+                requirement.operator == "eq" for requirement in preference_profile.spec_requirements
+            )
+            if strict_spec_requirements and exact_spec_candidates:
+                candidates = exact_spec_candidates
+            elif max(spec_match_scores, default=0.0) <= 0.0 and len(query_terms) >= 3:
                 retrieval_stage_counts["spec_filtered_candidates"] = 0
                 return [], retrieval_stage_counts
-        retrieval_stage_counts["spec_filtered_candidates"] = len(candidates)
+        else:
+            retrieval_stage_counts["spec_filtered_candidates"] = len(candidates)
 
         if requested_product_type:
             exact_type_candidates = [candidate for candidate in candidates if candidate[4] >= 3]
@@ -4225,12 +4234,48 @@ class InventoryService:
         hit: InventorySearchHit,
         requirements: tuple[InventorySpecRequirement, ...],
     ) -> bool:
+        return self._hit_spec_match_score(hit, requirements) >= 1.0
+
+    def _hit_spec_match_score(
+        self,
+        hit: InventorySearchHit,
+        requirements: tuple[InventorySpecRequirement, ...],
+    ) -> float:
         if not requirements:
-            return True
+            return 1.0
+        satisfied = 0.0
         for requirement in requirements:
-            if not self._spec_requirement_satisfied(hit.metadata.get(requirement.key), requirement):
-                return False
-        return True
+            actual = self._hit_metadata_value(hit, requirement.key)
+            if self._spec_requirement_satisfied(actual, requirement):
+                satisfied += 1.0
+                continue
+            partial = self._spec_requirement_partial_credit(actual, requirement)
+            satisfied += partial
+        return satisfied / len(requirements)
+
+    @staticmethod
+    def _hit_metadata_value(hit: InventorySearchHit, key: str) -> object | None:
+        aliases = {
+            "ram_gb": ("ram_gb", "ram"),
+            "storage_gb": ("storage_gb", "storage"),
+            "battery_hours": ("battery_hours",),
+            "screen_size_inch": ("screen_size_inch", "display_size_inch", "screen_size", "display"),
+            "gps_support": ("gps_support", "gps"),
+            "anc_support": ("anc_support", "anc", "noise_cancellation", "noise_cancelling", "noise_canceling"),
+            "inverter_support": ("inverter_support", "inverter"),
+        }.get(key, (key,))
+        for alias in aliases:
+            if alias in hit.metadata:
+                return hit.metadata.get(alias)
+        raw_attributes = hit.metadata.get("raw_attributes")
+        if isinstance(raw_attributes, dict):
+            for alias in aliases:
+                if alias in raw_attributes:
+                    return raw_attributes.get(alias)
+        for alias in aliases:
+            if alias in hit.attributes:
+                return hit.attributes.get(alias)
+        return None
 
     @staticmethod
     def _spec_requirement_satisfied(actual: object | None, requirement: InventorySpecRequirement) -> bool:
@@ -4255,6 +4300,27 @@ class InventoryService:
             except (TypeError, ValueError):
                 return False
         return False
+
+    @staticmethod
+    def _spec_requirement_partial_credit(actual: object | None, requirement: InventorySpecRequirement) -> float:
+        if actual is None:
+            return 0.0
+        if requirement.operator == "eq":
+            return 0.0
+        if requirement.operator == "gte":
+            if isinstance(actual, bool):
+                return 0.0
+            try:
+                actual_number = float(actual)
+                expected_number = float(requirement.value)
+            except (TypeError, ValueError):
+                return 0.0
+            if expected_number <= 0:
+                return 0.0
+            if actual_number <= 0:
+                return 0.0
+            return max(0.0, min(0.75, actual_number / expected_number))
+        return 0.0
 
     def _item_matches_filters(self, item: InventoryItemRecord, filters: InventorySearchFilters) -> bool:
         if filters.rag_only and not item.include_in_rag:

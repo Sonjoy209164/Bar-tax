@@ -52,6 +52,15 @@ class ProductEvidenceScore:
 
 
 class EcommerceReranker:
+    METADATA_ALIASES: dict[str, tuple[str, ...]] = {
+        "ram_gb": ("ram_gb", "ram"),
+        "storage_gb": ("storage_gb", "storage"),
+        "battery_hours": ("battery_hours",),
+        "screen_size_inch": ("screen_size_inch", "display_size_inch", "screen_size", "display"),
+        "gps_support": ("gps_support", "gps"),
+        "anc_support": ("anc_support", "anc", "noise_cancellation", "noise_cancelling", "noise_canceling"),
+        "inverter_support": ("inverter_support", "inverter"),
+    }
     FEATURE_TERMS: dict[str, tuple[str, ...]] = {
         "wireless": ("wireless", "bluetooth"),
         "noise_cancellation": ("noise cancellation", "noise cancelling", "anc"),
@@ -110,6 +119,10 @@ class EcommerceReranker:
         structured_spec_match = self._structured_spec_match(product, preferences)
         premium_fit = self._premium_fit(searchable_text, preferences)
         budget_fit = self._budget_fit(product, preferences)
+        spec_sensitive_query = bool(preferences.spec_requirements) or "battery_life" in preferences.feature_requirements
+        semantic_weight = 0.12 if spec_sensitive_query else 0.15
+        lexical_weight = 0.12 if spec_sensitive_query else 0.14
+        structured_spec_weight = 0.28 if spec_sensitive_query else 0.18
         unrelated_category_penalty = self._unrelated_category_penalty(
             product=product,
             product_type=product_type,
@@ -123,8 +136,8 @@ class EcommerceReranker:
         )
 
         raw_score = (
-            (normalized_semantic * 0.15)
-            + (normalized_lexical * 0.14)
+            (normalized_semantic * semantic_weight)
+            + (normalized_lexical * lexical_weight)
             + (normalized_exact_name * 0.12)
             + (normalized_exact_sku * 0.14)
             + (product_type_match * 0.18)
@@ -134,7 +147,7 @@ class EcommerceReranker:
             + (price_fit * 0.07)
             + (stock_fit * 0.03)
             + (metadata_match * 0.04)
-            + (structured_spec_match * 0.18)
+            + (structured_spec_match * structured_spec_weight)
             + (premium_fit * 0.02)
             + (budget_fit * 0.03)
             - unrelated_category_penalty
@@ -397,13 +410,26 @@ class EcommerceReranker:
 
     @staticmethod
     def _metadata_value(product: object, key: str) -> Any:
+        aliases = EcommerceReranker.METADATA_ALIASES.get(key, (key,))
         metadata = getattr(product, "metadata", None)
-        if isinstance(metadata, dict) and key in metadata:
-            return metadata.get(key)
+        if isinstance(metadata, dict):
+            for alias in aliases:
+                if alias in metadata:
+                    return metadata.get(alias)
+            raw_attributes = metadata.get("raw_attributes")
+            if isinstance(raw_attributes, dict):
+                for alias in aliases:
+                    if alias in raw_attributes:
+                        return raw_attributes.get(alias)
         attributes = getattr(product, "attributes", None)
-        if isinstance(attributes, dict) and key in attributes:
-            return attributes.get(key)
+        if isinstance(attributes, dict):
+            for alias in aliases:
+                if alias in attributes:
+                    return attributes.get(alias)
         return None
+
+    def _numeric_metadata(self, product: object, key: str) -> float | None:
+        return self._number_from_value(self._metadata_value(product, key))
 
     @staticmethod
     def _number_from_value(value: Any) -> float | None:

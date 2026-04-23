@@ -3,8 +3,15 @@ from __future__ import annotations
 import re
 from itertools import combinations
 
-from app.core.schemas import InventoryAnswerPlan, InventoryEvidenceContract, InventoryAnswerVerification, InventorySearchHit
+from app.core.schemas import (
+    InventoryAnswerPlan,
+    InventoryAnswerVerification,
+    InventoryEvidenceContract,
+    InventoryProductEvidence,
+    InventorySearchHit,
+)
 from app.inventory.ontology import ProductOntology, normalize_inventory_text
+from app.inventory.preferences import InventorySpecRequirement
 
 
 class InventoryFinalAnswerVerifier:
@@ -42,6 +49,17 @@ class InventoryFinalAnswerVerifier:
     SUBSTITUTE_WORDS = ("alternative", "fallback", "substitute", "replacement", "instead", "switch to", "shift to")
     CAVEAT_WORDS = ("fallback", "related", "nearby", "not exact", "not equivalent", "not a substitute", "not a replacement")
     NO_MATCH_WORDS = ("could not find", "no reliable", "no exact", "not enough evidence", "do not have")
+    BOOLEAN_TRUE_VALUES = {"1", "true", "yes", "y", "on", "supported", "available", "included", "enabled"}
+    BOOLEAN_FALSE_VALUES = {"0", "false", "no", "n", "off", "none", "unsupported", "not supported", "disabled"}
+    SPEC_METADATA_ALIASES = {
+        "ram_gb": ("ram_gb", "ram"),
+        "storage_gb": ("storage_gb", "storage"),
+        "battery_hours": ("battery_hours",),
+        "screen_size_inch": ("screen_size_inch", "display_size_inch", "screen_size", "display"),
+        "gps_support": ("gps_support", "gps"),
+        "anc_support": ("anc_support", "anc", "noise_cancellation", "noise_cancelling", "noise_canceling"),
+        "inverter_support": ("inverter_support", "inverter"),
+    }
 
     def __init__(self, ontology: ProductOntology | None = None) -> None:
         self.ontology = ontology or ProductOntology()
@@ -73,6 +91,88 @@ class InventoryFinalAnswerVerifier:
             issues=deduped,
             checked_final_answer=True,
             final_answer_issues=deduped,
+        )
+
+    def verify_product_fit(
+        self,
+        *,
+        answer_plan: InventoryAnswerPlan,
+        hits: list[InventorySearchHit],
+    ) -> InventoryAnswerVerification:
+        preferences = answer_plan.preferences if isinstance(answer_plan.preferences, dict) else {}
+        detail_intent = answer_plan.detected_intent == "product_detail" or "product_detail" in answer_plan.intent
+        requested_type = normalize_inventory_text(
+            str(preferences.get("product_type") or answer_plan.product_type or "")
+        )
+        requested_family = normalize_inventory_text(
+            str(
+                preferences.get("product_family")
+                or answer_plan.product_family
+                or self.ontology.product_family(requested_type)
+                or ""
+            )
+        )
+        requested_category = normalize_inventory_text(str(preferences.get("category") or ""))
+        if detail_intent:
+            requested_type = ""
+            requested_family = ""
+            requested_category = ""
+        budget_min = self._coerce_float(preferences.get("budget_min"))
+        budget_max = self._coerce_float(preferences.get("budget_max"))
+        needs_in_stock = bool(preferences.get("needs_in_stock"))
+        avoid_product_types = {
+            normalize_inventory_text(str(value))
+            for value in preferences.get("avoid_product_types", [])
+            if isinstance(value, str) and normalize_inventory_text(value)
+        }
+        spec_requirements = self._spec_requirements_from_plan(preferences.get("spec_requirements"))
+
+        hit_by_id = {hit.product_id: hit for hit in hits}
+        evidence_by_id = self._candidate_evidence_by_id(answer_plan.evidence_contract)
+        issues: list[str] = []
+
+        issues.extend(
+            self._selection_fit_issues(
+                label="Primary recommendation",
+                role="primary",
+                product_id=answer_plan.primary_product_id,
+                hit_by_id=hit_by_id,
+                evidence_by_id=evidence_by_id,
+                requested_type=requested_type,
+                requested_family=requested_family,
+                requested_category=requested_category,
+                budget_min=budget_min,
+                budget_max=budget_max,
+                needs_in_stock=needs_in_stock,
+                spec_requirements=spec_requirements,
+                avoid_product_types=avoid_product_types,
+            )
+        )
+        for product_id in answer_plan.alternative_product_ids:
+            issues.extend(
+                self._selection_fit_issues(
+                    label="Alternative recommendation",
+                    role="alternative",
+                    product_id=product_id,
+                    hit_by_id=hit_by_id,
+                    evidence_by_id=evidence_by_id,
+                    requested_type=requested_type,
+                    requested_family=requested_family,
+                    requested_category=requested_category,
+                    budget_min=budget_min,
+                    budget_max=budget_max,
+                    needs_in_stock=needs_in_stock,
+                    spec_requirements=spec_requirements,
+                    avoid_product_types=avoid_product_types,
+                )
+            )
+
+        deduped = self._dedupe(issues)
+        return InventoryAnswerVerification(
+            passed=not deduped,
+            issues=deduped,
+            hard_constraint_issues=deduped,
+            requires_abstention=bool(deduped),
         )
 
     def _check_excluded_products(
@@ -316,3 +416,232 @@ class InventoryFinalAnswerVerifier:
                         if isinstance(value, int):
                             supported.add(value)
         return supported
+
+    def _selection_fit_issues(
+        self,
+        *,
+        label: str,
+        role: str,
+        product_id: str | None,
+        hit_by_id: dict[str, InventorySearchHit],
+        evidence_by_id: dict[str, InventoryProductEvidence],
+        requested_type: str,
+        requested_family: str,
+        requested_category: str,
+        budget_min: float | None,
+        budget_max: float | None,
+        needs_in_stock: bool,
+        spec_requirements: tuple[InventorySpecRequirement, ...],
+        avoid_product_types: set[str],
+    ) -> list[str]:
+        if not product_id:
+            return []
+        hit = hit_by_id.get(product_id)
+        if hit is None:
+            return []
+        evidence = evidence_by_id.get(product_id)
+        issues: list[str] = []
+
+        product_type = normalize_inventory_text(self.ontology.detect_product_type(product=hit) or "")
+        product_family = normalize_inventory_text(self.ontology.product_family(product_type) or "")
+        product_category = normalize_inventory_text(hit.category)
+
+        if requested_category and product_category != requested_category:
+            issues.append(
+                f"{label} {hit.name} is in category {hit.category or 'unknown'}, not the required {requested_category} category."
+            )
+        if product_type and product_type in avoid_product_types:
+            issues.append(f"{label} {hit.name} is a blocked product type: {product_type}.")
+        if role == "primary" and requested_type:
+            if not product_type:
+                issues.append(f"{label} {hit.name} cannot be verified as the requested {requested_type} type.")
+            elif product_type != requested_type:
+                issues.append(f"{label} {hit.name} is {product_type}, not the requested {requested_type}.")
+        if role == "alternative":
+            if requested_family:
+                if not product_family:
+                    issues.append(
+                        f"{label} {hit.name} cannot be verified as part of the required {requested_family} product family."
+                    )
+                elif product_family != requested_family:
+                    issues.append(
+                        f"{label} {hit.name} is outside the required {requested_family} product family."
+                    )
+            elif requested_type:
+                if not product_type:
+                    issues.append(f"{label} {hit.name} cannot be verified as the requested {requested_type} type.")
+                elif product_type != requested_type:
+                    issues.append(f"{label} {hit.name} is {product_type}, not the requested {requested_type}.")
+
+        price = self._resolved_price(hit=hit, evidence=evidence)
+        if budget_min is not None:
+            if price is None:
+                issues.append(
+                    f"{label} {hit.name} has no verified price, so the minimum budget {budget_min:.2f} cannot be checked."
+                )
+            elif price < budget_min - 0.01:
+                issues.append(
+                    f"{label} {hit.name} is priced at {price:.2f}, below the required minimum budget {budget_min:.2f}."
+                )
+        if budget_max is not None:
+            if price is None:
+                issues.append(
+                    f"{label} {hit.name} has no verified price, so the budget ceiling {budget_max:.2f} cannot be checked."
+                )
+            elif price > budget_max + 0.01:
+                issues.append(
+                    f"{label} {hit.name} is priced at {price:.2f}, above the budget ceiling {budget_max:.2f}."
+                )
+
+        if needs_in_stock:
+            stock_status, stock_value = self._resolved_stock(hit=hit, evidence=evidence)
+            if stock_status == "conflicting":
+                issues.append(f"{label} {hit.name} has conflicting stock evidence, so in-stock fit is not reliable.")
+            elif stock_value is None:
+                issues.append(f"{label} {hit.name} has no verified stock value, so in-stock fit cannot be checked.")
+            elif stock_value <= 0:
+                issues.append(f"{label} {hit.name} is not currently in stock.")
+
+        for requirement in spec_requirements:
+            actual = self._resolved_spec_value(hit=hit, evidence=evidence, key=requirement.key)
+            if actual is None:
+                issues.append(f"{label} {hit.name} is missing the required spec {requirement.key}.")
+                continue
+            if not self._spec_requirement_satisfied(actual, requirement):
+                issues.append(
+                    f"{label} {hit.name} fails the required spec {requirement.key} {requirement.operator} {requirement.value}."
+                )
+
+        return issues
+
+    @staticmethod
+    def _candidate_evidence_by_id(
+        contract: InventoryEvidenceContract | None,
+    ) -> dict[str, InventoryProductEvidence]:
+        if contract is None:
+            return {}
+        return {candidate.product_id: candidate for candidate in contract.candidate_evidence}
+
+    @staticmethod
+    def _coerce_float(value: object | None) -> float | None:
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _spec_requirements_from_plan(payload: object | None) -> tuple[InventorySpecRequirement, ...]:
+        if not isinstance(payload, list):
+            return ()
+        requirements: list[InventorySpecRequirement] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or "").strip()
+            operator = str(item.get("operator") or "").strip()
+            value = item.get("value")
+            if not key or operator not in {"eq", "gte"}:
+                continue
+            requirements.append(InventorySpecRequirement(key=key, operator=operator, value=value))
+        return tuple(requirements)
+
+    @staticmethod
+    def _fact_value(
+        evidence: InventoryProductEvidence | None,
+        key: str,
+    ) -> tuple[str | None, object | None]:
+        if evidence is None:
+            return None, None
+        for fact in evidence.facts:
+            if fact.key == key:
+                return fact.status, fact.value
+        return None, None
+
+    def _resolved_price(
+        self,
+        *,
+        hit: InventorySearchHit,
+        evidence: InventoryProductEvidence | None,
+    ) -> float | None:
+        fact_status, fact_value = self._fact_value(evidence, "price")
+        if fact_status == "present" and isinstance(fact_value, (int, float)):
+            return float(fact_value)
+        return float(hit.price) if hit.price is not None else None
+
+    def _resolved_stock(
+        self,
+        *,
+        hit: InventorySearchHit,
+        evidence: InventoryProductEvidence | None,
+    ) -> tuple[str, int | None]:
+        fact_status, fact_value = self._fact_value(evidence, "stock")
+        if fact_status == "conflicting":
+            return "conflicting", None
+        if fact_status == "present" and isinstance(fact_value, int):
+            return "present", int(fact_value)
+        if fact_status == "missing":
+            return "missing", None
+        return ("present", hit.stock) if hit.stock is not None else ("missing", None)
+
+    def _resolved_spec_value(
+        self,
+        *,
+        hit: InventorySearchHit,
+        evidence: InventoryProductEvidence | None,
+        key: str,
+    ) -> object | None:
+        fact_status, fact_value = self._fact_value(evidence, f"spec.{key.casefold()}")
+        if fact_status == "present":
+            return fact_value
+        return self._hit_metadata_value(hit, key)
+
+    def _hit_metadata_value(self, hit: InventorySearchHit, key: str) -> object | None:
+        aliases = self.SPEC_METADATA_ALIASES.get(key, (key,))
+        for alias in aliases:
+            if alias in hit.metadata:
+                return hit.metadata.get(alias)
+        raw_attributes = hit.metadata.get("raw_attributes")
+        if isinstance(raw_attributes, dict):
+            for alias in aliases:
+                if alias in raw_attributes:
+                    return raw_attributes.get(alias)
+        for alias in aliases:
+            if alias in hit.attributes:
+                return hit.attributes.get(alias)
+        return None
+
+    def _spec_requirement_satisfied(
+        self,
+        actual: object | None,
+        requirement: InventorySpecRequirement,
+    ) -> bool:
+        if actual is None:
+            return False
+        if requirement.operator == "eq":
+            if isinstance(requirement.value, bool):
+                actual_bool = self._coerce_bool(actual)
+                return actual_bool is requirement.value
+            return str(actual).strip().casefold() == str(requirement.value).strip().casefold()
+        if requirement.operator == "gte":
+            if isinstance(actual, bool):
+                return False
+            actual_number = self._coerce_float(actual)
+            expected_number = self._coerce_float(requirement.value)
+            if actual_number is None or expected_number is None:
+                return False
+            return actual_number >= expected_number
+        return False
+
+    def _coerce_bool(self, value: object | None) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        normalized = normalize_inventory_text(str(value))
+        if normalized in self.BOOLEAN_TRUE_VALUES:
+            return True
+        if normalized in self.BOOLEAN_FALSE_VALUES:
+            return False
+        return None

@@ -1131,6 +1131,151 @@ def test_inventory_final_answer_verifier_uses_contract_supported_stock_values() 
     assert verification.passed is True
 
 
+def test_inventory_final_answer_verifier_requires_abstention_for_budget_stock_and_spec_mismatch() -> None:
+    ontology = ProductOntology()
+    builder = InventoryEvidenceContractBuilder(ontology)
+    verifier = InventoryFinalAnswerVerifier(ontology)
+    question = "Recommend a laptop under $1000 with 32GB RAM in stock"
+    preferences = InventoryPreferenceExtractor(ontology).extract(question)
+    laptop = InventorySearchHit(
+        product_id="prod-laptop",
+        sku="CMP-LAP-100",
+        name="Nimbus 14 Essential",
+        category="Computing",
+        brand="Nimbus",
+        price=1299.0,
+        currency="USD",
+        stock=0,
+        tags=["computing", "laptop"],
+        attributes={"ram_gb": "16"},
+        snippet="Entry business laptop",
+        score=0.73,
+    )
+    plan = InventoryAnswerPlan(
+        primary_product_id=laptop.product_id,
+        preferences=preferences.to_plan_dict(),
+        product_type=preferences.product_type,
+        product_family=preferences.product_family,
+    )
+    contract = builder.build(
+        question=question,
+        answer_plan=plan,
+        hits=[laptop],
+        preferences=preferences,
+        business_signals={},
+        next_best_question=None,
+    )
+    plan = plan.model_copy(update={"evidence_contract": contract})
+
+    verification = verifier.verify_product_fit(
+        answer_plan=plan,
+        hits=[laptop],
+    )
+
+    joined = " ".join(verification.hard_constraint_issues).lower()
+    assert verification.requires_abstention is True
+    assert "budget ceiling" in joined
+    assert "not currently in stock" in joined
+    assert "fails the required spec ram_gb gte 32.0" in joined
+
+
+def test_inventory_final_answer_verifier_requires_abstention_for_category_mismatch() -> None:
+    ontology = ProductOntology()
+    builder = InventoryEvidenceContractBuilder(ontology)
+    verifier = InventoryFinalAnswerVerifier(ontology)
+    question = "Show me a laptop"
+    preferences = InventoryPreferenceExtractor(ontology).extract(question)
+    bag = InventorySearchHit(
+        product_id="prod-bag",
+        sku="ACC-BAG-001",
+        name="CarryShield Laptop Bag",
+        category="Accessories",
+        brand="CarryShield",
+        price=79.0,
+        currency="USD",
+        stock=22,
+        tags=["bag", "accessory"],
+        snippet="Protective laptop bag for daily carry",
+        score=0.61,
+    )
+    plan = InventoryAnswerPlan(
+        primary_product_id=bag.product_id,
+        preferences=preferences.to_plan_dict(),
+        product_type=preferences.product_type,
+        product_family=preferences.product_family,
+    )
+    contract = builder.build(
+        question=question,
+        answer_plan=plan,
+        hits=[bag],
+        preferences=preferences,
+        business_signals={},
+        next_best_question=None,
+    )
+    plan = plan.model_copy(update={"evidence_contract": contract})
+
+    verification = verifier.verify_product_fit(
+        answer_plan=plan,
+        hits=[bag],
+    )
+
+    joined = " ".join(verification.hard_constraint_issues).lower()
+    assert verification.requires_abstention is True
+    assert "required computing category" in joined
+    assert "not the requested laptop" in joined
+
+
+def test_inventory_final_answer_verifier_requires_abstention_for_conflicting_stock_signals() -> None:
+    ontology = ProductOntology()
+    builder = InventoryEvidenceContractBuilder(ontology)
+    verifier = InventoryFinalAnswerVerifier(ontology)
+    question = "Show me an in stock laptop"
+    preferences = InventoryPreferenceExtractor(ontology).extract(question)
+    laptop = InventorySearchHit(
+        product_id="prod-laptop",
+        sku="CMP-LAP-001",
+        name="Nimbus 14 Business Ultrabook",
+        category="Computing",
+        brand="Nimbus",
+        price=1199.0,
+        currency="USD",
+        stock=4,
+        tags=["computing", "laptop"],
+        snippet="Lightweight 14 inch laptop",
+        score=0.8,
+    )
+    plan = InventoryAnswerPlan(
+        primary_product_id=laptop.product_id,
+        preferences=preferences.to_plan_dict(),
+        product_type=preferences.product_type,
+        product_family=preferences.product_family,
+    )
+    contract = builder.build(
+        question=question,
+        answer_plan=plan,
+        hits=[laptop],
+        preferences=preferences,
+        business_signals={
+            laptop.product_id: InventoryBusinessSignalRecord(
+                product_id=laptop.product_id,
+                inventory_on_hand=0,
+                inventory_snapshot_at="2026-04-20T10:00:00Z",
+            )
+        },
+        next_best_question=None,
+    )
+    plan = plan.model_copy(update={"evidence_contract": contract})
+
+    verification = verifier.verify_product_fit(
+        answer_plan=plan,
+        hits=[laptop],
+    )
+
+    joined = " ".join(verification.hard_constraint_issues).lower()
+    assert verification.requires_abstention is True
+    assert "conflicting stock evidence" in joined
+
+
 def test_inventory_memory_resolver_uses_reference_but_ignores_new_explicit_request() -> None:
     resolver = InventoryMemoryResolver()
     last_plan = InventoryAnswerPlan(

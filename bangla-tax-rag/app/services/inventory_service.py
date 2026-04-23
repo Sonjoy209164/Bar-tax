@@ -3341,17 +3341,20 @@ class InventoryService:
         missing_facts: list[str] | None = None,
         memory_resolution: InventoryMemoryResolution | None = None,
     ) -> tuple[InventoryReply, str, bool, str | None, str | None]:
-        abstained = abstention_reason is not None
+        resolved_abstention_reason = abstention_reason or base_reply.answer_plan.abstention_reason
+        abstained = bool(resolved_abstention_reason) or base_reply.answer_plan.abstain
+        if abstained and resolved_abstention_reason is None:
+            resolved_abstention_reason = "I do not have a reliable catalog fit that satisfies the required constraints."
         answer_engine = self._resolve_inventory_answer_engine(
             requested_answer_engine=requested_answer_engine,
             confidence_score=confidence_score,
             hits=hits,
-            abstention_reason=abstention_reason,
+            abstention_reason=resolved_abstention_reason if abstained else None,
         )
         if answer_engine != "natural":
             verified_base_reply = self._with_final_answer_verification(reply=base_reply, hits=hits)
-            if verified_base_reply.verification.passed:
-                return verified_base_reply, "deterministic", abstained, abstention_reason, None
+            if self._verified_reply_is_acceptable(reply=verified_base_reply):
+                return verified_base_reply, "deterministic", abstained, resolved_abstention_reason, None
             safe_reply = self._build_safe_final_answer_reply(
                 base_reply=verified_base_reply,
                 hits=hits,
@@ -3379,7 +3382,7 @@ class InventoryService:
                 verified_base_reply,
                 "deterministic",
                 abstained,
-                abstention_reason,
+                resolved_abstention_reason,
                 natural_fallback_reason or "Natural answer model failed; deterministic fallback was used.",
             )
         if synthesized_reply.abstained or not synthesized_reply.answer.strip():
@@ -3387,7 +3390,7 @@ class InventoryService:
             fallback_reason = synthesized_reply.abstention_reason or (
                 "Natural answer model returned no usable content; deterministic fallback was used."
             )
-            return verified_base_reply, "deterministic", abstained, abstention_reason, fallback_reason
+            return verified_base_reply, "deterministic", abstained, resolved_abstention_reason, fallback_reason
 
         natural_reply = InventoryReply(
             answer=synthesized_reply.answer.strip(),
@@ -3406,12 +3409,12 @@ class InventoryService:
             verified_natural_reply.verification.final_answer_issues,
         )
         verified_base_reply = self._with_final_answer_verification(reply=base_reply, hits=hits)
-        if verified_base_reply.verification.passed:
+        if self._verified_reply_is_acceptable(reply=verified_base_reply):
             return (
                 verified_base_reply,
                 "deterministic",
                 abstained,
-                abstention_reason,
+                resolved_abstention_reason,
                 "Natural answer failed final answer verification; deterministic fallback was used.",
             )
 
@@ -3449,10 +3452,21 @@ class InventoryService:
         verification = InventoryAnswerVerification(
             passed=existing_verification.passed and final_verification.passed,
             issues=issues,
+            hard_constraint_issues=existing_verification.hard_constraint_issues,
+            requires_abstention=existing_verification.requires_abstention,
             checked_final_answer=True,
             final_answer_issues=final_verification.final_answer_issues,
         )
         return reply.model_copy(update={"verification": verification})
+
+    @staticmethod
+    def _verified_reply_is_acceptable(
+        *,
+        reply: InventoryReply,
+    ) -> bool:
+        if reply.verification.passed:
+            return True
+        return reply.answer_plan.abstain and not reply.verification.final_answer_issues
 
     def _build_safe_final_answer_reply(
         self,
@@ -4649,13 +4663,81 @@ class InventoryService:
             strategy=strategy,
             next_best_question=reply.follow_up_question,
         )
-        return InventoryReply(
+        verification = self._verify_answer_plan(answer_plan=plan, hits=hits)
+        enriched_reply = InventoryReply(
             answer=reply.answer,
             recommended_product_ids=reply.recommended_product_ids,
             cross_sell_product_ids=reply.cross_sell_product_ids,
             follow_up_question=reply.follow_up_question,
             answer_plan=plan,
-            verification=self._verify_answer_plan(answer_plan=plan, hits=hits),
+            verification=verification,
+        )
+        if verification.requires_abstention and not plan.abstain:
+            return self._build_hard_constraint_abstain_reply(reply=enriched_reply)
+        return enriched_reply
+
+    def _build_hard_constraint_abstain_reply(
+        self,
+        *,
+        reply: InventoryReply,
+    ) -> InventoryReply:
+        issues = self._dedupe_verification_issues(
+            reply.verification.hard_constraint_issues or reply.verification.issues
+        )
+        reason = issues[0] if issues else "I could not verify a catalog fit for the required constraints."
+        follow_up_question = (
+            reply.follow_up_question
+            or reply.answer_plan.next_best_question
+            or (
+                reply.answer_plan.evidence_contract.follow_up_question_rules[0]
+                if reply.answer_plan.evidence_contract and reply.answer_plan.evidence_contract.follow_up_question_rules
+                else None
+            )
+            or "Tell me which constraint matters most: category, budget, stock, or a specific spec."
+        )
+        evidence_contract = reply.answer_plan.evidence_contract
+        if evidence_contract is not None:
+            evidence_contract = evidence_contract.model_copy(update={"primary_product_id": None})
+        abstain_plan = reply.answer_plan.model_copy(
+            update={
+                "primary_product_id": None,
+                "alternative_product_ids": [],
+                "cross_sell_product_ids": [],
+                "primary_reason": None,
+                "alternative_reason": None,
+                "cross_sell_reason": None,
+                "tradeoffs": [],
+                "risk_notes": self._dedupe_verification_issues([*reply.answer_plan.risk_notes, *issues]),
+                "reasoning_steps": [
+                    *reply.answer_plan.reasoning_steps,
+                    "Abstained because the selected product fit violated hard constraints: "
+                    + self._natural_join(issues[:3])
+                    + ".",
+                ],
+                "next_best_question": follow_up_question,
+                "abstain": True,
+                "abstention_reason": reason,
+                "evidence_contract": evidence_contract,
+            }
+        )
+        verification = reply.verification.model_copy(
+            update={
+                "passed": False,
+                "issues": self._dedupe_verification_issues([*reply.verification.issues, *issues]),
+                "hard_constraint_issues": issues,
+                "requires_abstention": True,
+            }
+        )
+        return InventoryReply(
+            answer=(
+                "I do not have a reliable catalog fit that satisfies the required category, budget, "
+                "stock, or spec constraints for this request."
+            ),
+            recommended_product_ids=[],
+            cross_sell_product_ids=[],
+            follow_up_question=follow_up_question,
+            answer_plan=abstain_plan,
+            verification=verification,
         )
 
     def _enrich_answer_plan(
@@ -4772,7 +4854,18 @@ class InventoryService:
         overlapping_exclusions = set(answer_plan.excluded_product_ids).intersection(used_product_ids)
         if overlapping_exclusions:
             issues.append("Answer plan both used and excluded the same product IDs.")
-        return InventoryAnswerVerification(passed=not issues, issues=issues)
+        product_fit_verification = self.final_answer_verifier.verify_product_fit(
+            answer_plan=answer_plan,
+            hits=hits,
+        )
+        merged_issues = self._dedupe_verification_issues([*issues, *product_fit_verification.issues])
+        hard_constraint_issues = self._dedupe_verification_issues(product_fit_verification.hard_constraint_issues)
+        return InventoryAnswerVerification(
+            passed=not merged_issues,
+            issues=merged_issues,
+            hard_constraint_issues=hard_constraint_issues,
+            requires_abstention=product_fit_verification.requires_abstention,
+        )
 
     def _metadata_used_for_hit(self, hit: InventorySearchHit | None) -> list[str]:
         if hit is None:

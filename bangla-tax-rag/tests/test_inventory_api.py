@@ -952,6 +952,123 @@ def test_inventory_sales_answer_uses_deterministic_step_up_alternative_scorecard
     assert reply.answer_plan.confidence_breakdown["alternative"]["deterministic_alternative_score"] > 0
 
 
+def test_inventory_build_answer_abstains_when_alternative_breaks_budget_ceiling(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+
+    reply = service._build_answer(
+        question="Recommend a laptop under $1000, but show the next stronger option too",
+        hits=[
+            InventorySearchHit(
+                product_id="budget",
+                sku="CMP-LAP-001",
+                name="Nimbus 14 Essential",
+                category="Computing",
+                brand="Nimbus",
+                price=899.0,
+                currency="USD",
+                stock=16,
+                tags=["computing", "laptop"],
+                snippet="Lower-cost business laptop",
+                evidence_scores={
+                    "final_score": 0.88,
+                    "product_type_match": 1.0,
+                    "price_fit": 0.95,
+                    "budget_fit": 1.0,
+                    "stock_fit": 1.0,
+                },
+                score=0.88,
+            ),
+            InventorySearchHit(
+                product_id="step-up",
+                sku="CMP-LAP-010",
+                name="Nimbus 14 Pro",
+                category="Computing",
+                brand="Nimbus",
+                price=1149.0,
+                currency="USD",
+                stock=14,
+                tags=["computing", "laptop", "premium"],
+                snippet="Higher-resolution display and faster processor",
+                evidence_scores={
+                    "final_score": 0.74,
+                    "product_type_match": 1.0,
+                    "premium_fit": 0.92,
+                    "structured_spec_match": 0.7,
+                    "stock_fit": 1.0,
+                },
+                score=0.74,
+            ),
+        ],
+        filters=InventorySearchFilters(),
+        low_stock_threshold=10,
+        assistant_mode="sales",
+        reply_style="detailed",
+    )
+
+    assert reply.answer_plan.abstain is True
+    assert reply.recommended_product_ids == []
+    assert reply.answer_plan.primary_product_id is None
+    assert reply.answer_plan.alternative_product_ids == []
+    assert reply.verification.requires_abstention is True
+    assert "budget ceiling" in (reply.answer_plan.abstention_reason or "").lower()
+
+
+def test_inventory_finalize_reply_marks_hard_constraint_abstention(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+    hit = InventorySearchHit(
+        product_id="budget",
+        sku="CMP-LAP-001",
+        name="Nimbus 14 Essential",
+        category="Computing",
+        brand="Nimbus",
+        price=899.0,
+        currency="USD",
+        stock=9,
+        tags=["computing", "laptop"],
+        attributes={"ram_gb": "16"},
+        snippet="Lower-cost business laptop",
+        evidence_scores={
+            "final_score": 0.86,
+            "product_type_match": 1.0,
+            "price_fit": 0.95,
+            "budget_fit": 1.0,
+            "stock_fit": 1.0,
+        },
+        score=0.86,
+    )
+
+    base_reply = service._build_answer(
+        question="Recommend a laptop under $1000 with 32GB RAM",
+        hits=[hit],
+        filters=InventorySearchFilters(),
+        low_stock_threshold=10,
+        assistant_mode="sales",
+        reply_style="detailed",
+    )
+    final_reply, answer_engine, abstained, abstention_reason, fallback_reason = service._finalize_inventory_reply(
+        question="Recommend a laptop under $1000 with 32GB RAM",
+        assistant_mode="sales",
+        reply_style="detailed",
+        requested_answer_engine="deterministic",
+        confidence_score=0.86,
+        hits=[hit],
+        base_reply=base_reply,
+        conversation_history=[],
+        conversation_summary=None,
+        abstention_reason=None,
+        execution_path="test",
+    )
+
+    assert base_reply.answer_plan.abstain is True
+    assert answer_engine == "deterministic"
+    assert abstained is True
+    assert fallback_reason is None
+    assert abstention_reason == base_reply.answer_plan.abstention_reason
+    assert final_reply.answer_plan.abstain is True
+    assert final_reply.answer_plan.primary_product_id is None
+    assert final_reply.verification.requires_abstention is True
+
+
 def test_inventory_natural_prompt_uses_writer_contract_and_plan_fields(tmp_path) -> None:  # type: ignore[no-untyped-def]
     service = _build_inventory_service(tmp_path)
     hit = InventorySearchHit(

@@ -799,6 +799,8 @@ class InventoryAnswerPlan(BaseModel):
 class InventoryAnswerVerification(BaseModel):
     passed: bool = True
     issues: list[str] = Field(default_factory=list)
+    hard_constraint_issues: list[str] = Field(default_factory=list)
+    requires_abstention: bool = False
     checked_final_answer: bool = False
     final_answer_issues: list[str] = Field(default_factory=list)
 

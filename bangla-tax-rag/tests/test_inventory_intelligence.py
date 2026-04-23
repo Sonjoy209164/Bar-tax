@@ -96,6 +96,31 @@ def test_product_ontology_rejects_unrelated_substitutes() -> None:
     assert ontology.relation_score("headphones", keyboard) == 0
 
 
+def test_product_ontology_prefers_accessory_type_for_laptop_bag_bundle_items() -> None:
+    ontology = ProductOntology()
+    laptop = SimpleNamespace(
+        product_id="laptop",
+        name="Nimbus 14 Business Ultrabook",
+        category="Computing",
+        tags=["computing", "laptop"],
+        snippet="Lightweight 14 inch laptop",
+        attributes={},
+        metadata={},
+    )
+    bag = SimpleNamespace(
+        product_id="bag",
+        name="CarryShield Laptop Bag",
+        category="Accessories",
+        tags=["bag", "accessory"],
+        snippet="Protective laptop bag for daily carry",
+        attributes={},
+        metadata={},
+    )
+
+    assert ontology.detect_product_type(product=bag) == "bag"
+    assert ontology.valid_cross_sell(laptop, bag, explicit_cross_sell=True) is True
+
+
 def test_ecommerce_reranker_prefers_exact_product_type_over_generic_semantic_match() -> None:
     ontology = ProductOntology()
     reranker = EcommerceReranker(ontology)

@@ -104,16 +104,39 @@ class ProductOntology:
         if not searchable:
             return None
 
+        name_text = self._product_signal_text(product, "name")
+        category_text = self._product_signal_text(product, "category")
+        brand_text = self._product_signal_text(product, "brand")
+        tags = {
+            normalize_inventory_text(tag)
+            for tag in (getattr(product, "tags", None) or [])
+            if isinstance(tag, str) and normalize_inventory_text(tag)
+        }
+
         best_type: str | None = None
         best_score = 0
         for product_type, synonyms in self.PRODUCT_SYNONYMS.items():
             score = 0
+            normalized_product_type = normalize_inventory_text(product_type)
             for synonym in synonyms:
                 normalized_synonym = normalize_inventory_text(synonym)
                 if not normalized_synonym:
                     continue
                 if self._contains_phrase(searchable, normalized_synonym):
                     score = max(score, len(normalized_synonym.split()) * 2)
+                    if name_text and self._contains_phrase(name_text, normalized_synonym):
+                        score += 2
+                    if category_text and self._contains_phrase(category_text, normalized_synonym):
+                        score += 2
+                    if brand_text and self._contains_phrase(brand_text, normalized_synonym):
+                        score += 1
+                    if any(self._contains_phrase(tag, normalized_synonym) for tag in tags):
+                        score += 3
+            if normalized_product_type in tags:
+                score += 3
+            default_category = normalize_inventory_text(self.category_for_product_type(product_type))
+            if default_category and category_text == default_category:
+                score += 2
             if score > best_score:
                 best_type = product_type
                 best_score = score
@@ -255,6 +278,11 @@ class ProductOntology:
     def _text_attr(product: object, attr: str) -> str:
         value = getattr(product, attr, None)
         return value if isinstance(value, str) else ""
+
+    def _product_signal_text(self, product: object | None, attr: str) -> str:
+        if product is None:
+            return ""
+        return normalize_inventory_text(self._text_attr(product, attr))
 
     def _same_category(self, primary: object, candidate: object) -> bool:
         primary_category = self._text_attr(primary, "category")

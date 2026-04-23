@@ -46,7 +46,7 @@ question
 - [ ] Finalize which question types stay deterministic.
 - [ ] Finalize which question types require agentic decomposition.
 - [ ] Finalize when the system must abstain.
-- [ ] Finalize the evidence contract schema used by the answer layer.
+- [x] Finalize the evidence contract schema used by the answer layer.
 - [ ] Finalize the evaluation questions for complex reasoning.
 
 Success criteria:
@@ -59,12 +59,12 @@ Every incoming question has a defined execution path instead of falling through 
 
 Question families to support:
 
-- [ ] `exact_lookup`
-- [ ] `comparison`
-- [ ] `recommendation`
-- [ ] `diagnosis_root_cause`
-- [ ] `planning_agentic_workflow`
-- [ ] `no_match_or_abstain`
+- [x] `exact_lookup`
+- [x] `comparison`
+- [x] `recommendation`
+- [x] `diagnosis_root_cause`
+- [x] `planning_agentic_workflow`
+- [x] `no_match_or_abstain`
 
 Implementation tasks:
 
@@ -89,23 +89,23 @@ The system chooses different retrieval and reasoning paths for lookup, compariso
 
 Target retrieval stages:
 
-- [ ] lexical retrieval
-- [ ] dense retrieval
-- [ ] metadata filtering
-- [ ] entity / SKU / exact alias lookup
-- [ ] reranking
-- [ ] evidence packing
+- [x] lexical retrieval
+- [x] dense retrieval
+- [x] metadata filtering
+- [x] entity / SKU / exact alias lookup
+- [x] reranking
+- [x] evidence packing
 
 Implementation tasks:
 
 - [x] Add lexical-first recovery for exact and near-exact product lookups.
 - [x] Combine lexical and dense candidate pools before reranking.
-- [ ] Use normalized vector metadata for hard filters on specs and constraints.
+- [x] Use normalized vector metadata for hard filters on specs and constraints.
 - [x] Add product alias handling for name variants, SKU variants, and spec aliases like `1TB` vs `1024GB`.
 - [x] Add exact-match boosting for product names and SKU hits.
 - [x] Add category and product-type gating before final ranking.
-- [ ] Add metadata-aware reranking for spec-heavy queries.
-- [ ] Add business-signal-aware reranking for operational queries.
+- [x] Add metadata-aware reranking for spec-heavy queries.
+- [x] Add business-signal-aware reranking for operational queries.
 - [x] Record per-stage candidate counts in traces.
 - [ ] Add evals for lexical miss recovery and alias recovery.
 
@@ -119,27 +119,27 @@ The retriever returns the right candidate set for exact, spec-heavy, and compari
 
 Evidence required for complex reasoning:
 
-- [ ] normalized specs
-- [ ] availability
-- [ ] pricing
-- [ ] business signals
-- [ ] lead time
-- [ ] demand
-- [ ] margin
-- [ ] comparable alternatives
-- [ ] contradictions
-- [ ] missing facts
+- [x] normalized specs
+- [x] availability
+- [x] pricing
+- [x] business signals
+- [x] lead time
+- [x] demand
+- [x] margin
+- [x] comparable alternatives
+- [x] contradictions
+- [x] missing facts
 
 Implementation tasks:
 
-- [ ] Define a normalized fact model for retrieved product evidence.
-- [ ] Pull structured specs from `attributes` and curated vector metadata.
-- [ ] Pull business metrics from the business signal store.
-- [ ] Mark fields as present, missing, conflicting, or inferred.
-- [ ] Attach evidence provenance for each fact.
-- [ ] Detect stale or contradictory catalog vs business values.
-- [ ] Expose `missing_facts` explicitly to the answer planner.
-- [ ] Add tests for fact extraction and contradiction detection.
+- [x] Define a normalized fact model for retrieved product evidence.
+- [x] Pull structured specs from `attributes` and curated vector metadata.
+- [x] Pull business metrics from the business signal store.
+- [x] Mark fields as present, missing, conflicting, or inferred.
+- [x] Attach evidence provenance for each fact.
+- [x] Detect stale or contradictory catalog vs business values.
+- [x] Expose `missing_facts` explicitly to the answer planner.
+- [x] Add tests for fact extraction and contradiction detection.
 
 Success criteria:
 
@@ -153,21 +153,21 @@ Complex questions should be decomposed into sub-queries.
 
 Examples:
 
-- [ ] restock priority
-- [ ] bundle recommendation
-- [ ] compare two or more products
+- [x] restock priority
+- [x] bundle recommendation
+- [x] compare two or more products
 - [ ] root cause analysis
 - [ ] operational planning
 
 Implementation tasks:
 
-- [ ] Add a retrieval planner for multi-step inventory questions.
-- [ ] Split a complex question into sub-goals.
-- [ ] Create a retrieval request per sub-goal.
-- [ ] Support plan steps like `find candidates`, `rank`, `check constraints`, `find complements`, `compose`.
-- [ ] Merge sub-query outputs into one evidence bundle.
-- [ ] Keep decomposition bounded and traceable.
-- [ ] Add tests for AC-restock-and-bundle style questions.
+- [x] Add a retrieval planner for multi-step inventory questions.
+- [x] Split a complex question into sub-goals.
+- [x] Create a retrieval request per sub-goal.
+- [x] Support plan steps like `find candidates`, `rank`, `check constraints`, `find complements`, `compose`.
+- [x] Merge sub-query outputs into one evidence bundle.
+- [x] Keep decomposition bounded and traceable.
+- [x] Add tests for AC-restock-and-bundle style questions.
 
 Example target:
 
@@ -192,22 +192,22 @@ Do not pass raw hits directly into answer generation.
 
 Evidence contract should contain:
 
-- [ ] primary candidates
-- [ ] rejected candidates and why
-- [ ] required tradeoffs
-- [ ] missing facts
-- [ ] allowed claims
-- [ ] follow-up question rules
+- [x] primary candidates
+- [x] rejected candidates and why
+- [x] required tradeoffs
+- [x] missing facts
+- [x] allowed claims
+- [x] follow-up question rules
 
 Implementation tasks:
 
-- [ ] Define an `EvidenceContract` or equivalent schema.
-- [ ] Add candidate-level reasons for inclusion and rejection.
-- [ ] Add tradeoff summaries like `better battery`, `weaker stock`, `higher margin`, `lower demand`.
-- [ ] Add claim allowlist fields so the model only states supported facts.
-- [ ] Add follow-up rules for missing constraints such as budget, availability, or preferred feature.
-- [ ] Add trace output for evidence contract creation.
-- [ ] Add tests for contract completeness.
+- [x] Define an `EvidenceContract` or equivalent schema.
+- [x] Add candidate-level reasons for inclusion and rejection.
+- [x] Add tradeoff summaries like `better battery`, `weaker stock`, `higher margin`, `lower demand`.
+- [x] Add claim allowlist fields so the model only states supported facts.
+- [x] Add follow-up rules for missing constraints such as budget, availability, or preferred feature.
+- [x] Add trace output for evidence contract creation.
+- [x] Add tests for contract completeness.
 
 Success criteria:
 
@@ -246,9 +246,9 @@ The system reaches the same ranking decision reliably even when the wording laye
 
 Before returning the final answer:
 
-- [ ] verify claims
+- [x] verify claims
 - [ ] verify product-fit
-- [ ] detect unsupported conclusions
+- [x] detect unsupported conclusions
 - [ ] force abstain when evidence is weak
 
 Implementation tasks:
@@ -256,10 +256,10 @@ Implementation tasks:
 - [ ] Check that recommended products satisfy the asked constraints.
 - [ ] Check that price, stock, and spec claims exist in evidence.
 - [ ] Reject category mismatch recommendations.
-- [ ] Reject weak substitutions that are really cross-sell items.
-- [ ] Detect when no exact match exists.
-- [ ] Detect when the answer should ask a follow-up instead of pretending certainty.
-- [ ] Add tests for abstain behavior and false-claim prevention.
+- [x] Reject weak substitutions that are really cross-sell items.
+- [x] Detect when no exact match exists.
+- [x] Detect when the answer should ask a follow-up instead of pretending certainty.
+- [x] Add tests for abstain behavior and false-claim prevention.
 
 Success criteria:
 
@@ -299,14 +299,14 @@ Every retrieval or reasoning change can be measured against real failure categor
 
 ## Phase 9: Observability And Debugging
 
-- [ ] Log question family classification.
-- [ ] Log route choice and confidence.
-- [ ] Log candidate counts per retrieval stage.
-- [ ] Log applied metadata filters.
+- [x] Log question family classification.
+- [x] Log route choice and confidence.
+- [x] Log candidate counts per retrieval stage.
+- [x] Log applied metadata filters.
 - [ ] Log rejected candidates and rejection reasons.
-- [ ] Log evidence gaps and abstain reasons.
+- [x] Log evidence gaps and abstain reasons.
 - [ ] Log deterministic score breakdowns.
-- [ ] Expose these details in traces without leaking them to end users.
+- [x] Expose these details in traces without leaking them to end users.
 
 Success criteria:
 
@@ -316,11 +316,11 @@ When the system fails, we can tell whether the problem came from classification,
 
 ## Suggested Build Order
 
-- [ ] Phase 1: Question classification and routing
-- [ ] Phase 2: Multi-stage retrieval stack
-- [ ] Phase 3: Structured fact retrieval
-- [ ] Phase 4: Query decomposition
-- [ ] Phase 5: Evidence contract
+- [x] Phase 1: Question classification and routing
+- [x] Phase 2: Multi-stage retrieval stack
+- [x] Phase 3: Structured fact retrieval
+- [x] Phase 4: Query decomposition
+- [x] Phase 5: Evidence contract
 - [ ] Phase 6: Deterministic reasoning
 - [ ] Phase 7: Verification and abstain
 - [ ] Phase 8: Evaluation and failure tracking
@@ -328,9 +328,9 @@ When the system fails, we can tell whether the problem came from classification,
 
 ## Definition Of Done
 
-- [ ] Complex questions no longer rely on one generic retrieval path.
-- [ ] Spec-heavy and alias-heavy questions retrieve the right candidates.
-- [ ] Comparison and recommendation answers are driven by structured evidence.
-- [ ] Unsupported claims are blocked before final answer generation.
+- [x] Complex questions no longer rely on one generic retrieval path.
+- [x] Spec-heavy and alias-heavy questions retrieve the right candidates.
+- [x] Comparison and recommendation answers are driven by structured evidence.
+- [x] Unsupported claims are blocked before final answer generation.
 - [ ] Failure modes are measured with repeatable evals.
-- [ ] Traces show where the system succeeded or failed.
+- [x] Traces show where the system succeeded or failed.

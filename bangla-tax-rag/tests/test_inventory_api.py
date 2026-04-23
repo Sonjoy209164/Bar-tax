@@ -2381,9 +2381,202 @@ async def test_inventory_agentic_uses_business_signals_for_restock_reasoning(
 
     assert trace_response.status_code == 200
     trace_payload = trace_response.json()
+    assert any(step["action"] == "find_restock_candidates" for step in trace_payload["retrieval_steps"])
     assert any(step["action"] == "business_signal_analysis" for step in trace_payload["retrieval_steps"])
-    assert trace_payload["retrieval_steps"][-1]["action"] == "business_signal_analysis"
+    assert trace_payload["retrieval_steps"][-1]["action"] == "rank_operational_candidates"
     assert "Business signal tool" in " ".join(trace_payload["reasoning_summary"])
+
+
+@pytest.mark.anyio
+async def test_inventory_agentic_compare_builds_bounded_comparison_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "laptop-pro",
+                        "sku": "CMP-LTP-901",
+                        "name": "CreatorCraft 16 Pro",
+                        "category": "Computing",
+                        "brand": "CreatorCraft",
+                        "short_description": "Creator laptop with dedicated graphics",
+                        "price": 1699.0,
+                        "currency": "USD",
+                        "stock": 4,
+                        "status": "Active",
+                        "tags": ["laptop", "creator", "premium"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "laptop-air",
+                        "sku": "CMP-LTP-902",
+                        "name": "CreatorCraft 16 Air",
+                        "category": "Computing",
+                        "brand": "CreatorCraft",
+                        "short_description": "Creator laptop with longer battery life",
+                        "price": 1499.0,
+                        "currency": "USD",
+                        "stock": 9,
+                        "status": "Active",
+                        "tags": ["laptop", "creator"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/agentic/ask",
+            json={
+                "question": "Compare CreatorCraft 16 Pro vs CreatorCraft 16 Air",
+                "assistant_mode": "support",
+                "reply_style": "detailed",
+                "max_reasoning_steps": 4,
+            },
+        )
+        trace_response = await client.get(f"/inventory/chat/trace/{response.json()['trace_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "CreatorCraft 16 Pro" in payload["answer"]
+    assert "CreatorCraft 16 Air" in payload["answer"]
+    assert payload["answer_plan"]["evidence_contract"]["primary_candidate_ids"][:2] == [
+        "laptop-pro",
+        "laptop-air",
+    ]
+
+    assert trace_response.status_code == 200
+    trace_payload = trace_response.json()
+    assert trace_payload["retrieval_steps"][0]["action"] == "find_comparison_candidates"
+    assert trace_payload["retrieval_steps"][-1]["action"] == "align_comparison_facts"
+
+
+@pytest.mark.anyio
+async def test_inventory_agentic_bundle_builds_primary_and_add_on_steps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "laptop-main",
+                        "sku": "CMP-LAP-001",
+                        "name": "Nimbus 14 Business Ultrabook",
+                        "category": "Computing",
+                        "brand": "Nimbus",
+                        "short_description": "Lightweight 14 inch laptop",
+                        "price": 1199.0,
+                        "currency": "USD",
+                        "stock": 8,
+                        "status": "Active",
+                        "tags": ["computing", "laptop"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "mouse-addon",
+                        "sku": "CMP-MS-002",
+                        "name": "GlidePoint Wireless Mouse",
+                        "category": "Computing",
+                        "brand": "GlidePoint",
+                        "short_description": "Silent wireless mouse",
+                        "price": 49.0,
+                        "currency": "USD",
+                        "stock": 31,
+                        "status": "Active",
+                        "tags": ["computing", "mouse"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "bag-addon",
+                        "sku": "ACC-BAG-003",
+                        "name": "CarryShield Laptop Bag",
+                        "category": "Accessories",
+                        "brand": "CarryShield",
+                        "short_description": "Protective laptop bag",
+                        "price": 69.0,
+                        "currency": "USD",
+                        "stock": 14,
+                        "status": "Active",
+                        "tags": ["bag", "accessory"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/agentic/ask",
+            json={
+                "question": "What should I bundle with Nimbus 14 Business Ultrabook?",
+                "assistant_mode": "support",
+                "reply_style": "detailed",
+                "max_reasoning_steps": 4,
+            },
+        )
+        trace_response = await client.get(f"/inventory/chat/trace/{response.json()['trace_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["cross_sell_product_ids"]
+    assert "Nimbus 14 Business Ultrabook" in payload["answer"]
+    assert payload["answer_plan"]["cross_sell_product_ids"]
+
+    assert trace_response.status_code == 200
+    trace_payload = trace_response.json()
+    actions = [step["action"] for step in trace_payload["retrieval_steps"]]
+    assert "find_bundle_primary" in actions
+    assert "find_compatible_add_ons" in actions
+    assert actions[-1] == "filter_compatible_add_ons"
+
+
+@pytest.mark.anyio
+async def test_inventory_agentic_abstains_when_required_domains_are_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/inventory/agentic/ask",
+            json={
+                "question": "What should I restock first next month?",
+                "assistant_mode": "support",
+                "reply_style": "detailed",
+                "available_data_domains": ["catalog"],
+            },
+        )
+        trace_response = await client.get(f"/inventory/chat/trace/{response.json()['trace_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["abstained"] is True
+    assert payload["retrieval_steps_used"] == 0
+    assert "do not have" in payload["answer"].lower() or "cannot make a reliable workflow recommendation" in payload["answer"].lower()
+    assert any("missing data domain" in item.lower() for item in payload["missing_facts"])
+
+    assert trace_response.status_code == 200
+    trace_payload = trace_response.json()
+    assert trace_payload["execution_path"] == "inventory_agentic_missing_domain_abstain"
+    assert trace_payload["retrieval_steps"] == []
 
 
 @pytest.mark.anyio

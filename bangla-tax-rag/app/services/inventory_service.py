@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -366,6 +367,22 @@ class InventoryBusinessInsight(BaseModel):
     reasoning_summary: list[str] = Field(default_factory=list)
     missing_facts: list[str] = Field(default_factory=list)
     selected_product_ids: list[str] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class InventoryAgenticPlanStepSpec:
+    action: str
+    mode: str
+    query_text: str | None = None
+    filters: InventorySearchFilters | None = None
+
+
+@dataclass(frozen=True)
+class InventoryAgenticExecutionPlan:
+    strategy: str
+    search_steps: tuple[InventoryAgenticPlanStepSpec, ...]
+    analysis_actions: tuple[str, ...] = ()
+    abstain_on_missing_domains: bool = False
 
 
 class InventoryService:
@@ -1223,19 +1240,223 @@ class InventoryService:
             )
             return response
 
-        search_requests = self._build_agentic_search_requests(
+        execution_plan = self._build_agentic_execution_plan(
             question=request.question,
             filters=effective_filters,
             low_stock_threshold=request.low_stock_threshold,
             max_reasoning_steps=request.max_reasoning_steps or self.config.default_agentic_max_reasoning_steps,
             route_response=route_response,
         )
+        if execution_plan.abstain_on_missing_domains and route_response.missing_data_domains:
+            missing_domain_reply = self._build_missing_domain_abstain_reply(
+                question=request.question,
+                assistant_mode=request.assistant_mode,
+                reply_style=request.reply_style,
+                filters=effective_filters,
+                missing_data_domains=route_response.missing_data_domains,
+            )
+            reasoning_summary.append(
+                "Abstained before retrieval because the workflow requires data domains that are not available to this agent."
+            )
+            final_reply, answer_engine, abstained, abstention_reason, fallback_reason = self._finalize_inventory_reply(
+                question=request.question,
+                assistant_mode=request.assistant_mode,
+                reply_style=request.reply_style,
+                requested_answer_engine=request.answer_engine,
+                confidence_score=0.18,
+                hits=[],
+                base_reply=missing_domain_reply,
+                conversation_history=request.conversation_history,
+                conversation_summary=request.conversation_summary,
+                abstention_reason=missing_domain_reply.answer_plan.abstention_reason,
+                execution_path="inventory_agentic_missing_domain_abstain",
+                reasoning_summary=reasoning_summary,
+                missing_facts=missing_facts,
+                memory_resolution=resolved_memory.resolution,
+            )
+            response = InventoryAgenticResponse(
+                status="success",
+                question=request.question,
+                answer=final_reply.answer,
+                assistant_mode=request.assistant_mode,
+                reply_style=request.reply_style,
+                answer_engine=answer_engine,
+                execution_path="inventory_agentic_missing_domain_abstain",
+                confidence_score=0.18,
+                abstained=abstained,
+                abstention_reason=abstention_reason,
+                trace_id=trace_id,
+                reasoning_summary=reasoning_summary,
+                missing_facts=missing_facts,
+                retrieval_steps_used=0,
+                total_hits=0,
+                applied_filters=effective_filters,
+                hits=[],
+                recommended_product_ids=final_reply.recommended_product_ids,
+                cross_sell_product_ids=final_reply.cross_sell_product_ids,
+                follow_up_question=final_reply.follow_up_question,
+                answer_plan=final_reply.answer_plan,
+                verification=final_reply.verification,
+                memory_resolution=resolved_memory.resolution,
+            )
+            trace_payload = {
+                "trace_id": trace_id,
+                "question": request.question,
+                "assistant_mode": request.assistant_mode,
+                "reply_style": request.reply_style,
+                "execution_path": "inventory_agentic_missing_domain_abstain",
+                "route_decision": self._serialize_route_response(route_response),
+                "retrieval_stage_counts": {},
+                "reasoning_summary": reasoning_summary,
+                "missing_facts": missing_facts,
+                "retrieval_steps": [],
+                "final_answer": final_reply.answer,
+                "confidence_score": 0.18,
+            }
+            self.trace_store.save(trace_payload)
+            self._save_inventory_chat_trace(
+                trace_id=trace_id,
+                response=response,
+                execution_path="inventory_agentic_missing_domain_abstain",
+                started_at=started_at,
+                requested_answer_engine=request.answer_engine,
+                retrieved_hits=[],
+                reranked_hits=[],
+                retrieval_stage_counts={},
+                reasoning_summary=reasoning_summary,
+                missing_facts=missing_facts,
+                retrieval_steps=[],
+                fallback_reason_override=fallback_reason,
+                route_decision_override=self._serialize_route_response(route_response),
+            )
+            return response
 
         retrieval_steps: list[InventoryAgenticStep] = []
         aggregated_retrieval_stage_counts: dict[str, int] = {}
         aggregated_hits: list[InventorySearchHit] = []
         seen_hits: set[str] = set()
-        for step_number, search_request in enumerate(search_requests, start=1):
+        for step_number, plan_step in enumerate(execution_plan.search_steps, start=1):
+            if plan_step.mode == "bundle_add_on_search":
+                primary = self._agentic_primary_hit_for_bundle(
+                    question=request.question,
+                    hits=aggregated_hits,
+                    filters=effective_filters,
+                )
+                if primary is None:
+                    retrieval_steps.append(
+                        InventoryAgenticStep(
+                            step_number=step_number,
+                            action=plan_step.action,
+                            query_text=plan_step.query_text,
+                            applied_filters=(plan_step.filters or effective_filters).model_copy(deep=True),
+                            total_hits=0,
+                            selected_product_ids=[],
+                            observation=f"Step {step_number} skipped because no stable primary candidate was available yet.",
+                        )
+                    )
+                    reasoning_summary.append(
+                        f"Step {step_number} skipped because no stable primary candidate was available yet."
+                    )
+                    continue
+
+                bundle_filters = (plan_step.filters or effective_filters).model_copy(deep=True)
+                bundle_hits = self._bundle_add_on_hits(
+                    primary=primary,
+                    filters=bundle_filters,
+                    top_k=min(max(request.top_k, 5), self.config.max_top_k),
+                )
+                bundle_stage_counts = {"deterministic_bundle_catalog_scan": len(bundle_hits)}
+                aggregated_retrieval_stage_counts = self._merge_retrieval_stage_counts(
+                    aggregated_retrieval_stage_counts,
+                    bundle_stage_counts,
+                )
+                selected_hits = bundle_hits[: min(3, len(bundle_hits))]
+                for hit in bundle_hits:
+                    if hit.product_id in seen_hits:
+                        continue
+                    seen_hits.add(hit.product_id)
+                    aggregated_hits.append(hit)
+                observation = self._build_agentic_step_observation(
+                    step_number=step_number,
+                    request=InventorySearchRequest(
+                        query_text=self._bundle_add_on_query(primary=primary, question=request.question),
+                        top_k=min(max(request.top_k, 5), self.config.max_top_k),
+                        filters=bundle_filters,
+                    ),
+                    route_response=route_response,
+                    total_hits=len(bundle_hits),
+                    selected_hits=selected_hits,
+                    action=plan_step.action,
+                )
+                retrieval_steps.append(
+                    InventoryAgenticStep(
+                        step_number=step_number,
+                        action=plan_step.action,
+                        query_text=self._bundle_add_on_query(primary=primary, question=request.question),
+                        applied_filters=bundle_filters,
+                        total_hits=len(bundle_hits),
+                        selected_product_ids=[hit.product_id for hit in selected_hits],
+                        observation=observation,
+                        retrieval_stage_counts=bundle_stage_counts,
+                    )
+                )
+                reasoning_summary.append(observation)
+                continue
+
+            if plan_step.mode == "business":
+                business_hits = self._business_candidate_hits(
+                    question=request.question,
+                    filters=(plan_step.filters or effective_filters).model_copy(deep=True),
+                    business_signals=business_signals,
+                    top_k=min(max(request.top_k, 5), self.config.max_top_k),
+                )
+                selected_hits = business_hits[: min(3, len(business_hits))]
+                for hit in business_hits:
+                    if hit.product_id in seen_hits:
+                        continue
+                    seen_hits.add(hit.product_id)
+                    aggregated_hits.append(hit)
+                business_observation = self._build_business_signal_observation(
+                    business_intent=business_intent or "business",
+                    selected_hits=selected_hits,
+                    business_signals=business_signals,
+                )
+                retrieval_steps.append(
+                    InventoryAgenticStep(
+                        step_number=step_number,
+                        action=plan_step.action,
+                        query_text=plan_step.query_text,
+                        applied_filters=(plan_step.filters or effective_filters).model_copy(deep=True),
+                        total_hits=len(business_hits),
+                        selected_product_ids=[hit.product_id for hit in selected_hits],
+                        observation=business_observation,
+                    )
+                )
+                reasoning_summary.append(business_observation)
+                continue
+
+            search_request = self._agentic_search_request_for_step(
+                plan_step=plan_step,
+                question=request.question,
+                filters=effective_filters,
+                top_k=min(max(self.config.default_top_k, 5), self.config.max_top_k),
+                hits_so_far=aggregated_hits,
+            )
+            if search_request is None:
+                retrieval_steps.append(
+                    InventoryAgenticStep(
+                        step_number=step_number,
+                        action=plan_step.action,
+                        query_text=plan_step.query_text,
+                        applied_filters=(plan_step.filters or effective_filters).model_copy(deep=True),
+                        total_hits=0,
+                        selected_product_ids=[],
+                        observation=f"Step {step_number} skipped because no stable primary candidate was available yet.",
+                    )
+                )
+                reasoning_summary.append(f"Step {step_number} skipped because no stable primary candidate was available yet.")
+                continue
+
             search_response, retrieval_stage_counts = self._search_with_diagnostics(search_request)
             aggregated_retrieval_stage_counts = self._merge_retrieval_stage_counts(
                 aggregated_retrieval_stage_counts,
@@ -1253,11 +1474,12 @@ class InventoryService:
                 route_response=route_response,
                 total_hits=search_response.total_hits,
                 selected_hits=selected_hits,
+                action=plan_step.action,
             )
             retrieval_steps.append(
                 InventoryAgenticStep(
                     step_number=step_number,
-                    action=self._label_agentic_action(search_request=search_request, route_response=route_response),
+                    action=plan_step.action,
                     query_text=search_request.query_text,
                     applied_filters=search_request.filters.model_copy(deep=True),
                     total_hits=search_response.total_hits,
@@ -1267,40 +1489,6 @@ class InventoryService:
                 )
             )
             reasoning_summary.append(observation)
-
-        if business_intent:
-            business_hits = self._business_candidate_hits(
-                question=request.question,
-                filters=effective_filters,
-                business_signals=business_signals,
-                top_k=min(max(request.top_k, 5), self.config.max_top_k),
-            )
-            if business_hits:
-                selected_business_hits = business_hits[: min(3, len(business_hits))]
-                for hit in business_hits:
-                    if hit.product_id in seen_hits:
-                        continue
-                    seen_hits.add(hit.product_id)
-                    aggregated_hits.append(hit)
-                business_observation = self._build_business_signal_observation(
-                    business_intent=business_intent,
-                    selected_hits=selected_business_hits,
-                    business_signals=business_signals,
-                )
-                retrieval_steps.append(
-                    InventoryAgenticStep(
-                        step_number=len(retrieval_steps) + 1,
-                        action="business_signal_analysis",
-                        query_text=f"business_signals:{business_intent}",
-                        applied_filters=effective_filters.model_copy(deep=True),
-                        total_hits=len(business_hits),
-                        selected_product_ids=[hit.product_id for hit in selected_business_hits],
-                        observation=business_observation,
-                    )
-                )
-                reasoning_summary.append(business_observation)
-            elif business_intent in available_data_domains:
-                missing_facts.append(f"No product-level business signals matched this {business_intent} question.")
 
         if not aggregated_hits:
             final_reply = InventoryReply(
@@ -1317,14 +1505,29 @@ class InventoryService:
                 low_stock_threshold=request.low_stock_threshold,
                 assistant_mode=request.assistant_mode,
             )
-            final_reply = self._build_answer(
-                question=request.question,
-                hits=ordered_hits,
-                filters=effective_filters,
-                low_stock_threshold=request.low_stock_threshold,
-                assistant_mode=request.assistant_mode,
-                reply_style=request.reply_style,
-            )
+            if execution_plan.strategy == "compare":
+                final_reply = self._build_agentic_compare_reply(
+                    question=request.question,
+                    hits=ordered_hits,
+                    filters=effective_filters,
+                    reply_style=request.reply_style,
+                )
+            elif execution_plan.strategy == "bundle":
+                final_reply = self._build_agentic_bundle_reply(
+                    question=request.question,
+                    hits=ordered_hits,
+                    filters=effective_filters,
+                    reply_style=request.reply_style,
+                )
+            else:
+                final_reply = self._build_answer(
+                    question=request.question,
+                    hits=ordered_hits,
+                    filters=effective_filters,
+                    low_stock_threshold=request.low_stock_threshold,
+                    assistant_mode=request.assistant_mode,
+                    reply_style=request.reply_style,
+                )
             confidence_score = self._estimate_confidence(ordered_hits)
 
         business_insight = self._build_business_tool_insight(
@@ -1337,6 +1540,14 @@ class InventoryService:
             reasoning_summary.extend(business_insight.reasoning_summary)
         if business_insight.missing_facts:
             missing_facts.extend(business_insight.missing_facts)
+        retrieval_steps = self._append_agentic_analysis_steps(
+            retrieval_steps=retrieval_steps,
+            analysis_actions=execution_plan.analysis_actions,
+            question=request.question,
+            reply=final_reply,
+            business_insight=business_insight,
+            max_reasoning_steps=request.max_reasoning_steps or self.config.default_agentic_max_reasoning_steps,
+        )
 
         answer = self._compose_agentic_answer(
             base_answer=final_reply.answer,
@@ -2420,7 +2631,7 @@ class InventoryService:
             return "Escalate to agentic handling because this question needs diagnosis and multi-step reasoning beyond direct catalog retrieval."
         return "Escalate to agentic handling because the question needs multi-step reasoning beyond straightforward catalog retrieval."
 
-    def _build_agentic_search_requests(
+    def _build_agentic_execution_plan(
         self,
         *,
         question: str,
@@ -2428,50 +2639,162 @@ class InventoryService:
         low_stock_threshold: int,
         max_reasoning_steps: int,
         route_response: InventoryRouteResponse,
-    ) -> list[InventorySearchRequest]:
-        search_requests: list[InventorySearchRequest] = [
-            InventorySearchRequest(
-                query_text=question,
-                top_k=min(max(self.config.default_top_k, 5), self.config.max_top_k),
-                filters=filters.model_copy(deep=True),
-            )
-        ]
+    ) -> InventoryAgenticExecutionPlan:
         signals = route_response.signals
-        if max_reasoning_steps <= 1:
-            return search_requests
-
+        strategy = self._agentic_strategy(question=question, route_response=route_response)
         keyword_query = " ".join(self._extract_query_terms(question))
-        if not signals.has_explicit_product_reference and keyword_query and keyword_query != self._normalize_conversation_text(question):
-            search_requests.append(
-                InventorySearchRequest(
-                    query_text=keyword_query,
-                    top_k=min(max(self.config.default_top_k, 5), self.config.max_top_k),
+        normalized_question = self._normalize_conversation_text(question)
+        steps: list[InventoryAgenticPlanStepSpec] = []
+        analysis_actions: list[str] = []
+        abstain_on_missing_domains = bool(
+            route_response.missing_data_domains
+            and (
+                signals.needs_cross_system_data
+                or signals.needs_historical_data
+                or signals.question_family in {"planning_agentic_workflow", "diagnosis_root_cause"}
+            )
+        )
+
+        if strategy == "compare":
+            steps.append(
+                InventoryAgenticPlanStepSpec(
+                    action="find_comparison_candidates",
+                    mode="search",
+                    query_text=question,
                     filters=filters.model_copy(deep=True),
                 )
             )
-
-        if len(search_requests) >= max_reasoning_steps:
-            return search_requests[:max_reasoning_steps]
-
-        if signals.needs_workflow_action or self._has_any_phrase(
-            self._normalize_conversation_text(question),
-            ["restock", "reorder", "low stock", "running low"],
-        ):
+            if not signals.has_explicit_product_reference and keyword_query and keyword_query != normalized_question:
+                steps.append(
+                    InventoryAgenticPlanStepSpec(
+                        action="expand_comparison_candidates",
+                        mode="search",
+                        query_text=keyword_query,
+                        filters=filters.model_copy(deep=True),
+                    )
+                )
+            analysis_actions.append("align_comparison_facts")
+        elif strategy == "bundle":
+            steps.append(
+                InventoryAgenticPlanStepSpec(
+                    action="find_bundle_primary",
+                    mode="search",
+                    query_text=question,
+                    filters=filters.model_copy(deep=True),
+                )
+            )
+            steps.append(
+                InventoryAgenticPlanStepSpec(
+                    action="find_compatible_add_ons",
+                    mode="bundle_add_on_search",
+                    query_text=question,
+                    filters=filters.model_copy(deep=True),
+                )
+            )
+            analysis_actions.append("filter_compatible_add_ons")
+        elif strategy == "restock":
             low_stock_filters = filters.model_copy(deep=True)
             if low_stock_filters.max_stock is None:
                 low_stock_filters.max_stock = low_stock_threshold
-            search_requests.append(
-                InventorySearchRequest(
+            steps.append(
+                InventoryAgenticPlanStepSpec(
+                    action="find_restock_candidates",
+                    mode="search",
                     query_text=keyword_query or question,
-                    top_k=min(max(self.config.default_top_k, 5), self.config.max_top_k),
                     filters=low_stock_filters,
                 )
             )
+            steps.append(
+                InventoryAgenticPlanStepSpec(
+                    action="business_signal_analysis",
+                    mode="business",
+                    query_text=f"business_signals:{self._business_tool_intent(question) or 'restock'}",
+                    filters=low_stock_filters,
+                )
+            )
+            analysis_actions.append("rank_operational_candidates")
+        else:
+            steps.append(
+                InventoryAgenticPlanStepSpec(
+                    action="broad_inventory_search",
+                    mode="search",
+                    query_text=question,
+                    filters=filters.model_copy(deep=True),
+                )
+            )
+            if not signals.has_explicit_product_reference and keyword_query and keyword_query != normalized_question:
+                steps.append(
+                    InventoryAgenticPlanStepSpec(
+                        action="keyword_focus_pass",
+                        mode="search",
+                        query_text=keyword_query,
+                        filters=filters.model_copy(deep=True),
+                    )
+                )
+            if signals.needs_workflow_action and self._has_any_phrase(
+                normalized_question,
+                ["restock", "reorder", "low stock", "running low"],
+            ):
+                low_stock_filters = filters.model_copy(deep=True)
+                if low_stock_filters.max_stock is None:
+                    low_stock_filters.max_stock = low_stock_threshold
+                steps.append(
+                    InventoryAgenticPlanStepSpec(
+                        action="target_low_stock_scan",
+                        mode="search",
+                        query_text=keyword_query or question,
+                        filters=low_stock_filters,
+                    )
+                )
 
-        if len(search_requests) >= max_reasoning_steps:
-            return search_requests[:max_reasoning_steps]
+        bounded_steps = tuple(steps[:max_reasoning_steps])
+        max_analysis = max(0, max_reasoning_steps - len(bounded_steps))
+        return InventoryAgenticExecutionPlan(
+            strategy=strategy,
+            search_steps=bounded_steps,
+            analysis_actions=tuple(analysis_actions[:max_analysis]),
+            abstain_on_missing_domains=abstain_on_missing_domains,
+        )
 
-        return search_requests[:max_reasoning_steps]
+    def _agentic_strategy(self, *, question: str, route_response: InventoryRouteResponse) -> str:
+        normalized = self._normalize_conversation_text(question)
+        if route_response.signals.question_family == "comparison" or self._has_any_phrase(
+            normalized,
+            ["compare", "vs", "versus", "difference between", "which is better"],
+        ):
+            return "compare"
+        if self._should_offer_cross_sell(question):
+            return "bundle"
+        if self._business_tool_intent(question) == "restock" or self._has_any_phrase(
+            normalized,
+            ["restock", "reorder", "stockout", "running low", "low stock"],
+        ):
+            return "restock"
+        return "default"
+
+    def _agentic_search_request_for_step(
+        self,
+        *,
+        plan_step: InventoryAgenticPlanStepSpec,
+        question: str,
+        filters: InventorySearchFilters,
+        top_k: int,
+        hits_so_far: list[InventorySearchHit],
+    ) -> InventorySearchRequest | None:
+        if plan_step.mode == "bundle_add_on_search":
+            primary = self._agentic_primary_hit_for_bundle(question=question, hits=hits_so_far, filters=filters)
+            if primary is None:
+                return None
+            bundle_filters = (plan_step.filters or filters).model_copy(deep=True)
+            bundle_filters.product_ids = []
+            bundle_filters.categories = []
+            query_text = self._bundle_add_on_query(primary=primary, question=question)
+            return InventorySearchRequest(query_text=query_text, top_k=top_k, filters=bundle_filters)
+        return InventorySearchRequest(
+            query_text=plan_step.query_text or question,
+            top_k=top_k,
+            filters=(plan_step.filters or filters).model_copy(deep=True),
+        )
 
     def _label_agentic_action(
         self,
@@ -2497,9 +2820,26 @@ class InventoryService:
         route_response: InventoryRouteResponse,
         total_hits: int,
         selected_hits: list[InventorySearchHit],
+        action: str | None = None,
     ) -> str:
         if total_hits == 0:
             return f"Step {step_number} found no supporting catalog hits for the current search angle."
+        if action == "find_comparison_candidates":
+            return (
+                f"Step {step_number} found comparison candidates led by {self._natural_join(hit.name for hit in selected_hits[:3])}."
+            )
+        if action == "find_bundle_primary":
+            return (
+                f"Step {step_number} identified the bundle anchor candidate as {self._natural_join(hit.name for hit in selected_hits[:2])}."
+            )
+        if action == "find_compatible_add_ons":
+            return (
+                f"Step {step_number} searched for compatible add-ons and surfaced {self._natural_join(hit.name for hit in selected_hits[:3])}."
+            )
+        if action == "find_restock_candidates":
+            return (
+                f"Step {step_number} narrowed the catalog to restock candidates led by {self._natural_join(hit.name for hit in selected_hits[:3])}."
+            )
         if route_response.signals.needs_historical_data or route_response.signals.needs_cross_system_data:
             return (
                 f"Step {step_number} gathered {total_hits} catalog-backed product signal(s) while deeper external analysis remains required."
@@ -3557,13 +3897,181 @@ class InventoryService:
                 filters=filters,
                 low_stock_threshold=low_stock_threshold,
                 reply_style=reply_style,
-            )
+        )
         return self._enrich_reply_plan(
             reply=reply,
             question=question,
             filters=filters,
             hits=hits,
             strategy=reply.answer_plan.intent if reply.answer_plan.intent != "unknown" else assistant_mode,
+        )
+
+    def _build_agentic_compare_reply(
+        self,
+        *,
+        question: str,
+        hits: list[InventorySearchHit],
+        filters: InventorySearchFilters,
+        reply_style: str,
+    ) -> InventoryReply:
+        if len(hits) < 2:
+            return self._build_answer(
+                question=question,
+                hits=hits,
+                filters=filters,
+                low_stock_threshold=self.config.low_stock_threshold,
+                assistant_mode="support",
+                reply_style=reply_style,
+            )
+        primary = hits[0]
+        alternative = next(
+            (hit for hit in hits[1:] if self.product_ontology.valid_alternative(primary, hit)),
+            hits[1],
+        )
+        answer_parts = [
+            f"Best side-by-side comparison: {self._format_option_label(primary)} versus {self._format_option_label(alternative)}."
+        ]
+        price_note = self._comparison_price_note(primary=primary, alternative=alternative)
+        if price_note:
+            answer_parts.append(price_note)
+        if reply_style == "detailed":
+            answer_parts.append(
+                f"{primary.name} is the stronger lead when you want the closest fit, while {alternative.name} is the main fallback or tradeoff option."
+            )
+            answer_parts.append("Should I compare price, stock, battery, or use-case fit next?")
+        reply = InventoryReply(
+            answer=" ".join(answer_parts),
+            recommended_product_ids=[primary.product_id, alternative.product_id],
+            follow_up_question="Should I compare price, stock, battery, or use-case fit next?",
+            answer_plan=self._build_inventory_answer_plan(
+                intent="comparison",
+                primary=primary,
+                alternative=alternative,
+                excluded_hits=[hit for hit in hits if hit.product_id not in {primary.product_id, alternative.product_id}],
+                metadata_source=primary,
+                reasoning_steps=[
+                    "Compared the strongest candidate pair for a bounded side-by-side answer.",
+                    "Reserved deeper tradeoff explanation for the evidence contract and final planner.",
+                ],
+            ),
+        )
+        reply = self._enrich_reply_plan(
+            reply=reply,
+            question=question,
+            filters=filters,
+            hits=hits,
+            strategy="comparison",
+        )
+        return reply.model_copy(
+            update={
+                "verification": self._verify_answer_plan(answer_plan=reply.answer_plan, hits=hits),
+            }
+        )
+
+    def _build_agentic_bundle_reply(
+        self,
+        *,
+        question: str,
+        hits: list[InventorySearchHit],
+        filters: InventorySearchFilters,
+        reply_style: str,
+    ) -> InventoryReply:
+        primary = self._agentic_primary_hit_for_bundle(question=question, hits=hits, filters=filters)
+        if primary is None:
+            return self._build_answer(
+                question=question,
+                hits=hits,
+                filters=filters,
+                low_stock_threshold=self.config.low_stock_threshold,
+                assistant_mode="support",
+                reply_style=reply_style,
+            )
+        cross_sell = self._select_cross_sell_candidate(primary=primary, hits=hits[1:], question=question)
+        if cross_sell is None:
+            return self._build_answer(
+                question=question,
+                hits=hits,
+                filters=filters,
+                low_stock_threshold=self.config.low_stock_threshold,
+                assistant_mode="support",
+                reply_style=reply_style,
+            )
+        answer_parts = [
+            f"For a clean bundle, start with {self._format_option_label(primary)}."
+        ]
+        answer_parts.append(self._build_cross_sell_line(primary=primary, cross_sell=cross_sell))
+        if reply_style == "detailed":
+            answer_parts.append(
+                f"I filtered add-ons to keep only items that are complementary to {primary.name}, not weak substitutes."
+            )
+            answer_parts.append("Do you want a cheaper bundle, a premium bundle, or just the core product?")
+        reply = InventoryReply(
+            answer=" ".join(answer_parts),
+            recommended_product_ids=[primary.product_id],
+            cross_sell_product_ids=[cross_sell.product_id],
+            follow_up_question="Do you want a cheaper bundle, a premium bundle, or just the core product?",
+            answer_plan=self._build_inventory_answer_plan(
+                intent="bundle_recommendation",
+                primary=primary,
+                cross_sell=cross_sell,
+                excluded_hits=[hit for hit in hits if hit.product_id not in {primary.product_id, cross_sell.product_id}],
+                metadata_source=primary,
+                reasoning_steps=[
+                    "Selected a primary bundle anchor first.",
+                    "Filtered candidate add-ons to only compatible cross-sells.",
+                ],
+            ),
+        )
+        reply = self._enrich_reply_plan(
+            reply=reply,
+            question=question,
+            filters=filters,
+            hits=hits,
+            strategy="bundle_recommendation",
+        )
+        return reply.model_copy(
+            update={
+                "verification": self._verify_answer_plan(answer_plan=reply.answer_plan, hits=hits),
+            }
+        )
+
+    def _build_missing_domain_abstain_reply(
+        self,
+        *,
+        question: str,
+        assistant_mode: str,
+        reply_style: str,
+        filters: InventorySearchFilters,
+        missing_data_domains: list[str],
+    ) -> InventoryReply:
+        missing = self._natural_join(domain.replace("_", " ") for domain in missing_data_domains)
+        answer = (
+            f"I cannot make a reliable workflow recommendation yet because I do not have {missing} in this agent."
+        )
+        if reply_style == "detailed":
+            answer += " Narrow the question to the mirrored catalog, or connect the missing domains and ask again."
+        reply = InventoryReply(
+            answer=answer,
+            follow_up_question="Do you want a catalog-only answer instead, or should I wait for those data domains?",
+            answer_plan=self._build_inventory_answer_plan(
+                intent="agentic_missing_data_abstain",
+                primary=None,
+                abstain=True,
+                abstention_reason=f"Missing required data domains: {missing}.",
+                reasoning_steps=["Abstained because required workflow data domains are unavailable."],
+            ),
+        )
+        reply = self._enrich_reply_plan(
+            reply=reply,
+            question=question,
+            filters=filters,
+            hits=[],
+            strategy="agentic_missing_data_abstain",
+        )
+        return reply.model_copy(
+            update={
+                "verification": self._verify_answer_plan(answer_plan=reply.answer_plan, hits=[]),
+            }
         )
 
     def _build_support_answer(
@@ -5463,6 +5971,143 @@ class InventoryService:
             f"If the customer is building out a fuller setup around {primary.name}, I would also cross-sell {cross_sell.name}"
             f"{self._format_optional_price_suffix(self._format_price_text(cross_sell))}."
         )
+
+    def _comparison_price_note(self, *, primary: InventorySearchHit, alternative: InventorySearchHit) -> str | None:
+        if primary.price is None or alternative.price is None:
+            return None
+        if primary.price < alternative.price:
+            return (
+                f"{primary.name} is the lower-price option at {self._format_price_text(primary)}, while {alternative.name} is {self._format_price_text(alternative)}."
+            )
+        if primary.price > alternative.price:
+            return (
+                f"{alternative.name} is the lower-price option at {self._format_price_text(alternative)}, while {primary.name} is {self._format_price_text(primary)}."
+            )
+        return f"Both products are listed at {self._format_price_text(primary)}."
+
+    def _agentic_primary_hit_for_bundle(
+        self,
+        *,
+        question: str,
+        hits: list[InventorySearchHit],
+        filters: InventorySearchFilters,
+    ) -> InventorySearchHit | None:
+        if not hits:
+            return None
+        ranked_hits = self._rank_support_hits(
+            question=question,
+            hits=hits,
+            filters=filters,
+            low_stock_threshold=self.config.low_stock_threshold,
+        )
+        for hit in ranked_hits:
+            product_type = self.product_ontology.detect_product_type(product=hit)
+            if product_type in self.product_ontology.CROSS_SELL_COMPATIBILITY:
+                return hit
+        return ranked_hits[0]
+
+    def _bundle_add_on_query(self, *, primary: InventorySearchHit, question: str) -> str:
+        product_type = self.product_ontology.detect_product_type(product=primary)
+        compatible_types = sorted(self.product_ontology.CROSS_SELL_COMPATIBILITY.get(product_type or "", set()))
+        compatibility_hint = " ".join(compatible_types)
+        anchor = product_type or primary.category or primary.name
+        if compatibility_hint:
+            return f"{compatibility_hint} accessory add on bundle for {anchor} {primary.category} {primary.name}"
+        return f"{anchor} accessory add on bundle pair with {primary.name}"
+
+    def _bundle_add_on_hits(
+        self,
+        *,
+        primary: InventorySearchHit,
+        filters: InventorySearchFilters,
+        top_k: int,
+    ) -> list[InventorySearchHit]:
+        compatible_hits: list[InventorySearchHit] = []
+        for item in self._load_catalog().values():
+            if item.product_id == primary.product_id or not self._item_matches_filters(item, filters):
+                continue
+            hit = self._build_search_hit(item=item, score=0.0)
+            if self._is_out_of_stock(hit):
+                continue
+            if not self.product_ontology.valid_cross_sell(primary, hit, explicit_cross_sell=True):
+                continue
+            compatibility_score = round(0.5 + (self._quality_score(hit) / 20.0), 4)
+            compatible_hits.append(hit.model_copy(update={"score": compatibility_score}))
+        compatible_hits.sort(
+            key=lambda hit: (
+                self._quality_score(hit),
+                hit.score,
+                -(hit.price or 0.0),
+                hit.name.casefold(),
+            ),
+            reverse=True,
+        )
+        return compatible_hits[:top_k]
+
+    def _append_agentic_analysis_steps(
+        self,
+        *,
+        retrieval_steps: list[InventoryAgenticStep],
+        analysis_actions: tuple[str, ...],
+        question: str,
+        reply: InventoryReply,
+        business_insight: InventoryBusinessInsight,
+        max_reasoning_steps: int,
+    ) -> list[InventoryAgenticStep]:
+        if not analysis_actions or len(retrieval_steps) >= max_reasoning_steps:
+            return retrieval_steps
+        evidence_contract = reply.answer_plan.evidence_contract
+        if evidence_contract is None:
+            return retrieval_steps
+
+        candidate_name = {
+            candidate.product_id: candidate.name
+            for candidate in evidence_contract.candidate_evidence
+        }
+        for action in analysis_actions:
+            if len(retrieval_steps) >= max_reasoning_steps:
+                break
+            selected_ids: list[str]
+            observation: str
+            if action == "align_comparison_facts":
+                selected_ids = evidence_contract.primary_candidate_ids[:2]
+                selected_names = [candidate_name[product_id] for product_id in selected_ids if product_id in candidate_name]
+                observation = (
+                    f"Aligned structured comparison facts for {self._natural_join(selected_names)} using the evidence contract."
+                )
+            elif action == "filter_compatible_add_ons":
+                selected_ids = [
+                    product_id
+                    for product_id in [
+                        reply.answer_plan.primary_product_id,
+                        *reply.answer_plan.cross_sell_product_ids,
+                    ]
+                    if product_id
+                ]
+                selected_names = [candidate_name[product_id] for product_id in selected_ids if product_id in candidate_name]
+                observation = (
+                    f"Filtered bundle add-ons through the evidence contract and kept {self._natural_join(selected_names)} as compatible roles."
+                )
+            elif action == "rank_operational_candidates":
+                selected_ids = business_insight.selected_product_ids or evidence_contract.primary_candidate_ids[:3]
+                selected_names = [candidate_name[product_id] for product_id in selected_ids if product_id in candidate_name]
+                observation = (
+                    f"Ranked operational candidates for restock using demand, margin, lead time, and stock evidence across {self._natural_join(selected_names)}."
+                )
+            else:
+                continue
+            retrieval_steps.append(
+                InventoryAgenticStep(
+                    step_number=len(retrieval_steps) + 1,
+                    action=action,
+                    query_text=question,
+                    applied_filters=InventorySearchFilters(),
+                    total_hits=len(selected_ids),
+                    selected_product_ids=selected_ids,
+                    observation=observation,
+                )
+            )
+        return retrieval_steps
 
     def _build_sales_follow_up_question(
         self,

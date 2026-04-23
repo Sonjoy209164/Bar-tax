@@ -12,23 +12,32 @@ def test_inventory_eval_matrix_passes_phase8_cases() -> None:
     summary = run_inventory_eval_matrix()
 
     assert summary["suite_name"] == "inventory_phase8_eval_matrix"
-    assert summary["total_cases"] == 14
-    assert summary["passed_cases"] == 14
+    assert summary["total_cases"] == 16
+    assert summary["passed_cases"] == 16
     assert summary["failed_cases"] == 0
     assert summary["accuracy"] == 1.0
     assert summary["retrieval_stage_failures"] == 0
     assert summary["answer_stage_failures"] == 0
     assert summary["abstain_metrics"]["false_positive_abstains"] == 0
     assert summary["abstain_metrics"]["false_negative_abstains"] == 0
+    assert summary["family_breakdown"]["product_detail"]["total_cases"] == 3
     assert summary["family_breakdown"]["recommendation"]["total_cases"] >= 4
     assert summary["family_breakdown"]["diagnosis_root_cause"]["total_cases"] == 1
     assert summary["family_breakdown"]["planning_agentic_workflow"]["total_cases"] == 1
+    assert summary["covered_failure_modes"]["missed_lexical_recovery"] == 1
+    assert summary["covered_failure_modes"]["missed_alias_recovery"] == 1
     assert summary["covered_failure_modes"]["wrong_product_type"] == 1
     assert summary["covered_failure_modes"]["false_spec_claim"] == 1
     assert summary["covered_failure_modes"]["false_in_stock_claim"] == 1
     assert summary["covered_failure_modes"]["bad_comparison"] == 1
     assert summary["covered_failure_modes"]["bad_cross_sell"] == 1
     assert summary["covered_failure_modes"]["hallucinated_business_rationale"] == 3
+    lexical_case = next(case for case in summary["case_results"] if case["case_id"] == "lexical-miss-recovery")
+    assert lexical_case["response"]["primary_product_id"] == "prod-monitor"
+    assert "Auralite Pro Monitor Pair" in lexical_case["response"]["answer"]
+    alias_case = next(case for case in summary["case_results"] if case["case_id"] == "alias-recovery")
+    assert alias_case["response"]["primary_product_id"] == "premium"
+    assert "Nimbus 14 Elite" in alias_case["response"]["answer"]
     wrong_type_case = next(case for case in summary["case_results"] if case["case_id"] == "wrong-product-type")
     assert wrong_type_case["response"]["primary_product_id"] == "prod-headphone"
     assert "KeyForge Mechanical Keyboard" not in wrong_type_case["response"]["answer"]

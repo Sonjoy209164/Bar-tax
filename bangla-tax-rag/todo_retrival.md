@@ -107,7 +107,7 @@ Implementation tasks:
 - [x] Add metadata-aware reranking for spec-heavy queries.
 - [x] Add business-signal-aware reranking for operational queries.
 - [x] Record per-stage candidate counts in traces.
-- [ ] Add evals for lexical miss recovery and alias recovery.
+- [x] Add evals for lexical miss recovery and alias recovery.
 
 Success criteria:
 

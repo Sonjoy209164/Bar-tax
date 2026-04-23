@@ -221,6 +221,14 @@ def inventory_eval_cases() -> tuple[InventoryEvalCase, ...]:
         tags=["computing", "laptop", "premium"],
         attributes={"ram_gb": "32", "storage_gb": "1024"},
     )
+    premium_with_alias = premium.model_copy(
+        deep=True,
+        update={
+            "metadata": {
+                "search_aliases": ["N14E", "n 14 elite", "cmp lap 002"],
+            },
+        },
+    )
     step_up = _item(
         product_id="step-up",
         sku="CMP-LAP-010",
@@ -407,6 +415,40 @@ def inventory_eval_cases() -> tuple[InventoryEvalCase, ...]:
             expected_abstained=False,
             expected_primary_product_id="prod-monitor",
             required_answer_substrings=("Auralite Pro Monitor Pair is",),
+        ),
+        InventoryEvalCase(
+            case_id="lexical-miss-recovery",
+            family="product_detail",
+            description="A near-exact detail lookup with a lexical miss should still recover the right product.",
+            tags=("missed_lexical_recovery",),
+            items=(monitor, headphone),
+            request=InventoryAskRequest(
+                question="tell me about Auralite Pro monitr pair",
+                assistant_mode="support",
+                reply_style="detailed",
+                top_k=5,
+            ),
+            expected_execution_path="inventory_ask",
+            expected_abstained=False,
+            expected_primary_product_id="prod-monitor",
+            required_answer_substrings=("Auralite Pro Monitor Pair is",),
+        ),
+        InventoryEvalCase(
+            case_id="alias-recovery",
+            family="product_detail",
+            description="An alias-only detail lookup should recover the canonical product via alias-aware retrieval.",
+            tags=("missed_alias_recovery",),
+            items=(budget, premium_with_alias),
+            request=InventoryAskRequest(
+                question="tell me about N14E",
+                assistant_mode="support",
+                reply_style="detailed",
+                top_k=5,
+            ),
+            expected_execution_path="inventory_ask",
+            expected_abstained=False,
+            expected_primary_product_id="premium",
+            required_answer_substrings=("Nimbus 14 Elite is",),
         ),
         InventoryEvalCase(
             case_id="wrong-product-type",

@@ -49,6 +49,7 @@ from app.core.schemas import (
     InventorySyncStatusResponse,
     InventorySyncValidateRequest,
     InventorySyncValidateResponse,
+    InventoryTraceCandidateDebug,
     InventoryUpsertResponse,
 )
 from app.core.settings import get_settings
@@ -384,6 +385,11 @@ class InventoryAgenticExecutionPlan:
     search_steps: tuple[InventoryAgenticPlanStepSpec, ...]
     analysis_actions: tuple[str, ...] = ()
     abstain_on_missing_domains: bool = False
+
+
+@dataclass(frozen=True)
+class InventorySearchTraceDiagnostics:
+    rejected_candidates: tuple[InventoryTraceCandidateDebug, ...] = ()
 
 
 class InventoryService:
@@ -816,18 +822,29 @@ class InventoryService:
         self,
         request: InventorySearchRequest,
     ) -> tuple[InventorySearchResponse, dict[str, int]]:
+        response, retrieval_stage_counts, _trace_diagnostics = self._search_with_trace_diagnostics(request)
+        return response, retrieval_stage_counts
+
+    def _search_with_trace_diagnostics(
+        self,
+        request: InventorySearchRequest,
+    ) -> tuple[InventorySearchResponse, dict[str, int], InventorySearchTraceDiagnostics]:
         catalog = self._load_catalog()
         top_k = min(request.top_k, self.config.max_top_k)
         query_text = (request.query_text or "").strip()
         if query_text:
-            hits, retrieval_stage_counts = self._semantic_search(
+            hits, retrieval_stage_counts, trace_diagnostics = self._semantic_search(
                 query_text=query_text,
                 top_k=top_k,
                 filters=request.filters,
                 catalog=catalog,
             )
         else:
-            hits, retrieval_stage_counts = self._browse_items(top_k=top_k, filters=request.filters, catalog=catalog)
+            hits, retrieval_stage_counts, trace_diagnostics = self._browse_items(
+                top_k=top_k,
+                filters=request.filters,
+                catalog=catalog,
+            )
         response = InventorySearchResponse(
             status="success",
             query_text=query_text or None,
@@ -836,7 +853,7 @@ class InventoryService:
             hits=hits,
         )
         retrieval_stage_counts["search_requests"] = retrieval_stage_counts.get("search_requests", 0) + 1
-        return response, retrieval_stage_counts
+        return response, retrieval_stage_counts, trace_diagnostics
 
     def ask(self, request: InventoryAskRequest) -> InventoryAskResponse:
         started_at = perf_counter()
@@ -905,7 +922,7 @@ class InventoryService:
             question=request.question,
             filters=effective_filters,
         )
-        search_response, retrieval_stage_counts = self._search_with_diagnostics(
+        search_response, retrieval_stage_counts, search_trace_diagnostics = self._search_with_trace_diagnostics(
             InventorySearchRequest(
                 query_text=request.question,
                 top_k=request.top_k,
@@ -948,6 +965,30 @@ class InventoryService:
                 question=request.question,
                 hits=ordered_hits,
             )
+        ask_trace_selected_hits = ordered_hits[: min(3, len(ordered_hits))]
+        rejected_count = len(search_trace_diagnostics.rejected_candidates)
+        if search_response.total_hits == 0:
+            ask_trace_observation = "Direct inventory search found no supporting catalog hits."
+        else:
+            ask_trace_observation = (
+                f"Direct inventory search found {search_response.total_hits} catalog hit(s) led by "
+                f"{self._natural_join(hit.name for hit in ask_trace_selected_hits)}."
+            )
+            if rejected_count:
+                ask_trace_observation += f" Rejected {rejected_count} weaker or mismatched candidate(s) during filtering and reranking."
+        retrieval_steps = [
+            self._build_trace_step(
+                step_number=1,
+                action="inventory_search",
+                query_text=request.question,
+                applied_filters=effective_filters,
+                total_hits=search_response.total_hits,
+                selected_hits=ask_trace_selected_hits,
+                rejected_candidates=list(search_trace_diagnostics.rejected_candidates[:5]),
+                observation=ask_trace_observation,
+                retrieval_stage_counts=retrieval_stage_counts,
+            )
+        ]
         reply, answer_engine, abstained, abstention_reason, fallback_reason = self._finalize_inventory_reply(
             question=request.question,
             assistant_mode=request.assistant_mode,
@@ -993,6 +1034,7 @@ class InventoryService:
             reranked_hits=ordered_hits,
             fallback_reason_override=fallback_reason,
             retrieval_stage_counts=retrieval_stage_counts,
+            retrieval_steps=retrieval_steps,
         )
         return response
 
@@ -1123,7 +1165,6 @@ class InventoryService:
         business_signals = self._load_business_signals()
         business_domains = self._business_domains_available(business_signals)
         available_data_domains = sorted(set(request.available_data_domains).union(business_domains))
-        business_intent = self._business_tool_intent(request.question)
         resolved_memory = self.memory_resolver.resolve(
             question=request.question,
             filters=request.filters.model_copy(deep=True),
@@ -1249,6 +1290,10 @@ class InventoryService:
             max_reasoning_steps=request.max_reasoning_steps or self.config.default_agentic_max_reasoning_steps,
             route_response=route_response,
         )
+        business_intent = self._agentic_business_intent(
+            question=request.question,
+            strategy=execution_plan.strategy,
+        )
         if execution_plan.abstain_on_missing_domains and route_response.missing_data_domains:
             missing_domain_reply = self._build_missing_domain_abstain_reply(
                 question=request.question,
@@ -1346,13 +1391,13 @@ class InventoryService:
                 )
                 if primary is None:
                     retrieval_steps.append(
-                        InventoryAgenticStep(
+                        self._build_trace_step(
                             step_number=step_number,
                             action=plan_step.action,
                             query_text=plan_step.query_text,
                             applied_filters=(plan_step.filters or effective_filters).model_copy(deep=True),
                             total_hits=0,
-                            selected_product_ids=[],
+                            selected_hits=[],
                             observation=f"Step {step_number} skipped because no stable primary candidate was available yet.",
                         )
                     )
@@ -1391,13 +1436,17 @@ class InventoryService:
                     action=plan_step.action,
                 )
                 retrieval_steps.append(
-                    InventoryAgenticStep(
+                    self._build_trace_step(
                         step_number=step_number,
                         action=plan_step.action,
                         query_text=self._bundle_add_on_query(primary=primary, question=request.question),
                         applied_filters=bundle_filters,
                         total_hits=len(bundle_hits),
-                        selected_product_ids=[hit.product_id for hit in selected_hits],
+                        selected_hits=selected_hits,
+                        rejected_candidates=self._trace_ranked_out_candidates(
+                            hits=bundle_hits[len(selected_hits):],
+                            reason="Not selected for the compatible add-on shortlist because stronger compatible add-ons ranked higher.",
+                        ),
                         observation=observation,
                         retrieval_stage_counts=bundle_stage_counts,
                     )
@@ -1429,13 +1478,17 @@ class InventoryService:
                     business_signals=business_signals,
                 )
                 retrieval_steps.append(
-                    InventoryAgenticStep(
+                    self._build_trace_step(
                         step_number=step_number,
                         action=plan_step.action,
                         query_text=plan_step.query_text,
                         applied_filters=(plan_step.filters or effective_filters).model_copy(deep=True),
                         total_hits=len(business_hits),
-                        selected_product_ids=[hit.product_id for hit in selected_hits],
+                        selected_hits=selected_hits,
+                        rejected_candidates=self._trace_ranked_out_candidates(
+                            hits=business_hits[len(selected_hits):],
+                            reason="Not selected for the business-signal shortlist because stronger operational evidence ranked higher.",
+                        ),
                         observation=business_observation,
                     )
                 )
@@ -1451,20 +1504,20 @@ class InventoryService:
             )
             if search_request is None:
                 retrieval_steps.append(
-                    InventoryAgenticStep(
+                    self._build_trace_step(
                         step_number=step_number,
                         action=plan_step.action,
                         query_text=plan_step.query_text,
                         applied_filters=(plan_step.filters or effective_filters).model_copy(deep=True),
                         total_hits=0,
-                        selected_product_ids=[],
+                        selected_hits=[],
                         observation=f"Step {step_number} skipped because no stable primary candidate was available yet.",
                     )
                 )
                 reasoning_summary.append(f"Step {step_number} skipped because no stable primary candidate was available yet.")
                 continue
 
-            search_response, retrieval_stage_counts = self._search_with_diagnostics(search_request)
+            search_response, retrieval_stage_counts, search_trace_diagnostics = self._search_with_trace_diagnostics(search_request)
             aggregated_retrieval_stage_counts = self._merge_retrieval_stage_counts(
                 aggregated_retrieval_stage_counts,
                 retrieval_stage_counts,
@@ -1484,13 +1537,14 @@ class InventoryService:
                 action=plan_step.action,
             )
             retrieval_steps.append(
-                InventoryAgenticStep(
+                self._build_trace_step(
                     step_number=step_number,
                     action=plan_step.action,
                     query_text=search_request.query_text,
                     applied_filters=search_request.filters.model_copy(deep=True),
                     total_hits=search_response.total_hits,
-                    selected_product_ids=[hit.product_id for hit in selected_hits],
+                    selected_hits=selected_hits,
+                    rejected_candidates=list(search_trace_diagnostics.rejected_candidates[:5]),
                     observation=observation,
                     retrieval_stage_counts=retrieval_stage_counts,
                 )
@@ -1550,6 +1604,14 @@ class InventoryService:
             hits=ordered_hits,
             business_signals=business_signals,
             business_intent=business_intent,
+        )
+        final_reply = self._align_agentic_reply_with_business_insight(
+            reply=final_reply,
+            hits=ordered_hits,
+            business_insight=business_insight,
+            business_intent=business_intent,
+            question_family=route_response.signals.question_family,
+            strategy=execution_plan.strategy,
         )
         if business_insight.reasoning_summary:
             reasoning_summary.extend(business_insight.reasoning_summary)
@@ -1758,6 +1820,143 @@ class InventoryService:
         return product_ids
 
     @staticmethod
+    def _trace_score_breakdown(hit: InventorySearchHit) -> dict[str, object]:
+        if not hit.evidence_scores:
+            return {}
+        allowed_keys = {
+            "final_score",
+            "semantic_score",
+            "lexical_score",
+            "exact_name_match",
+            "exact_sku_match",
+            "category_match",
+            "brand_match",
+            "product_type_match",
+            "family_match",
+            "price_fit",
+            "stock_fit",
+            "metadata_match",
+            "structured_spec_match",
+            "premium_fit",
+            "budget_fit",
+            "unrelated_category_penalty",
+            "out_of_stock_penalty",
+            "business_signal_score",
+            "business_intent",
+            "business_reasons",
+            "reasons",
+        }
+        breakdown: dict[str, object] = {}
+        for key, value in hit.evidence_scores.items():
+            if key in allowed_keys or key.startswith("deterministic_"):
+                breakdown[key] = value
+        return breakdown
+
+    def _trace_candidate_debug(
+        self,
+        *,
+        hit: InventorySearchHit,
+        rejection_reasons: list[str] | None = None,
+        score_breakdown: dict[str, object] | None = None,
+    ) -> InventoryTraceCandidateDebug:
+        return InventoryTraceCandidateDebug(
+            product_id=hit.product_id,
+            name=hit.name,
+            category=hit.category,
+            score=hit.score,
+            score_breakdown=dict(score_breakdown or self._trace_score_breakdown(hit)),
+            rejection_reasons=list(rejection_reasons or []),
+        )
+
+    def _trace_candidate_debugs_from_hits(
+        self,
+        hits: list[InventorySearchHit],
+        *,
+        limit: int = 3,
+    ) -> list[InventoryTraceCandidateDebug]:
+        return [self._trace_candidate_debug(hit=hit) for hit in hits[:limit]]
+
+    def _record_rejected_candidate(
+        self,
+        *,
+        rejection_log: dict[str, InventoryTraceCandidateDebug],
+        hit: InventorySearchHit,
+        reason: str,
+    ) -> None:
+        existing = rejection_log.get(hit.product_id)
+        if existing is None:
+            rejection_log[hit.product_id] = self._trace_candidate_debug(
+                hit=hit,
+                rejection_reasons=[reason],
+            )
+            return
+        reasons = list(existing.rejection_reasons)
+        if reason not in reasons:
+            reasons.append(reason)
+        rejection_log[hit.product_id] = existing.model_copy(
+            update={
+                "score": hit.score,
+                "score_breakdown": existing.score_breakdown or self._trace_score_breakdown(hit),
+                "rejection_reasons": reasons,
+            }
+        )
+
+    def _trace_ranked_out_candidates(
+        self,
+        *,
+        hits: list[InventorySearchHit],
+        reason: str,
+        limit: int = 5,
+    ) -> list[InventoryTraceCandidateDebug]:
+        return [
+            self._trace_candidate_debug(hit=hit, rejection_reasons=[reason])
+            for hit in hits[:limit]
+        ]
+
+    @staticmethod
+    def _trace_candidate_debug_from_evidence_candidate(candidate: BaseModel) -> InventoryTraceCandidateDebug:
+        product_id = getattr(candidate, "product_id", None)
+        name = getattr(candidate, "name", None)
+        category = getattr(candidate, "category", None)
+        score = getattr(candidate, "score", None)
+        score_breakdown = getattr(candidate, "score_breakdown", {}) or {}
+        rejection_reasons = getattr(candidate, "rejection_reasons", []) or []
+        return InventoryTraceCandidateDebug(
+            product_id=product_id,
+            name=name,
+            category=category,
+            score=score,
+            score_breakdown=dict(score_breakdown),
+            rejection_reasons=list(rejection_reasons),
+        )
+
+    def _build_trace_step(
+        self,
+        *,
+        step_number: int,
+        action: str,
+        query_text: str | None,
+        applied_filters: InventorySearchFilters,
+        total_hits: int,
+        selected_hits: list[InventorySearchHit],
+        observation: str,
+        retrieval_stage_counts: dict[str, int] | None = None,
+        rejected_candidates: list[InventoryTraceCandidateDebug] | None = None,
+    ) -> InventoryAgenticStep:
+        return InventoryAgenticStep(
+            step_number=step_number,
+            action=action,
+            query_text=query_text,
+            applied_filters=applied_filters.model_copy(deep=True),
+            total_hits=total_hits,
+            selected_product_ids=[hit.product_id for hit in selected_hits],
+            selected_candidates=self._trace_candidate_debugs_from_hits(selected_hits, limit=len(selected_hits)),
+            rejected_candidates=list(rejected_candidates or []),
+            observation=observation,
+            retrieval_stage_counts=dict(retrieval_stage_counts or {}),
+        )
+
+    @staticmethod
     def _trace_fallback_reason(
         *,
         requested_answer_engine: str,
@@ -1860,8 +2059,9 @@ class InventoryService:
         top_k: int,
         filters: InventorySearchFilters,
         catalog: dict[str, InventoryItemRecord],
-    ) -> tuple[list[InventorySearchHit], dict[str, int]]:
+    ) -> tuple[list[InventorySearchHit], dict[str, int], InventorySearchTraceDiagnostics]:
         retrieval_stage_counts = self._empty_retrieval_stage_counts()
+        rejection_log: dict[str, InventoryTraceCandidateDebug] = {}
         query_terms = self._extract_query_terms(query_text)
         subject_phrase = self._extract_subject_phrase(query_text)
         detail_request = self._is_detail_request(query_text)
@@ -1919,7 +2119,7 @@ class InventoryService:
             )
 
         if not candidates:
-            return [], retrieval_stage_counts
+            return [], retrieval_stage_counts, InventorySearchTraceDiagnostics()
 
         if preference_profile.spec_requirements:
             spec_match_scores = [
@@ -1936,10 +2136,26 @@ class InventoryService:
                 requirement.operator == "eq" for requirement in preference_profile.spec_requirements
             )
             if strict_spec_requirements and exact_spec_candidates:
+                for candidate, score in zip(candidates, spec_match_scores, strict=False):
+                    if score >= 1.0:
+                        continue
+                    self._record_rejected_candidate(
+                        rejection_log=rejection_log,
+                        hit=candidate[0],
+                        reason="Rejected at the spec gate because it did not satisfy all required exact spec filters.",
+                    )
                 candidates = exact_spec_candidates
             elif max(spec_match_scores, default=0.0) <= 0.0 and len(query_terms) >= 3:
+                for candidate in candidates:
+                    self._record_rejected_candidate(
+                        rejection_log=rejection_log,
+                        hit=candidate[0],
+                        reason="Rejected at the spec gate because no candidate satisfied the requested structured specs.",
+                    )
                 retrieval_stage_counts["spec_filtered_candidates"] = 0
-                return [], retrieval_stage_counts
+                return [], retrieval_stage_counts, InventorySearchTraceDiagnostics(
+                    rejected_candidates=tuple(rejection_log.values())
+                )
         else:
             retrieval_stage_counts["spec_filtered_candidates"] = len(candidates)
 
@@ -1947,12 +2163,38 @@ class InventoryService:
             exact_type_candidates = [candidate for candidate in candidates if candidate[4] >= 3]
             related_type_candidates = [candidate for candidate in candidates if candidate[4] >= 2]
             if exact_type_candidates:
+                kept_ids = {candidate[0].product_id for candidate in exact_type_candidates}
+                for candidate in candidates:
+                    if candidate[0].product_id in kept_ids:
+                        continue
+                    self._record_rejected_candidate(
+                        rejection_log=rejection_log,
+                        hit=candidate[0],
+                        reason="Rejected at the product-type gate because it was not a close enough match for the requested product family.",
+                    )
                 candidates = exact_type_candidates
             elif related_type_candidates and not exact_lookup:
+                kept_ids = {candidate[0].product_id for candidate in related_type_candidates}
+                for candidate in candidates:
+                    if candidate[0].product_id in kept_ids:
+                        continue
+                    self._record_rejected_candidate(
+                        rejection_log=rejection_log,
+                        hit=candidate[0],
+                        reason="Rejected at the product-type gate because stronger family matches were available.",
+                    )
                 candidates = related_type_candidates
             elif exact_lookup or preference_profile.confidence >= 0.28:
+                for candidate in candidates:
+                    self._record_rejected_candidate(
+                        rejection_log=rejection_log,
+                        hit=candidate[0],
+                        reason="Rejected at the product-type gate because no candidate matched the requested product type strongly enough.",
+                    )
                 retrieval_stage_counts["type_gated_candidates"] = 0
-                return [], retrieval_stage_counts
+                return [], retrieval_stage_counts, InventorySearchTraceDiagnostics(
+                    rejected_candidates=tuple(rejection_log.values())
+                )
         retrieval_stage_counts["type_gated_candidates"] = len(candidates)
 
         requested_category = self._resolve_explicit_requested_category(
@@ -1968,21 +2210,55 @@ class InventoryService:
                 if candidate[0].category and candidate[0].category.casefold() == requested_category.casefold()
             ]
             if category_matched_candidates:
+                kept_ids = {candidate[0].product_id for candidate in category_matched_candidates}
+                for candidate in candidates:
+                    if candidate[0].product_id in kept_ids:
+                        continue
+                    self._record_rejected_candidate(
+                        rejection_log=rejection_log,
+                        hit=candidate[0],
+                        reason="Rejected at the category gate because it did not match the explicitly requested category.",
+                    )
                 candidates = category_matched_candidates
         retrieval_stage_counts["category_gated_candidates"] = len(candidates)
 
         if exact_lookup:
             max_coverage = max(coverage for _, _, _, coverage, _ in candidates)
             if max_coverage <= 0:
+                for candidate in candidates:
+                    self._record_rejected_candidate(
+                        rejection_log=rejection_log,
+                        hit=candidate[0],
+                        reason="Rejected at the exact-lookup gate because it did not cover the referenced product terms.",
+                    )
                 retrieval_stage_counts["exact_lookup_candidates"] = 0
-                return [], retrieval_stage_counts
+                return [], retrieval_stage_counts, InventorySearchTraceDiagnostics(
+                    rejected_candidates=tuple(rejection_log.values())
+                )
             coverage_threshold = len(query_terms) if len(query_terms) <= 2 else max(1, len(query_terms) - 1)
             exact_candidates = [candidate for candidate in candidates if candidate[3] >= coverage_threshold]
             if exact_candidates:
+                kept_ids = {candidate[0].product_id for candidate in exact_candidates}
+                for candidate in candidates:
+                    if candidate[0].product_id in kept_ids:
+                        continue
+                    self._record_rejected_candidate(
+                        rejection_log=rejection_log,
+                        hit=candidate[0],
+                        reason="Rejected at the exact-lookup gate because it missed too many exact reference terms.",
+                    )
                 candidates = exact_candidates
             else:
+                for candidate in candidates:
+                    self._record_rejected_candidate(
+                        rejection_log=rejection_log,
+                        hit=candidate[0],
+                        reason="Rejected at the exact-lookup gate because it missed too many exact reference terms.",
+                    )
                 retrieval_stage_counts["exact_lookup_candidates"] = 0
-                return [], retrieval_stage_counts
+                return [], retrieval_stage_counts, InventorySearchTraceDiagnostics(
+                    rejected_candidates=tuple(rejection_log.values())
+                )
         retrieval_stage_counts["exact_lookup_candidates"] = len(candidates)
 
         best_lexical_score = max(lexical_score for _, lexical_score, _, _, _ in candidates)
@@ -1998,6 +2274,15 @@ class InventoryService:
                 candidate for candidate in candidates if candidate[1] >= lexical_threshold
             ]
             if anchored_candidates:
+                kept_ids = {candidate[0].product_id for candidate in anchored_candidates}
+                for candidate in candidates:
+                    if candidate[0].product_id in kept_ids:
+                        continue
+                    self._record_rejected_candidate(
+                        rejection_log=rejection_log,
+                        hit=candidate[0],
+                        reason="Rejected at the lexical anchor gate because exact-text evidence was too weak relative to the strongest lexical matches.",
+                    )
                 candidates = anchored_candidates
         retrieval_stage_counts["lexical_anchor_candidates"] = len(candidates)
 
@@ -2068,8 +2353,16 @@ class InventoryService:
         )
         retrieval_stage_counts["reranked_candidates"] = len(ranked_candidates)
         returned_hits = [hit for hit, _, _, _, _, _ in ranked_candidates[:top_k]]
+        for hit, *_rest in ranked_candidates[top_k:]:
+            self._record_rejected_candidate(
+                rejection_log=rejection_log,
+                hit=hit,
+                reason="Rejected after deterministic reranking because it fell below the returned top_k cutoff.",
+            )
         retrieval_stage_counts["returned_hits"] = len(returned_hits)
-        return returned_hits, retrieval_stage_counts
+        return returned_hits, retrieval_stage_counts, InventorySearchTraceDiagnostics(
+            rejected_candidates=tuple(rejection_log.values())
+        )
 
     def _browse_items(
         self,
@@ -2077,7 +2370,7 @@ class InventoryService:
         top_k: int,
         filters: InventorySearchFilters,
         catalog: dict[str, InventoryItemRecord],
-    ) -> tuple[list[InventorySearchHit], dict[str, int]]:
+    ) -> tuple[list[InventorySearchHit], dict[str, int], InventorySearchTraceDiagnostics]:
         items = [
             item
             for item in sorted(catalog.values(), key=self._catalog_sort_key, reverse=True)
@@ -2086,9 +2379,17 @@ class InventoryService:
         retrieval_stage_counts = self._empty_retrieval_stage_counts()
         retrieval_stage_counts["browse_candidates"] = len(items)
         retrieval_stage_counts["reranked_candidates"] = len(items)
-        hits = [self._build_search_hit(item=item, score=0.0) for item in items[:top_k]]
+        all_hits = [self._build_search_hit(item=item, score=0.0) for item in items]
+        hits = all_hits[:top_k]
         retrieval_stage_counts["returned_hits"] = len(hits)
-        return hits, retrieval_stage_counts
+        return hits, retrieval_stage_counts, InventorySearchTraceDiagnostics(
+            rejected_candidates=tuple(
+                self._trace_ranked_out_candidates(
+                    hits=all_hits[top_k:],
+                    reason="Excluded from browse results because it fell beyond the returned top_k cutoff.",
+                )
+            )
+        )
 
     def _merge_question_filters(
         self,
@@ -2380,6 +2681,27 @@ class InventoryService:
 
         if has_workflow_signal and (
             intent_result.intent in {"restock", "business_analysis", "cross_sell"}
+            or (
+                intent_result.intent == "product_search"
+                and self._has_any_phrase(
+                    normalized,
+                    [
+                        "supplier",
+                        "vendor",
+                        "lead time",
+                        "lead-time",
+                        "delay",
+                        "delays",
+                        "margin",
+                        "profit",
+                        "sales",
+                        "demand",
+                        "stockout",
+                        "reorder",
+                        "restock",
+                    ],
+                )
+            )
             or has_root_cause_signal
         ):
             family = "planning_agentic_workflow"
@@ -2657,6 +2979,7 @@ class InventoryService:
     ) -> InventoryAgenticExecutionPlan:
         signals = route_response.signals
         strategy = self._agentic_strategy(question=question, route_response=route_response)
+        analysis_business_intent = self._agentic_business_intent(question=question, strategy=strategy)
         keyword_query = " ".join(self._extract_query_terms(question))
         normalized_question = self._normalize_conversation_text(question)
         steps: list[InventoryAgenticPlanStepSpec] = []
@@ -2723,11 +3046,68 @@ class InventoryService:
                 InventoryAgenticPlanStepSpec(
                     action="business_signal_analysis",
                     mode="business",
-                    query_text=f"business_signals:{self._business_tool_intent(question) or 'restock'}",
+                    query_text=f"business_signals:{analysis_business_intent or 'restock'}",
                     filters=low_stock_filters,
                 )
             )
             analysis_actions.append("rank_operational_candidates")
+        elif strategy == "diagnosis":
+            steps.append(
+                InventoryAgenticPlanStepSpec(
+                    action="find_root_cause_candidates",
+                    mode="search",
+                    query_text=question,
+                    filters=filters.model_copy(deep=True),
+                )
+            )
+            if not signals.has_explicit_product_reference and keyword_query and keyword_query != normalized_question:
+                steps.append(
+                    InventoryAgenticPlanStepSpec(
+                        action="focus_root_cause_candidates",
+                        mode="search",
+                        query_text=keyword_query,
+                        filters=filters.model_copy(deep=True),
+                    )
+                )
+            steps.append(
+                InventoryAgenticPlanStepSpec(
+                    action="business_signal_analysis",
+                    mode="business",
+                    query_text=f"business_signals:{analysis_business_intent or 'demand'}",
+                    filters=filters.model_copy(deep=True),
+                )
+            )
+            analysis_actions.append("diagnose_root_cause_facts")
+        elif strategy == "operational_planning":
+            planning_filters = filters.model_copy(deep=True)
+            steps.append(
+                InventoryAgenticPlanStepSpec(
+                    action="find_operational_candidates",
+                    mode="search",
+                    query_text=keyword_query or question,
+                    filters=planning_filters,
+                )
+            )
+            if not signals.has_explicit_product_reference and keyword_query and keyword_query != normalized_question:
+                steps.append(
+                    InventoryAgenticPlanStepSpec(
+                        action="expand_operational_candidates",
+                        mode="search",
+                        query_text=question,
+                        filters=planning_filters,
+                    )
+                )
+            steps.append(
+                InventoryAgenticPlanStepSpec(
+                    action="business_signal_analysis",
+                    mode="business",
+                    query_text=f"business_signals:{analysis_business_intent or 'demand'}",
+                    filters=planning_filters,
+                )
+            )
+            if signals.needs_root_cause_reasoning:
+                analysis_actions.append("diagnose_root_cause_facts")
+            analysis_actions.append("compose_operational_plan")
         else:
             steps.append(
                 InventoryAgenticPlanStepSpec(
@@ -2773,6 +3153,7 @@ class InventoryService:
 
     def _agentic_strategy(self, *, question: str, route_response: InventoryRouteResponse) -> str:
         normalized = self._normalize_conversation_text(question)
+        business_intent = self._business_tool_intent(question)
         if route_response.signals.question_family == "comparison" or self._has_any_phrase(
             normalized,
             ["compare", "vs", "versus", "difference between", "which is better"],
@@ -2780,12 +3161,38 @@ class InventoryService:
             return "compare"
         if self._should_offer_cross_sell(question):
             return "bundle"
-        if self._business_tool_intent(question) == "restock" or self._has_any_phrase(
+        if route_response.signals.question_family == "diagnosis_root_cause":
+            return "diagnosis"
+        if route_response.signals.question_family == "planning_agentic_workflow" and business_intent not in {
+            "restock",
+            "stockout_prevention",
+        }:
+            return "operational_planning"
+        if business_intent == "restock" or self._has_any_phrase(
             normalized,
             ["restock", "reorder", "stockout", "running low", "low stock"],
         ):
             return "restock"
         return "default"
+
+    def _agentic_business_intent(self, *, question: str, strategy: str) -> str | None:
+        base_intent = self._business_tool_intent(question)
+        normalized = self._normalize_conversation_text(question)
+        if strategy in {"diagnosis", "operational_planning"}:
+            if self._has_any_phrase(normalized, ["return rate", "returns", "returned"]):
+                return "returns"
+            if self._has_any_phrase(normalized, ["supplier", "vendor", "lead time", "lead-time", "delay", "delays"]):
+                return "supplier_risk"
+            if self._has_any_phrase(normalized, ["margin", "profit", "profitable"]):
+                return "margin"
+            if self._has_any_phrase(
+                normalized,
+                ["sales", "demand", "selling", "sold", "velocity", "trend", "drop", "dropping", "decline", "declining"],
+            ):
+                return "demand"
+            if strategy == "diagnosis":
+                return base_intent or "demand"
+        return base_intent
 
     def _agentic_search_request_for_step(
         self,
@@ -2855,6 +3262,22 @@ class InventoryService:
             return (
                 f"Step {step_number} narrowed the catalog to restock candidates led by {self._natural_join(hit.name for hit in selected_hits[:3])}."
             )
+        if action == "find_root_cause_candidates":
+            return (
+                f"Step {step_number} found root-cause candidates led by {self._natural_join(hit.name for hit in selected_hits[:3])}."
+            )
+        if action == "focus_root_cause_candidates":
+            return (
+                f"Step {step_number} tightened the diagnosis pass around {self._natural_join(hit.name for hit in selected_hits[:3])}."
+            )
+        if action == "find_operational_candidates":
+            return (
+                f"Step {step_number} gathered operational candidates led by {self._natural_join(hit.name for hit in selected_hits[:3])}."
+            )
+        if action == "expand_operational_candidates":
+            return (
+                f"Step {step_number} expanded the workflow candidate set and surfaced {self._natural_join(hit.name for hit in selected_hits[:3])}."
+            )
         if route_response.signals.needs_historical_data or route_response.signals.needs_cross_system_data:
             return (
                 f"Step {step_number} gathered {total_hits} catalog-backed product signal(s) while deeper external analysis remains required."
@@ -2875,7 +3298,7 @@ class InventoryService:
             return "stockout_prevention"
         if self._has_any_phrase(normalized, ["restock", "reorder", "running low", "low stock"]):
             return "restock"
-        if self._has_any_phrase(normalized, ["supplier", "vendor", "lead time", "lead-time", "purchase order"]):
+        if self._has_any_phrase(normalized, ["supplier", "vendor", "lead time", "lead-time", "purchase order", "delay", "delays"]):
             return "supplier_risk"
         if self._has_any_phrase(normalized, ["margin", "profit", "profitable"]):
             return "margin"
@@ -2883,7 +3306,7 @@ class InventoryService:
             return "returns"
         if self._has_any_phrase(normalized, ["customer segment", "customer segments", "segment", "segments"]):
             return "customer_segments"
-        if self._has_any_phrase(normalized, ["demand", "sales", "sold", "selling", "velocity", "trend", "dropped"]):
+        if self._has_any_phrase(normalized, ["demand", "sales", "sold", "selling", "velocity", "trend", "dropped", "drop", "dropping", "decline", "declining"]):
             return "demand"
         return None
 
@@ -3018,6 +3441,88 @@ class InventoryService:
             reasoning_summary=reasoning_summary,
             selected_product_ids=[hit.product_id for hit in selected_hits],
         )
+
+    def _align_agentic_reply_with_business_insight(
+        self,
+        *,
+        reply: InventoryReply,
+        hits: list[InventorySearchHit],
+        business_insight: InventoryBusinessInsight,
+        business_intent: str | None,
+        question_family: str,
+        strategy: str,
+    ) -> InventoryReply:
+        selected_ids = business_insight.selected_product_ids[:3]
+        if strategy not in {"diagnosis", "operational_planning"} or not selected_ids:
+            return reply
+
+        primary_id = selected_ids[0]
+        if reply.answer_plan.primary_product_id == primary_id and reply.recommended_product_ids == selected_ids:
+            return reply
+
+        primary_hit = next((hit for hit in hits if hit.product_id == primary_id), None)
+        if primary_hit is None:
+            return reply.model_copy(update={"recommended_product_ids": selected_ids})
+
+        evidence_contract = reply.answer_plan.evidence_contract
+        if evidence_contract is not None:
+            ordered_candidate_ids = [primary_id, *[candidate_id for candidate_id in evidence_contract.primary_candidate_ids if candidate_id != primary_id]]
+            evidence_contract = evidence_contract.model_copy(
+                update={
+                    "primary_product_id": primary_id,
+                    "primary_candidate_ids": ordered_candidate_ids,
+                }
+            )
+
+        reasoning_steps = list(reply.answer_plan.reasoning_steps)
+        alignment_label = "diagnosis" if question_family == "diagnosis_root_cause" else "operational"
+        alignment_step = (
+            f"Aligned the {alignment_label} primary product to {primary_hit.name} because it has the strongest matched "
+            f"{(business_intent or 'business').replace('_', ' ')} signal."
+        )
+        if alignment_step not in reasoning_steps:
+            reasoning_steps.append(alignment_step)
+
+        confidence_breakdown = dict(reply.answer_plan.confidence_breakdown)
+        confidence_breakdown["diagnosis_business_signal_primary"] = {
+            "product_id": primary_id,
+            "intent": business_intent,
+        }
+        confidence_breakdown.pop("alternative", None)
+
+        previous_primary_id = reply.answer_plan.primary_product_id
+        reasoning_steps = [
+            step
+            for step in reasoning_steps
+            if not step.startswith("Primary recommendation is ") and not step.startswith("Alternative is ")
+        ]
+
+        plan = reply.answer_plan.model_copy(
+            update={
+                "primary_product_id": primary_id,
+                "alternative_product_ids": [],
+                "primary_reason": (
+                    f"{primary_hit.name} carries the strongest matched "
+                    f"{(business_intent or 'business').replace('_', ' ')} signal in the business mirror."
+                ),
+                "alternative_reason": None,
+                "tradeoffs": [],
+                "strategy": strategy,
+                "reasoning_steps": reasoning_steps,
+                "confidence_breakdown": confidence_breakdown,
+                "evidence_contract": evidence_contract,
+            }
+        )
+        aligned_reply = reply.model_copy(
+            update={
+                "recommended_product_ids": selected_ids,
+                "answer_plan": plan,
+                "verification": self._verify_answer_plan(answer_plan=plan, hits=hits),
+            }
+        )
+        if aligned_reply.verification.requires_abstention and not plan.abstain:
+            return self._build_hard_constraint_abstain_reply(reply=aligned_reply)
+        return aligned_reply
 
     def _business_insight_sentence(
         self,
@@ -6246,9 +6751,15 @@ class InventoryService:
                 break
             selected_ids: list[str]
             observation: str
+            selected_candidates: list[InventoryTraceCandidateDebug]
             if action == "align_comparison_facts":
                 selected_ids = evidence_contract.primary_candidate_ids[:2]
                 selected_names = [candidate_name[product_id] for product_id in selected_ids if product_id in candidate_name]
+                selected_candidates = [
+                    self._trace_candidate_debug_from_evidence_candidate(candidate)
+                    for candidate in evidence_contract.candidate_evidence
+                    if candidate.product_id in selected_ids
+                ]
                 observation = (
                     f"Aligned structured comparison facts for {self._natural_join(selected_names)} using the evidence contract."
                 )
@@ -6262,14 +6773,46 @@ class InventoryService:
                     if product_id
                 ]
                 selected_names = [candidate_name[product_id] for product_id in selected_ids if product_id in candidate_name]
+                selected_candidates = [
+                    self._trace_candidate_debug_from_evidence_candidate(candidate)
+                    for candidate in evidence_contract.candidate_evidence
+                    if candidate.product_id in selected_ids
+                ]
                 observation = (
                     f"Filtered bundle add-ons through the evidence contract and kept {self._natural_join(selected_names)} as compatible roles."
                 )
             elif action == "rank_operational_candidates":
                 selected_ids = business_insight.selected_product_ids or evidence_contract.primary_candidate_ids[:3]
                 selected_names = [candidate_name[product_id] for product_id in selected_ids if product_id in candidate_name]
+                selected_candidates = [
+                    self._trace_candidate_debug_from_evidence_candidate(candidate)
+                    for candidate in evidence_contract.candidate_evidence
+                    if candidate.product_id in selected_ids
+                ]
                 observation = (
                     f"Ranked operational candidates for restock using demand, margin, lead time, and stock evidence across {self._natural_join(selected_names)}."
+                )
+            elif action == "diagnose_root_cause_facts":
+                selected_ids = business_insight.selected_product_ids or evidence_contract.primary_candidate_ids[:3]
+                selected_names = [candidate_name[product_id] for product_id in selected_ids if product_id in candidate_name]
+                selected_candidates = [
+                    self._trace_candidate_debug_from_evidence_candidate(candidate)
+                    for candidate in evidence_contract.candidate_evidence
+                    if candidate.product_id in selected_ids
+                ]
+                observation = (
+                    f"Aligned likely root-cause factors for {self._natural_join(selected_names)} using business signals and the evidence contract."
+                )
+            elif action == "compose_operational_plan":
+                selected_ids = business_insight.selected_product_ids or evidence_contract.primary_candidate_ids[:3]
+                selected_names = [candidate_name[product_id] for product_id in selected_ids if product_id in candidate_name]
+                selected_candidates = [
+                    self._trace_candidate_debug_from_evidence_candidate(candidate)
+                    for candidate in evidence_contract.candidate_evidence
+                    if candidate.product_id in selected_ids
+                ]
+                observation = (
+                    f"Composed a bounded operational plan across {self._natural_join(selected_names)} using catalog constraints and matched business signals."
                 )
             else:
                 continue
@@ -6281,6 +6824,8 @@ class InventoryService:
                     applied_filters=InventorySearchFilters(),
                     total_hits=len(selected_ids),
                     selected_product_ids=selected_ids,
+                    selected_candidates=selected_candidates,
+                    rejected_candidates=[],
                     observation=observation,
                 )
             )
@@ -6796,3 +7341,4 @@ def get_inventory_service() -> InventoryService:
             conversation_history_limit=settings.inventory_conversation_history_limit,
         ),
     )
+   

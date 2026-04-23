@@ -234,6 +234,7 @@ class EvalResponse(BaseModel):
 class InventoryEvalRequest(BaseModel):
     case_ids: list[str] = Field(default_factory=list)
     output_dir: str | None = None
+    baseline_summary_path: str | None = None
 
     @field_validator("case_ids")
     @classmethod
@@ -250,6 +251,14 @@ class InventoryEvalRequest(BaseModel):
             seen.add(lowered)
             normalized.append(stripped)
         return normalized
+
+    @field_validator("output_dir", "baseline_summary_path")
+    @classmethod
+    def normalize_optional_eval_paths(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class AnnotationCandidate(BaseModel):
@@ -1169,6 +1178,15 @@ class InventoryAgenticRequest(BaseModel):
         return normalized or ["catalog"]
 
 
+class InventoryTraceCandidateDebug(BaseModel):
+    product_id: str
+    name: str
+    category: str | None = None
+    score: float | None = None
+    score_breakdown: dict[str, Any] = Field(default_factory=dict)
+    rejection_reasons: list[str] = Field(default_factory=list)
+
+
 class InventoryAgenticStep(BaseModel):
     step_number: int
     action: str
@@ -1176,6 +1194,8 @@ class InventoryAgenticStep(BaseModel):
     applied_filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
     total_hits: int = 0
     selected_product_ids: list[str] = Field(default_factory=list)
+    selected_candidates: list[InventoryTraceCandidateDebug] = Field(default_factory=list)
+    rejected_candidates: list[InventoryTraceCandidateDebug] = Field(default_factory=list)
     observation: str
     retrieval_stage_counts: dict[str, int] = Field(default_factory=dict)
 

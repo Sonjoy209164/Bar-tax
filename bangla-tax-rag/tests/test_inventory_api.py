@@ -1708,6 +1708,20 @@ async def test_inventory_agentic_trace_and_status_endpoints(monkeypatch: pytest.
                         "status": "Active",
                         "tags": ["audio", "microphone"],
                         "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-keyboard",
+                        "sku": "CMP-KB-002",
+                        "name": "KeyForge Mechanical Keyboard",
+                        "category": "Computing",
+                        "brand": "KeyForge",
+                        "short_description": "Wireless mechanical keyboard with tactile switches",
+                        "price": 139.0,
+                        "currency": "USD",
+                        "stock": 17,
+                        "status": "Active",
+                        "tags": ["computing", "keyboard", "wireless"],
+                        "include_in_rag": True,
                     }
                 ]
             },
@@ -1735,6 +1749,13 @@ async def test_inventory_agentic_trace_and_status_endpoints(monkeypatch: pytest.
     assert trace_payload["retrieval_steps"]
     assert trace_payload["retrieval_steps"][0]["retrieval_stage_counts"]["search_requests"] == 1
     assert trace_payload["retrieval_steps"][0]["retrieval_stage_counts"]["returned_hits"] >= 1
+    assert trace_payload["retrieval_steps"][0]["selected_candidates"][0]["product_id"] == "prod-mic"
+    assert "final_score" in trace_payload["retrieval_steps"][0]["selected_candidates"][0]["score_breakdown"]
+    assert trace_payload["retrieval_steps"][0]["rejected_candidates"][0]["product_id"] == "prod-keyboard"
+    assert any(
+        "gate" in reason.lower() or "top_k" in reason.lower()
+        for reason in trace_payload["retrieval_steps"][0]["rejected_candidates"][0]["rejection_reasons"]
+    )
     assert "VoxCast USB Podcast Microphone" in trace_payload["final_answer"]
 
     assert chat_trace_response.status_code == 200
@@ -1746,6 +1767,8 @@ async def test_inventory_agentic_trace_and_status_endpoints(monkeypatch: pytest.
     assert chat_trace_payload["retrieval_stage_counts"]["search_requests"] >= 1
     assert chat_trace_payload["retrieval_steps"]
     assert chat_trace_payload["reasoning_summary"]
+    assert chat_trace_payload["retrieval_steps"][0]["selected_candidates"][0]["product_id"] == "prod-mic"
+    assert chat_trace_payload["retrieval_steps"][0]["rejected_candidates"][0]["product_id"] == "prod-keyboard"
     assert chat_trace_payload["retrieved_product_ids"] == ["prod-mic"]
     assert chat_trace_payload["reranked_product_ids"] == ["prod-mic"]
     assert "VoxCast USB Podcast Microphone" in chat_trace_payload["final_answer"]
@@ -2651,6 +2674,111 @@ async def test_inventory_agentic_uses_business_signals_for_restock_reasoning(
 
 
 @pytest.mark.anyio
+async def test_inventory_agentic_operational_planning_builds_bounded_workflow_steps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/items/upsert",
+            json={
+                "items": [
+                    {
+                        "product_id": "prod-mic",
+                        "sku": "AUD-MIC-004",
+                        "name": "VoxCast USB Podcast Microphone",
+                        "category": "Audio",
+                        "brand": "VoxCast",
+                        "short_description": "Cardioid USB microphone for podcasts and webinars",
+                        "price": 159.0,
+                        "currency": "USD",
+                        "stock": 12,
+                        "status": "Active",
+                        "tags": ["audio", "microphone"],
+                        "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-headphones",
+                        "sku": "AUD-HP-010",
+                        "name": "Auralite Office ANC Headphones",
+                        "category": "Audio",
+                        "brand": "Auralite",
+                        "short_description": "Wireless headphones for office calls and daily focus work",
+                        "price": 249.0,
+                        "currency": "USD",
+                        "stock": 5,
+                        "status": "Active",
+                        "tags": ["audio", "headphones"],
+                        "include_in_rag": True,
+                    },
+                ]
+            },
+        )
+        await client.post(
+            "/inventory/business/signals/upsert",
+            json={
+                "signals": [
+                    {
+                        "product_id": "prod-mic",
+                        "period_start": "2026-04-01",
+                        "period_end": "2026-04-15",
+                        "units_sold": 64,
+                        "order_count": 48,
+                        "inventory_on_hand": 12,
+                        "supplier_lead_time_days": 7,
+                        "supplier_risk_score": 0.18,
+                        "gross_margin_rate": 0.33,
+                        "demand_score": 0.61,
+                    },
+                    {
+                        "product_id": "prod-headphones",
+                        "period_start": "2026-04-01",
+                        "period_end": "2026-04-15",
+                        "units_sold": 28,
+                        "order_count": 20,
+                        "inventory_on_hand": 5,
+                        "supplier_lead_time_days": 28,
+                        "supplier_risk_score": 0.67,
+                        "gross_margin_rate": 0.21,
+                        "demand_score": 0.72,
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/inventory/agentic/ask",
+            json={
+                "question": "What should we do first about supplier delays across audio products?",
+                "assistant_mode": "support",
+                "reply_style": "detailed",
+                "audience": "manager",
+                "max_reasoning_steps": 4,
+            },
+        )
+        trace_response = await client.get(f"/inventory/chat/trace/{response.json()['trace_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["execution_path"] == "inventory_agentic"
+    assert payload["answer_plan"]["primary_product_id"] == "prod-headphones"
+    assert payload["recommended_product_ids"][0] == "prod-headphones"
+    assert "Supplier-risk read:" in payload["answer"]
+    assert "Auralite Office ANC Headphones" in payload["answer"]
+
+    assert trace_response.status_code == 200
+    trace_payload = trace_response.json()
+    actions = [step["action"] for step in trace_payload["retrieval_steps"]]
+    assert "find_operational_candidates" in actions
+    assert "business_signal_analysis" in actions
+    assert trace_payload["retrieval_steps"][-1]["action"] == "compose_operational_plan"
+
+
+@pytest.mark.anyio
 async def test_inventory_agentic_compare_builds_bounded_comparison_plan(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -2868,6 +2996,20 @@ async def test_inventory_ask_returns_debuggable_chat_trace(monkeypatch: pytest.M
                         "status": "Active",
                         "tags": ["audio", "microphone"],
                         "include_in_rag": True,
+                    },
+                    {
+                        "product_id": "prod-keyboard",
+                        "sku": "CMP-KB-002",
+                        "name": "KeyForge Mechanical Keyboard",
+                        "category": "Computing",
+                        "brand": "KeyForge",
+                        "short_description": "Wireless mechanical keyboard with tactile switches",
+                        "price": 139.0,
+                        "currency": "USD",
+                        "stock": 17,
+                        "status": "Active",
+                        "tags": ["computing", "keyboard", "wireless"],
+                        "include_in_rag": True,
                     }
                 ]
             },
@@ -2903,6 +3045,14 @@ async def test_inventory_ask_returns_debuggable_chat_trace(monkeypatch: pytest.M
     assert trace_payload["retrieval_stage_counts"]["returned_hits"] == 1
     assert trace_payload["retrieved_product_ids"] == ["prod-mic"]
     assert trace_payload["reranked_product_ids"] == ["prod-mic"]
+    assert trace_payload["retrieval_steps"][0]["action"] == "inventory_search"
+    assert trace_payload["retrieval_steps"][0]["selected_candidates"][0]["product_id"] == "prod-mic"
+    assert "final_score" in trace_payload["retrieval_steps"][0]["selected_candidates"][0]["score_breakdown"]
+    assert trace_payload["retrieval_steps"][0]["rejected_candidates"][0]["product_id"] == "prod-keyboard"
+    assert any(
+        "gate" in reason.lower() or "top_k" in reason.lower()
+        for reason in trace_payload["retrieval_steps"][0]["rejected_candidates"][0]["rejection_reasons"]
+    )
     assert trace_payload["answer_plan"]["primary_product_id"] == "prod-mic"
     assert trace_payload["verification"]["checked_final_answer"] is True
     assert trace_payload["fallback_reason"] is None

@@ -156,8 +156,8 @@ Examples:
 - [x] restock priority
 - [x] bundle recommendation
 - [x] compare two or more products
-- [ ] root cause analysis
-- [ ] operational planning
+- [x] root cause analysis
+- [x] operational planning
 
 Implementation tasks:
 
@@ -271,25 +271,25 @@ The bot fails safely when evidence is incomplete instead of producing a polished
 
 Track these failure modes:
 
-- [ ] wrong product type
+- [x] wrong product type
 - [x] missed exact match
-- [ ] bad comparison
+- [x] bad comparison
 - [x] false in-stock claim
 - [x] false price claim
 - [x] false spec claim
 - [x] weak abstain behavior
-- [ ] bad cross-sell
-- [ ] hallucinated business rationale
+- [x] bad cross-sell
+- [x] hallucinated business rationale
 
 Implementation tasks:
 
 - [x] Build an eval runner for complex reasoning questions.
-- [ ] Add labeled cases for lookup, compare, recommend, diagnose, bundle, and restock.
+- [x] Add labeled cases for lookup, compare, recommend, diagnose, bundle, and restock.
 - [x] Track per-question-family quality, not only global accuracy.
 - [x] Track retrieval-stage misses separately from answer-stage misses.
 - [x] Track latency by route type.
 - [x] Track deterministic vs natural-answer fallback rates.
-- [ ] Add a simple report showing what improved and what regressed.
+- [x] Add a simple report showing what improved and what regressed.
 
 Success criteria:
 
@@ -303,9 +303,9 @@ Every retrieval or reasoning change can be measured against real failure categor
 - [x] Log route choice and confidence.
 - [x] Log candidate counts per retrieval stage.
 - [x] Log applied metadata filters.
-- [ ] Log rejected candidates and rejection reasons.
+- [x] Log rejected candidates and rejection reasons.
 - [x] Log evidence gaps and abstain reasons.
-- [ ] Log deterministic score breakdowns.
+- [x] Log deterministic score breakdowns.
 - [x] Expose these details in traces without leaking them to end users.
 
 Success criteria:
@@ -323,8 +323,8 @@ When the system fails, we can tell whether the problem came from classification,
 - [x] Phase 5: Evidence contract
 - [x] Phase 6: Deterministic reasoning
 - [x] Phase 7: Verification and abstain
-- [ ] Phase 8: Evaluation and failure tracking
-- [ ] Phase 9: Observability and debugging
+- [x] Phase 8: Evaluation and failure tracking
+- [x] Phase 9: Observability and debugging
 
 ## Definition Of Done
 
@@ -332,5 +332,5 @@ When the system fails, we can tell whether the problem came from classification,
 - [x] Spec-heavy and alias-heavy questions retrieve the right candidates.
 - [x] Comparison and recommendation answers are driven by structured evidence.
 - [x] Unsupported claims are blocked before final answer generation.
-- [ ] Failure modes are measured with repeatable evals.
+- [x] Failure modes are measured with repeatable evals.
 - [x] Traces show where the system succeeded or failed.

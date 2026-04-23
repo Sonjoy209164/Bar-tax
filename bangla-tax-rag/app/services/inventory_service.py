@@ -56,6 +56,7 @@ from app.generation.generator import ChatMessage, build_generation_options, get_
 from app.inventory import (
     EcommerceReranker,
     InventoryAnswerPlanner,
+    InventoryDecisionScorer,
     InventoryEvidenceContractBuilder,
     InventoryFinalAnswerVerifier,
     InventoryIntentClassifier,
@@ -408,6 +409,7 @@ class InventoryService:
         self.intent_classifier = InventoryIntentClassifier(self.product_ontology)
         self.preference_extractor = InventoryPreferenceExtractor(self.product_ontology)
         self.ecommerce_reranker = EcommerceReranker(self.product_ontology)
+        self.decision_scorer = InventoryDecisionScorer(self.product_ontology)
         self.evidence_contract_builder = InventoryEvidenceContractBuilder(self.product_ontology)
         self.answer_planner = InventoryAnswerPlanner(self.product_ontology)
         self.final_answer_verifier = InventoryFinalAnswerVerifier(self.product_ontology)
@@ -1412,7 +1414,12 @@ class InventoryService:
                 )
                 selected_hits = business_hits[: min(3, len(business_hits))]
                 for hit in business_hits:
-                    if hit.product_id in seen_hits:
+                    existing_index = next(
+                        (index for index, existing_hit in enumerate(aggregated_hits) if existing_hit.product_id == hit.product_id),
+                        None,
+                    )
+                    if existing_index is not None:
+                        aggregated_hits[existing_index] = hit
                         continue
                     seen_hits.add(hit.product_id)
                     aggregated_hits.append(hit)
@@ -1511,6 +1518,14 @@ class InventoryService:
                     hits=ordered_hits,
                     filters=effective_filters,
                     reply_style=request.reply_style,
+                )
+            elif execution_plan.strategy == "restock":
+                final_reply = self._build_agentic_restock_reply(
+                    question=request.question,
+                    hits=ordered_hits,
+                    filters=effective_filters,
+                    reply_style=request.reply_style,
+                    business_signals=business_signals,
                 )
             elif execution_plan.strategy == "bundle":
                 final_reply = self._build_agentic_bundle_reply(
@@ -2883,35 +2898,34 @@ class InventoryService:
         if not business_signals:
             return []
         catalog = self._load_catalog()
-        business_intent = self._business_tool_intent(question)
-        scored_hits: list[tuple[InventorySearchHit, float]] = []
+        candidate_tuples: list[tuple[InventorySearchHit, InventoryItemRecord, InventoryBusinessSignalRecord]] = []
         for signal in business_signals.values():
             item = catalog.get(signal.product_id)
             if item is None or not self._item_matches_filters(item, filters):
                 continue
-            score = self._business_priority_score(item=item, signal=signal, business_intent=business_intent)
+            hit = self._build_search_hit(item=item, score=0.0)
+            candidate_tuples.append((hit, item, signal))
+        ranked_hits = self.decision_scorer.rank_restock_candidates(candidates=candidate_tuples)
+        business_intent = self._business_tool_intent(question)
+        enriched_hits: list[InventorySearchHit] = []
+        for hit in ranked_hits:
+            score = self._decision_score(hit=hit, strategy="restock", fallback=hit.score)
             if score <= 0:
                 continue
-            hit = self._build_search_hit(item=item, score=round(score, 3))
             evidence_scores = {
                 **hit.evidence_scores,
                 "business_signal_score": round(score, 4),
                 "business_intent": business_intent,
-                "business_reasons": self._business_signal_reasons(signal=signal, business_intent=business_intent),
-            }
-            scored_hits.append((hit.model_copy(update={"score": round(score, 3), "evidence_scores": evidence_scores}), score))
-        return [
-            hit
-            for hit, _ in sorted(
-                scored_hits,
-                key=lambda item: (
-                    -item[1],
-                    self._is_out_of_stock(item[0]),
-                    self._price_sort_key(item[0]),
-                    item[0].name.casefold(),
+                "business_reasons": hit.evidence_scores.get(
+                    "deterministic_restock_reasons",
+                    self._business_signal_reasons(
+                        signal=business_signals[hit.product_id],
+                        business_intent=business_intent,
+                    ),
                 ),
-            )[:top_k]
-        ]
+            }
+            enriched_hits.append(hit.model_copy(update={"score": round(score, 4), "evidence_scores": evidence_scores}))
+        return enriched_hits[:top_k]
 
     def _build_business_signal_observation(
         self,
@@ -2957,15 +2971,25 @@ class InventoryService:
             )
 
         catalog = self._load_catalog()
-        hits_with_signals = sorted(
-            [hit for hit in hits if hit.product_id in business_signals],
-            key=lambda hit: self._business_priority_score(
-                item=catalog[hit.product_id],
-                signal=business_signals[hit.product_id],
-                business_intent=business_intent,
-            ),
-            reverse=True,
-        )
+        hits_with_signals = [hit for hit in hits if hit.product_id in business_signals]
+        if business_intent in {"restock", "stockout_prevention"}:
+            hits_with_signals = sorted(
+                hits_with_signals,
+                key=lambda hit: (
+                    -self._decision_score(hit=hit, strategy="restock", fallback=hit.score),
+                    hit.name.casefold(),
+                ),
+            )
+        else:
+            hits_with_signals = sorted(
+                hits_with_signals,
+                key=lambda hit: self._business_priority_score(
+                    item=catalog[hit.product_id],
+                    signal=business_signals[hit.product_id],
+                    business_intent=business_intent,
+                ),
+                reverse=True,
+            )
         if not hits_with_signals:
             return InventoryBusinessInsight(
                 missing_facts=[f"No product-level business signals matched this {business_intent} question."]
@@ -3882,10 +3906,13 @@ class InventoryService:
         assistant_mode: str,
         reply_style: str,
     ) -> InventoryReply:
+        plan_hits = hits
         if assistant_mode == "sales":
+            sales_style = self._classify_sales_style(question=question, filters=filters)
+            plan_hits = self._rank_sales_hits(hits=hits, sales_style=sales_style)
             reply = self._build_sales_answer(
                 question=question,
-                hits=hits,
+                hits=plan_hits,
                 filters=filters,
                 low_stock_threshold=low_stock_threshold,
                 reply_style=reply_style,
@@ -3902,7 +3929,7 @@ class InventoryService:
             reply=reply,
             question=question,
             filters=filters,
-            hits=hits,
+            hits=plan_hits,
             strategy=reply.answer_plan.intent if reply.answer_plan.intent != "unknown" else assistant_mode,
         )
 
@@ -3923,17 +3950,34 @@ class InventoryService:
                 assistant_mode="support",
                 reply_style=reply_style,
             )
-        primary = hits[0]
-        alternative = next(
-            (hit for hit in hits[1:] if self.product_ontology.valid_alternative(primary, hit)),
-            hits[1],
-        )
+        ranked_hits, primary, alternative = self.decision_scorer.select_comparison_pair(hits=hits)
+        if primary is None or alternative is None:
+            return self._build_answer(
+                question=question,
+                hits=ranked_hits or hits,
+                filters=filters,
+                low_stock_threshold=self.config.low_stock_threshold,
+                assistant_mode="support",
+                reply_style=reply_style,
+            )
+        primary_score = self._decision_score(hit=primary, strategy="comparison", fallback=primary.score)
+        alternative_score = self._decision_score(hit=alternative, strategy="comparison", fallback=alternative.score)
         answer_parts = [
             f"Best side-by-side comparison: {self._format_option_label(primary)} versus {self._format_option_label(alternative)}."
         ]
         price_note = self._comparison_price_note(primary=primary, alternative=alternative)
         if price_note:
             answer_parts.append(price_note)
+        primary_reasons = self._decision_reasons(hit=primary, strategy="comparison")
+        alternative_reasons = self._decision_reasons(hit=alternative, strategy="comparison")
+        if primary_reasons:
+            answer_parts.append(
+                f"{primary.name} leads the comparison scorecard at {primary_score:.2f} because {self._natural_join(primary_reasons[:2])}."
+            )
+        if alternative_reasons:
+            answer_parts.append(
+                f"{alternative.name} follows at {alternative_score:.2f} because {self._natural_join(alternative_reasons[:2])}."
+            )
         if reply_style == "detailed":
             answer_parts.append(
                 f"{primary.name} is the stronger lead when you want the closest fit, while {alternative.name} is the main fallback or tradeoff option."
@@ -3959,12 +4003,12 @@ class InventoryService:
             reply=reply,
             question=question,
             filters=filters,
-            hits=hits,
+            hits=ranked_hits,
             strategy="comparison",
         )
         return reply.model_copy(
             update={
-                "verification": self._verify_answer_plan(answer_plan=reply.answer_plan, hits=hits),
+                "verification": self._verify_answer_plan(answer_plan=reply.answer_plan, hits=ranked_hits),
             }
         )
 
@@ -4032,6 +4076,89 @@ class InventoryService:
         return reply.model_copy(
             update={
                 "verification": self._verify_answer_plan(answer_plan=reply.answer_plan, hits=hits),
+            }
+        )
+
+    def _build_agentic_restock_reply(
+        self,
+        *,
+        question: str,
+        hits: list[InventorySearchHit],
+        filters: InventorySearchFilters,
+        reply_style: str,
+        business_signals: dict[str, InventoryBusinessSignalRecord],
+    ) -> InventoryReply:
+        restock_hits = [
+            hit for hit in hits if self._decision_score(hit=hit, strategy="restock", fallback=0.0) > 0
+        ]
+        restock_hits = sorted(
+            restock_hits,
+            key=lambda hit: (
+                -self._decision_score(hit=hit, strategy="restock", fallback=hit.score),
+                hit.name.casefold(),
+            ),
+        )
+        if not restock_hits:
+            return self._build_answer(
+                question=question,
+                hits=hits,
+                filters=filters,
+                low_stock_threshold=self.config.low_stock_threshold,
+                assistant_mode="support",
+                reply_style=reply_style,
+            )
+        primary = restock_hits[0]
+        alternatives = restock_hits[1:3]
+        primary_score = self._decision_score(hit=primary, strategy="restock", fallback=primary.score)
+        primary_reasons = self._decision_reasons(hit=primary, strategy="restock")
+        answer_parts = [
+            f"Restock {self._format_option_label(primary)} first."
+        ]
+        if primary_reasons:
+            answer_parts.append(
+                f"It leads the restock scorecard at {primary_score:.2f} because {self._natural_join(primary_reasons[:3])}."
+            )
+        summary = self._format_business_signal_summary(
+            hit=primary,
+            signal=business_signals[primary.product_id],
+            include_margin=True,
+            include_supplier=True,
+            include_returns=False,
+            include_segments=False,
+        )
+        answer_parts.append(f"Operational read: {summary}.")
+        if alternatives:
+            answer_parts.append(
+                f"Next restock candidates are {self._natural_join(self._format_option_label(hit) for hit in alternatives)}."
+            )
+        follow_up_question = "Do you want the full restock ranking or the safest backup options after this?"
+        if reply_style == "detailed":
+            answer_parts.append(follow_up_question)
+        reply = InventoryReply(
+            answer=" ".join(answer_parts),
+            recommended_product_ids=[primary.product_id, *[hit.product_id for hit in alternatives[:2]]],
+            follow_up_question=follow_up_question,
+            answer_plan=self._build_inventory_answer_plan(
+                intent="restock_recommendation",
+                primary=primary,
+                excluded_hits=[hit for hit in hits if hit.product_id not in {primary.product_id, *[item.product_id for item in alternatives]}],
+                metadata_source=primary,
+                reasoning_steps=[
+                    "Ranked restock candidates with a deterministic scorecard over demand, stock pressure, lead time, margin, and supplier risk.",
+                    "Kept the answer tied to mirrored catalog items with supporting business signals.",
+                ],
+            ),
+        )
+        reply = self._enrich_reply_plan(
+            reply=reply,
+            question=question,
+            filters=filters,
+            hits=restock_hits,
+            strategy="restock",
+        )
+        return reply.model_copy(
+            update={
+                "verification": self._verify_answer_plan(answer_plan=reply.answer_plan, hits=restock_hits),
             }
         )
 
@@ -5388,62 +5515,14 @@ class InventoryService:
         hits: list[InventorySearchHit],
         sales_style: str,
     ) -> list[InventorySearchHit]:
-        if sales_style == "budget":
-            return sorted(
-                hits,
-                key=lambda hit: (
-                    self._is_out_of_stock(hit),
-                    -self._quality_score(hit),
-                    self._price_sort_key(hit),
-                    -hit.score,
-                    -(hit.stock or 0),
-                    hit.name.casefold(),
-                ),
-            )
-        if sales_style == "premium":
-            return sorted(
-                hits,
-                key=lambda hit: (
-                    self._is_out_of_stock(hit),
-                    -self._premium_signal(hit),
-                    -self._quality_score(hit),
-                    self._price_sort_key(hit, reverse=True),
-                    -hit.score,
-                    -(hit.stock or 0),
-                    hit.name.casefold(),
-                ),
-            )
-        if sales_style == "urgency":
-            return sorted(
-                hits,
-                key=lambda hit: (
-                    self._is_out_of_stock(hit),
-                    float("inf") if hit.stock is None else hit.stock,
-                    -self._quality_score(hit),
-                    -hit.score,
-                    self._price_sort_key(hit),
-                    hit.name.casefold(),
-                ),
-            )
-        if sales_style == "availability":
-            return sorted(
-                hits,
-                key=lambda hit: (
-                    self._is_out_of_stock(hit),
-                    -(hit.stock or 0),
-                    -self._quality_score(hit),
-                    -hit.score,
-                    self._price_sort_key(hit),
-                    hit.name.casefold(),
-                ),
-            )
+        ranked_hits = self.decision_scorer.rank_recommendations(hits=hits, sales_style=sales_style)
         return sorted(
-            hits,
+            ranked_hits,
             key=lambda hit: (
+                -self._decision_score(hit=hit, strategy="recommendation", fallback=hit.score),
                 self._is_out_of_stock(hit),
                 -self._quality_score(hit),
-                -hit.score,
-                self._price_sort_key(hit),
+                self._price_sort_key(hit, reverse=sales_style == "premium"),
                 -(hit.stock or 0),
                 hit.name.casefold(),
             ),
@@ -5984,6 +6063,31 @@ class InventoryService:
                 f"{alternative.name} is the lower-price option at {self._format_price_text(alternative)}, while {primary.name} is {self._format_price_text(primary)}."
             )
         return f"Both products are listed at {self._format_price_text(primary)}."
+
+    @staticmethod
+    def _decision_score(
+        *,
+        hit: InventorySearchHit,
+        strategy: str,
+        fallback: float,
+    ) -> float:
+        value = hit.evidence_scores.get(f"deterministic_{strategy}_score")
+        if isinstance(value, (int, float)):
+            return float(value)
+        return float(fallback)
+
+    @staticmethod
+    def _decision_reasons(
+        *,
+        hit: InventorySearchHit,
+        strategy: str,
+    ) -> list[str]:
+        value = hit.evidence_scores.get(f"deterministic_{strategy}_reasons")
+        if isinstance(value, list):
+            return [reason for reason in value if isinstance(reason, str) and reason]
+        if isinstance(value, tuple):
+            return [reason for reason in value if isinstance(reason, str) and reason]
+        return []
 
     def _agentic_primary_hit_for_bundle(
         self,

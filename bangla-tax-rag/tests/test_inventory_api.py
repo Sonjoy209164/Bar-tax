@@ -6,6 +6,7 @@ from app.core.schemas import (
     InventoryAnswerVerification,
     InventoryAskRequest,
     InventoryItemRecord,
+    InventorySearchFilters,
     InventorySearchRequest,
     InventorySearchHit,
 )
@@ -814,6 +815,64 @@ def test_inventory_ask_uses_explicit_product_aliases_for_detail_requests(tmp_pat
     assert response.answer.startswith("CreatorCraft 16 Pro is")
 
 
+def test_inventory_sales_answer_uses_deterministic_recommendation_scorecard(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+
+    reply = service._build_answer(
+        question="Recommend a premium laptop for this customer",
+        hits=[
+            InventorySearchHit(
+                product_id="budget",
+                sku="CMP-LAP-001",
+                name="Nimbus 14 Essential",
+                category="Computing",
+                brand="Nimbus",
+                price=899.0,
+                currency="USD",
+                stock=16,
+                tags=["computing", "laptop"],
+                snippet="Lower-cost business laptop",
+                evidence_scores={
+                    "final_score": 0.78,
+                    "product_type_match": 1.0,
+                    "price_fit": 0.82,
+                    "budget_fit": 0.95,
+                    "stock_fit": 1.0,
+                },
+                score=0.78,
+            ),
+            InventorySearchHit(
+                product_id="premium",
+                sku="CMP-LAP-002",
+                name="Nimbus 14 Elite",
+                category="Computing",
+                brand="Nimbus",
+                price=1799.0,
+                currency="USD",
+                stock=11,
+                tags=["computing", "laptop", "premium"],
+                snippet="Premium laptop with OLED display",
+                evidence_scores={
+                    "final_score": 0.75,
+                    "product_type_match": 1.0,
+                    "premium_fit": 1.0,
+                    "structured_spec_match": 0.8,
+                    "stock_fit": 1.0,
+                },
+                score=0.75,
+            ),
+        ],
+        filters=InventorySearchFilters(),
+        low_stock_threshold=10,
+        assistant_mode="sales",
+        reply_style="detailed",
+    )
+
+    assert reply.answer_plan.primary_product_id == "premium"
+    assert reply.recommended_product_ids[0] == "premium"
+    assert "recommendation scorecard" in (reply.answer_plan.primary_reason or "").lower()
+
+
 def test_inventory_natural_prompt_uses_writer_contract_and_plan_fields(tmp_path) -> None:  # type: ignore[no-untyped-def]
     service = _build_inventory_service(tmp_path)
     hit = InventorySearchHit(
@@ -1221,7 +1280,10 @@ async def test_inventory_sales_mode_excludes_unrelated_cross_category_fallbacks(
     assert "attributes.battery_hours" in payload["answer_plan"]["metadata_used"]
     assert payload["answer_plan"]["primary_reason"]
     assert payload["answer_plan"]["next_best_question"]
-    assert payload["answer_plan"]["confidence_breakdown"]["primary"]["final_score"] == payload["hits"][0]["score"]
+    assert (
+        payload["answer_plan"]["confidence_breakdown"]["primary"]["deterministic_recommendation_score"]
+        == payload["hits"][0]["score"]
+    )
     assert payload["verification"]["passed"] is True
 
 
@@ -2370,6 +2432,8 @@ async def test_inventory_agentic_uses_business_signals_for_restock_reasoning(
     assert "sold quantity 64" in payload["answer"]
     assert "supplier lead time 21 day(s)" in payload["answer"]
     assert not any("Missing data domain" in fact for fact in payload["missing_facts"])
+    assert payload["answer_plan"]["primary_product_id"] == "prod-mic"
+    assert "restock scorecard" in (payload["answer_plan"]["primary_reason"] or "").lower()
     evidence_contract = payload["answer_plan"]["evidence_contract"]
     primary_candidate = next(
         candidate for candidate in evidence_contract["candidate_evidence"] if candidate["product_id"] == "prod-mic"
@@ -2448,6 +2512,7 @@ async def test_inventory_agentic_compare_builds_bounded_comparison_plan(
     payload = response.json()
     assert "CreatorCraft 16 Pro" in payload["answer"]
     assert "CreatorCraft 16 Air" in payload["answer"]
+    assert "comparison scorecard" in (payload["answer_plan"]["primary_reason"] or "").lower()
     assert payload["answer_plan"]["evidence_contract"]["primary_candidate_ids"][:2] == [
         "laptop-pro",
         "laptop-air",

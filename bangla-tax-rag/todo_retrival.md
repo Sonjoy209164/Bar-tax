@@ -221,20 +221,20 @@ The model should explain decisions, not invent them.
 
 Apply deterministic logic for:
 
-- [ ] comparison
-- [ ] recommendation
-- [ ] prioritization
-- [ ] restock ranking
+- [x] comparison
+- [x] recommendation
+- [x] prioritization
+- [x] restock ranking
 - [ ] alternative suggestion
 
 Implementation tasks:
 
-- [ ] Define scoring rules for comparison and recommendation.
-- [ ] Define weighted ranking rules for operational prioritization.
-- [ ] Separate ranking logic from response wording.
-- [ ] Make the answer plan authoritative over the final response.
-- [ ] Keep the LLM as explainer where deterministic ranking is available.
-- [ ] Add tests for score-based decisions and tradeoff ordering.
+- [x] Define scoring rules for comparison and recommendation.
+- [x] Define weighted ranking rules for operational prioritization.
+- [x] Separate ranking logic from response wording.
+- [x] Make the answer plan authoritative over the final response.
+- [x] Keep the LLM as explainer where deterministic ranking is available.
+- [x] Add tests for score-based decisions and tradeoff ordering.
 
 Success criteria:
 

@@ -1,9 +1,16 @@
 from types import SimpleNamespace
 
-from app.core.schemas import InventoryAnswerPlan, InventoryBusinessSignalRecord, InventorySearchFilters, InventorySearchHit
+from app.core.schemas import (
+    InventoryAnswerPlan,
+    InventoryBusinessSignalRecord,
+    InventoryItemRecord,
+    InventorySearchFilters,
+    InventorySearchHit,
+)
 from app.inventory import (
     EcommerceReranker,
     InventoryAnswerPlanner,
+    InventoryDecisionScorer,
     InventoryEvidenceContractBuilder,
     InventoryFinalAnswerVerifier,
     InventoryIntentClassifier,
@@ -212,6 +219,60 @@ def test_ecommerce_reranker_scores_budget_and_stock_fit() -> None:
     assert out_of_stock_score.out_of_stock_penalty > 0
 
 
+def test_inventory_decision_scorer_prefers_premium_recommendation_over_hit_order() -> None:
+    scorer = InventoryDecisionScorer()
+    budget = InventorySearchHit(
+        product_id="budget",
+        sku="CMP-LAP-001",
+        name="Nimbus 14 Essential",
+        category="Computing",
+        brand="Nimbus",
+        price=899.0,
+        currency="USD",
+        stock=16,
+        tags=["computing", "laptop"],
+        snippet="Lower-cost business laptop",
+        evidence_scores={
+            "final_score": 0.78,
+            "product_type_match": 1.0,
+            "price_fit": 0.82,
+            "budget_fit": 0.95,
+            "premium_fit": 0.0,
+            "stock_fit": 1.0,
+        },
+        score=0.78,
+    )
+    premium = InventorySearchHit(
+        product_id="premium",
+        sku="CMP-LAP-002",
+        name="Nimbus 14 Elite",
+        category="Computing",
+        brand="Nimbus",
+        price=1799.0,
+        currency="USD",
+        stock=11,
+        tags=["computing", "laptop", "premium"],
+        snippet="Premium laptop with OLED display",
+        evidence_scores={
+            "final_score": 0.75,
+            "product_type_match": 1.0,
+            "price_fit": 0.65,
+            "budget_fit": 0.2,
+            "premium_fit": 1.0,
+            "stock_fit": 1.0,
+            "structured_spec_match": 0.8,
+        },
+        score=0.75,
+    )
+
+    ranked = scorer.rank_recommendations(hits=[budget, premium], sales_style="premium")
+
+    assert ranked[0].product_id == "premium"
+    assert ranked[0].evidence_scores["deterministic_recommendation_score"] > ranked[1].evidence_scores[
+        "deterministic_recommendation_score"
+    ]
+
+
 def test_inventory_answer_planner_builds_rich_decision_metadata() -> None:
     ontology = ProductOntology()
     preferences = InventoryPreferenceExtractor(ontology).extract(
@@ -299,8 +360,93 @@ def test_inventory_answer_planner_builds_rich_decision_metadata() -> None:
     assert rich_plan.tradeoffs
     assert rich_plan.next_best_question is not None
     assert rich_plan.confidence_breakdown["primary"]["final_score"] == 0.82
+    assert rich_plan.confidence_breakdown["decision"]["strategy"] == "recommendation"
     assert rich_plan.evidence_contract is not None
     assert rich_plan.evidence_contract.required_tradeoffs
+
+
+def test_inventory_answer_planner_explains_deterministic_comparison_scores() -> None:
+    ontology = ProductOntology()
+    builder = InventoryEvidenceContractBuilder(ontology)
+    planner = InventoryAnswerPlanner(ontology)
+    intent = InventoryIntentClassifier(ontology).classify("Compare these laptops")
+    preferences = InventoryPreferenceExtractor(ontology).extract("Compare these laptops")
+    primary = InventorySearchHit(
+        product_id="pro",
+        sku="CMP-LAP-100",
+        name="CreatorCraft 16 Pro",
+        category="Computing",
+        brand="CreatorCraft",
+        price=1699.0,
+        currency="USD",
+        stock=5,
+        tags=["computing", "laptop"],
+        snippet="Creator laptop with dedicated graphics",
+        attributes={"ram": "32GB"},
+        evidence_scores={
+            "final_score": 0.81,
+            "product_type_match": 1.0,
+            "family_match": 1.0,
+            "structured_spec_match": 0.8,
+            "deterministic_comparison_score": 0.84,
+            "deterministic_comparison_reasons": [
+                "it is an exact comparison-fit product for the requested type",
+                "price, stock, and core facts are all available for comparison",
+            ],
+        },
+        score=0.81,
+    )
+    alternative = InventorySearchHit(
+        product_id="air",
+        sku="CMP-LAP-101",
+        name="CreatorCraft 16 Air",
+        category="Computing",
+        brand="CreatorCraft",
+        price=1499.0,
+        currency="USD",
+        stock=9,
+        tags=["computing", "laptop"],
+        snippet="Creator laptop with longer battery life",
+        attributes={"ram": "16GB"},
+        evidence_scores={
+            "final_score": 0.75,
+            "product_type_match": 1.0,
+            "family_match": 1.0,
+            "structured_spec_match": 0.65,
+            "deterministic_comparison_score": 0.79,
+            "deterministic_comparison_reasons": [
+                "it is an exact comparison-fit product for the requested type",
+                "enough core facts are present for a grounded comparison",
+            ],
+        },
+        score=0.75,
+    )
+    plan = InventoryAnswerPlan(
+        intent="comparison",
+        primary_product_id=primary.product_id,
+        alternative_product_ids=[alternative.product_id],
+    )
+    contract = builder.build(
+        question="Compare these laptops",
+        answer_plan=plan,
+        hits=[primary, alternative],
+        preferences=preferences,
+        business_signals={},
+        next_best_question=None,
+    )
+
+    rich_plan = planner.enrich_plan(
+        answer_plan=plan,
+        evidence_contract=contract,
+        intent_result=intent,
+        preferences=preferences,
+        strategy="comparison",
+        next_best_question=None,
+    )
+
+    assert "comparison scorecard" in (rich_plan.primary_reason or "").lower()
+    assert "comparison scorecard" in (rich_plan.alternative_reason or "").lower()
+    assert rich_plan.confidence_breakdown["decision"]["primary_score"] == 0.84
 
 
 def test_inventory_evidence_contract_detects_stock_contradictions_and_missing_specs() -> None:
@@ -394,6 +540,96 @@ def test_inventory_evidence_contract_captures_business_restock_facts() -> None:
     assert "supplier lead time is 21 day(s)" in allowed_claims
     assert "margin rate is 33.0%" in allowed_claims
     assert contract.follow_up_question_rules
+
+
+def test_inventory_decision_scorer_ranks_restock_candidates_by_operational_priority() -> None:
+    scorer = InventoryDecisionScorer()
+    candidates = [
+        (
+            InventorySearchHit(
+                product_id="safe",
+                sku="AUD-HP-001",
+                name="Auralite Flex ANC Headphones",
+                category="Audio",
+                brand="Auralite",
+                price=249.0,
+                currency="USD",
+                stock=1,
+                tags=["audio", "headphones"],
+                snippet="Wireless headphones",
+                score=0.5,
+            ),
+            InventoryItemRecord(
+                product_id="safe",
+                sku="AUD-HP-001",
+                name="Auralite Flex ANC Headphones",
+                category="Audio",
+                brand="Auralite",
+                short_description="Wireless headphones",
+                price=249.0,
+                currency="USD",
+                stock=1,
+                status="Low Stock",
+                tags=["audio", "headphones"],
+                include_in_rag=True,
+            ),
+            InventoryBusinessSignalRecord(
+                product_id="safe",
+                units_sold=8,
+                order_count=6,
+                inventory_on_hand=1,
+                supplier_lead_time_days=5,
+                gross_margin_rate=0.12,
+                demand_score=0.22,
+            ),
+        ),
+        (
+            InventorySearchHit(
+                product_id="priority",
+                sku="AUD-MIC-004",
+                name="VoxCast USB Podcast Microphone",
+                category="Audio",
+                brand="VoxCast",
+                price=159.0,
+                currency="USD",
+                stock=2,
+                tags=["audio", "microphone"],
+                snippet="USB microphone",
+                score=0.5,
+            ),
+            InventoryItemRecord(
+                product_id="priority",
+                sku="AUD-MIC-004",
+                name="VoxCast USB Podcast Microphone",
+                category="Audio",
+                brand="VoxCast",
+                short_description="USB microphone",
+                price=159.0,
+                currency="USD",
+                stock=2,
+                status="Low Stock",
+                tags=["audio", "microphone"],
+                include_in_rag=True,
+            ),
+            InventoryBusinessSignalRecord(
+                product_id="priority",
+                units_sold=64,
+                order_count=48,
+                inventory_on_hand=2,
+                supplier_lead_time_days=21,
+                gross_margin_rate=0.33,
+                supplier_risk_score=0.35,
+                demand_score=0.91,
+            ),
+        ),
+    ]
+
+    ranked = scorer.rank_restock_candidates(candidates=candidates)
+
+    assert ranked[0].product_id == "priority"
+    assert ranked[0].evidence_scores["deterministic_restock_score"] > ranked[1].evidence_scores[
+        "deterministic_restock_score"
+    ]
 
 
 def test_inventory_evidence_contract_is_complete_for_compare_flow() -> None:

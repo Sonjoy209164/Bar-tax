@@ -1,3 +1,4 @@
+from app.inventory.decisioning import InventoryDecisionScore, InventoryDecisionScorer
 from app.inventory.evidence_contract import InventoryEvidenceContractBuilder
 from app.inventory.intent import InventoryIntentClassifier, InventoryIntentResult
 from app.inventory.memory import InventoryMemoryResolver, InventoryResolvedMemory
@@ -12,6 +13,8 @@ from app.inventory.verifier import InventoryFinalAnswerVerifier
 __all__ = [
     "EcommerceReranker",
     "InventoryAnswerPlanner",
+    "InventoryDecisionScore",
+    "InventoryDecisionScorer",
     "InventoryEvidenceContractBuilder",
     "InventoryFinalAnswerVerifier",
     "InventoryIntentClassifier",

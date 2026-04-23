@@ -9,6 +9,20 @@ from app.inventory.ontology import ProductOntology, normalize_inventory_text
 
 
 @dataclass(frozen=True)
+class InventorySpecRequirement:
+    key: str
+    operator: str
+    value: str | float | bool
+
+    def to_plan_dict(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "operator": self.operator,
+            "value": self.value,
+        }
+
+
+@dataclass(frozen=True)
 class InventoryPreferenceProfile:
     product_type: str | None = None
     product_family: str | None = None
@@ -20,6 +34,7 @@ class InventoryPreferenceProfile:
     needs_in_stock: bool = False
     use_cases: tuple[str, ...] = ()
     feature_requirements: tuple[str, ...] = ()
+    spec_requirements: tuple[InventorySpecRequirement, ...] = ()
     avoid_product_types: tuple[str, ...] = ()
     selected_product_ids: tuple[str, ...] = ()
     confidence: float = 0.0
@@ -38,6 +53,7 @@ class InventoryPreferenceProfile:
             "needs_in_stock",
             "use_cases",
             "feature_requirements",
+            "spec_requirements",
             "avoid_product_types",
             "selected_product_ids",
             "confidence",
@@ -48,7 +64,10 @@ class InventoryPreferenceProfile:
                 continue
             if isinstance(value, tuple):
                 if value:
-                    payload[key] = list(value)
+                    if key == "spec_requirements":
+                        payload[key] = [item.to_plan_dict() for item in value]
+                    else:
+                        payload[key] = list(value)
                 continue
             if isinstance(value, bool):
                 if value:
@@ -80,6 +99,7 @@ class InventoryPreferenceExtractor:
         "ergonomic": ("ergonomic", "lumbar"),
         "gps": ("gps",),
         "heart_rate": ("heart rate", "heart-rate"),
+        "inverter": ("inverter",),
         "portable": ("portable", "travel"),
         "premium": ("premium", "flagship", "high end", "high-end"),
     }
@@ -95,6 +115,15 @@ class InventoryPreferenceExtractor:
     PREMIUM_HINTS = ("premium", "best", "top", "flagship", "high end", "high-end", "luxury", "pro")
     BUDGET_HINTS = ("budget", "affordable", "value", "cheap", "cheapest", "lower price", "low price")
     AVAILABILITY_HINTS = ("in stock", "available now", "ready to sell", "available", "sellable now")
+    RAM_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*(tb|gb)\s*ram\b", re.IGNORECASE)
+    STORAGE_PATTERN = re.compile(
+        r"(\d+(?:\.\d+)?)\s*(tb|gb)\s*(?:ssd|hdd|storage|rom|capacity)\b",
+        re.IGNORECASE,
+    )
+    BATTERY_HOURS_PATTERN = re.compile(
+        r"(\d+(?:\.\d+)?)\s*(?:hour|hours|hr|hrs)\s*(?:battery|battery life)?\b",
+        re.IGNORECASE,
+    )
 
     def __init__(self, ontology: ProductOntology | None = None) -> None:
         self.ontology = ontology or ProductOntology()
@@ -139,6 +168,16 @@ class InventoryPreferenceExtractor:
             evidence.append("needs_in_stock:true")
 
         feature_requirements = tuple(self._extract_keyword_matches(text, self.FEATURE_KEYWORDS))
+        spec_requirements = tuple(
+            self._extract_spec_requirements(
+                question=question,
+                text=text,
+                product_type=product_type,
+                feature_requirements=feature_requirements,
+            )
+        )
+        for requirement in spec_requirements:
+            evidence.append(f"spec:{requirement.key}:{requirement.operator}:{requirement.value}")
         use_cases = tuple(self._extract_keyword_matches(text, self.USE_CASE_KEYWORDS))
         avoid_product_types = tuple(self._extract_avoid_product_types(text))
         selected_product_ids = tuple(filters.product_ids)
@@ -151,6 +190,7 @@ class InventoryPreferenceExtractor:
             budget_max=budget_max,
             quality_level=quality_level,
             feature_requirements=feature_requirements,
+            spec_requirements=spec_requirements,
             use_cases=use_cases,
             selected_product_ids=selected_product_ids,
         )
@@ -166,6 +206,7 @@ class InventoryPreferenceExtractor:
             needs_in_stock=needs_in_stock,
             use_cases=use_cases,
             feature_requirements=feature_requirements,
+            spec_requirements=spec_requirements,
             avoid_product_types=avoid_product_types,
             selected_product_ids=selected_product_ids,
             confidence=confidence,
@@ -234,6 +275,69 @@ class InventoryPreferenceExtractor:
                 matches.append(label)
         return matches
 
+    def _extract_spec_requirements(
+        self,
+        *,
+        question: str,
+        text: str,
+        product_type: str | None,
+        feature_requirements: tuple[str, ...],
+    ) -> list[InventorySpecRequirement]:
+        requirements: dict[str, InventorySpecRequirement] = {}
+
+        ram_match = self.RAM_PATTERN.search(question)
+        if ram_match:
+            requirements["ram_gb"] = InventorySpecRequirement(
+                key="ram_gb",
+                operator="gte",
+                value=self._capacity_to_gb(ram_match.group(1), ram_match.group(2)),
+            )
+
+        storage_match = self.STORAGE_PATTERN.search(question)
+        if storage_match:
+            requirements["storage_gb"] = InventorySpecRequirement(
+                key="storage_gb",
+                operator="gte",
+                value=self._capacity_to_gb(storage_match.group(1), storage_match.group(2)),
+            )
+        elif product_type in {"laptop", "monitor", "dock"}:
+            loose_storage = self._extract_loose_storage_requirement(question)
+            if loose_storage is not None:
+                requirements["storage_gb"] = InventorySpecRequirement(
+                    key="storage_gb",
+                    operator="gte",
+                    value=loose_storage,
+                )
+
+        battery_match = self.BATTERY_HOURS_PATTERN.search(question)
+        if battery_match:
+            requirements["battery_hours"] = InventorySpecRequirement(
+                key="battery_hours",
+                operator="gte",
+                value=float(battery_match.group(1)),
+            )
+
+        if "gps" in feature_requirements:
+            requirements["gps_support"] = InventorySpecRequirement(
+                key="gps_support",
+                operator="eq",
+                value=True,
+            )
+        if "noise_cancellation" in feature_requirements:
+            requirements["anc_support"] = InventorySpecRequirement(
+                key="anc_support",
+                operator="eq",
+                value=True,
+            )
+        if "inverter" in feature_requirements:
+            requirements["inverter_support"] = InventorySpecRequirement(
+                key="inverter_support",
+                operator="eq",
+                value=True,
+            )
+
+        return list(requirements.values())
+
     def _extract_avoid_product_types(self, text: str) -> list[str]:
         avoided: list[str] = []
         for product_type, synonyms in self.ontology.PRODUCT_SYNONYMS.items():
@@ -260,6 +364,7 @@ class InventoryPreferenceExtractor:
         budget_max: float | None,
         quality_level: str | None,
         feature_requirements: tuple[str, ...],
+        spec_requirements: tuple[InventorySpecRequirement, ...],
         use_cases: tuple[str, ...],
         selected_product_ids: tuple[str, ...],
     ) -> float:
@@ -276,6 +381,8 @@ class InventoryPreferenceExtractor:
             score += 0.1
         if feature_requirements:
             score += min(0.12, 0.04 * len(feature_requirements))
+        if spec_requirements:
+            score += min(0.18, 0.06 * len(spec_requirements))
         if use_cases:
             score += min(0.1, 0.05 * len(use_cases))
         if selected_product_ids:
@@ -285,3 +392,19 @@ class InventoryPreferenceExtractor:
     @staticmethod
     def _has_any(text: str, phrases: tuple[str, ...]) -> bool:
         return any(phrase in text for phrase in phrases)
+
+    @staticmethod
+    def _capacity_to_gb(value: str, unit: str) -> float:
+        numeric_value = float(value)
+        return numeric_value * 1024 if unit.casefold() == "tb" else numeric_value
+
+    def _extract_loose_storage_requirement(self, question: str) -> float | None:
+        for match in re.finditer(r"(\d+(?:\.\d+)?)\s*(tb|gb)\b", question, re.IGNORECASE):
+            start = max(0, match.start() - 16)
+            end = min(len(question), match.end() + 16)
+            local_window = question[start:end].casefold()
+            if "ram" in local_window:
+                continue
+            if any(token in local_window for token in ("storage", "ssd", "hdd", "capacity", "rom")):
+                return self._capacity_to_gb(match.group(1), match.group(2))
+        return None

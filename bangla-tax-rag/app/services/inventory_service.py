@@ -55,12 +55,14 @@ from app.generation.generator import ChatMessage, build_generation_options, get_
 from app.inventory import (
     EcommerceReranker,
     InventoryAnswerPlanner,
+    InventoryEvidenceContractBuilder,
     InventoryFinalAnswerVerifier,
     InventoryIntentClassifier,
     InventoryIntentResult,
     InventoryMemoryResolver,
     InventoryPreferenceExtractor,
     InventoryPreferenceProfile,
+    InventorySpecRequirement,
     ProductOntology,
 )
 from app.inventory.storage import InventoryMirrorStore, build_inventory_mirror_store
@@ -389,6 +391,7 @@ class InventoryService:
         self.intent_classifier = InventoryIntentClassifier(self.product_ontology)
         self.preference_extractor = InventoryPreferenceExtractor(self.product_ontology)
         self.ecommerce_reranker = EcommerceReranker(self.product_ontology)
+        self.evidence_contract_builder = InventoryEvidenceContractBuilder(self.product_ontology)
         self.answer_planner = InventoryAnswerPlanner(self.product_ontology)
         self.final_answer_verifier = InventoryFinalAnswerVerifier(self.product_ontology)
         self.memory_resolver = InventoryMemoryResolver(self.product_ontology)
@@ -1552,6 +1555,7 @@ class InventoryService:
             "dense_pool_candidates": 0,
             "lexical_pool_candidates": 0,
             "merged_pool_candidates": 0,
+            "spec_filtered_candidates": 0,
             "type_gated_candidates": 0,
             "category_gated_candidates": 0,
             "exact_lookup_candidates": 0,
@@ -1578,9 +1582,12 @@ class InventoryService:
         top_k: int,
         filters: InventorySearchFilters,
         catalog: dict[str, InventoryItemRecord],
+        derived_filters: dict[str, object] | None = None,
     ) -> tuple[dict[str, float], int]:
         query_vector = self.embedder.embed_text(query_text)
         vector_filters = self._build_vector_filters(filters)
+        if derived_filters:
+            vector_filters.update(derived_filters)
         candidate_limit = max(top_k * self.config.search_candidate_multiplier, top_k)
         result = self.vector_store.query(
             query_vector,
@@ -1629,14 +1636,6 @@ class InventoryService:
         catalog: dict[str, InventoryItemRecord],
     ) -> tuple[list[InventorySearchHit], dict[str, int]]:
         retrieval_stage_counts = self._empty_retrieval_stage_counts()
-        vector_scores, dense_raw_matches = self._dense_candidate_scores(
-            query_text=query_text,
-            top_k=top_k,
-            filters=filters,
-            catalog=catalog,
-        )
-        retrieval_stage_counts["dense_raw_matches"] = dense_raw_matches
-        retrieval_stage_counts["dense_pool_candidates"] = len(vector_scores)
         query_terms = self._extract_query_terms(query_text)
         subject_phrase = self._extract_subject_phrase(query_text)
         detail_request = self._is_detail_request(query_text)
@@ -1653,6 +1652,15 @@ class InventoryService:
             filters=filters,
             products=list(catalog.values()),
         )
+        vector_scores, dense_raw_matches = self._dense_candidate_scores(
+            query_text=query_text,
+            top_k=top_k,
+            filters=filters,
+            catalog=catalog,
+            derived_filters=self._build_requirement_vector_filters(preference_profile),
+        )
+        retrieval_stage_counts["dense_raw_matches"] = dense_raw_matches
+        retrieval_stage_counts["dense_pool_candidates"] = len(vector_scores)
         requested_product_type = preference_profile.product_type
         if detail_request and subject_phrase and len(subject_phrase.split()) >= 3:
             requested_product_type = None
@@ -1686,6 +1694,19 @@ class InventoryService:
 
         if not candidates:
             return [], retrieval_stage_counts
+
+        if preference_profile.spec_requirements:
+            spec_matched_candidates = [
+                candidate
+                for candidate in candidates
+                if self._hit_satisfies_spec_requirements(candidate[0], preference_profile.spec_requirements)
+            ]
+            if spec_matched_candidates:
+                candidates = spec_matched_candidates
+            else:
+                retrieval_stage_counts["spec_filtered_candidates"] = 0
+                return [], retrieval_stage_counts
+        retrieval_stage_counts["spec_filtered_candidates"] = len(candidates)
 
         if requested_product_type:
             exact_type_candidates = [candidate for candidate in candidates if candidate[4] >= 3]
@@ -3968,11 +3989,14 @@ class InventoryService:
             filters=filters,
             products=list(hits),
         )
+        business_signals = self._load_business_signals()
         plan = self._enrich_answer_plan(
             answer_plan=reply.answer_plan,
             intent_result=intent_result,
             preference_profile=preference_profile,
             hits=hits,
+            business_signals=business_signals,
+            question=question,
             strategy=strategy,
             next_best_question=reply.follow_up_question,
         )
@@ -3992,6 +4016,8 @@ class InventoryService:
         intent_result: InventoryIntentResult,
         preference_profile: InventoryPreferenceProfile,
         hits: list[InventorySearchHit],
+        business_signals: dict[str, InventoryBusinessSignalRecord],
+        question: str,
         strategy: str | None,
         next_best_question: str | None,
     ) -> InventoryAnswerPlan:
@@ -4010,9 +4036,18 @@ class InventoryService:
                 "product_family": preference_profile.product_family,
             }
         )
-        return self.answer_planner.enrich_plan(
+        evidence_contract = self.evidence_contract_builder.build(
+            question=question,
             answer_plan=base_plan,
             hits=hits,
+            preferences=preference_profile,
+            business_signals={hit.product_id: business_signals[hit.product_id] for hit in hits if hit.product_id in business_signals},
+            next_best_question=next_best_question,
+        )
+        base_plan = base_plan.model_copy(update={"evidence_contract": evidence_contract})
+        return self.answer_planner.enrich_plan(
+            answer_plan=base_plan,
+            evidence_contract=evidence_contract,
             intent_result=intent_result,
             preferences=preference_profile,
             strategy=strategy,
@@ -4176,6 +4211,51 @@ class InventoryService:
             vector_filters["price"] = price_filter
         return vector_filters
 
+    def _build_requirement_vector_filters(self, preferences: InventoryPreferenceProfile) -> dict[str, object]:
+        vector_filters: dict[str, object] = {}
+        for requirement in preferences.spec_requirements:
+            if requirement.operator == "eq":
+                vector_filters[requirement.key] = {"$eq": requirement.value}
+            elif requirement.operator == "gte":
+                vector_filters[requirement.key] = {"$gte": requirement.value}
+        return vector_filters
+
+    def _hit_satisfies_spec_requirements(
+        self,
+        hit: InventorySearchHit,
+        requirements: tuple[InventorySpecRequirement, ...],
+    ) -> bool:
+        if not requirements:
+            return True
+        for requirement in requirements:
+            if not self._spec_requirement_satisfied(hit.metadata.get(requirement.key), requirement):
+                return False
+        return True
+
+    @staticmethod
+    def _spec_requirement_satisfied(actual: object | None, requirement: InventorySpecRequirement) -> bool:
+        if actual is None:
+            return False
+        if requirement.operator == "eq":
+            if isinstance(requirement.value, bool):
+                if isinstance(actual, bool):
+                    return actual is requirement.value
+                normalized_actual = str(actual).strip().casefold()
+                if normalized_actual in _BOOLEAN_FALSE_VALUES:
+                    return requirement.value is False
+                if normalized_actual in _BOOLEAN_TRUE_VALUES:
+                    return requirement.value is True
+                return requirement.value is True
+            return str(actual).strip().casefold() == str(requirement.value).strip().casefold()
+        if requirement.operator == "gte":
+            if isinstance(actual, bool):
+                return False
+            try:
+                return float(actual) >= float(requirement.value)
+            except (TypeError, ValueError):
+                return False
+        return False
+
     def _item_matches_filters(self, item: InventoryItemRecord, filters: InventorySearchFilters) -> bool:
         if filters.rag_only and not item.include_in_rag:
             return False
@@ -4203,6 +4283,10 @@ class InventoryService:
         return True
 
     def _build_search_hit(self, *, item: InventoryItemRecord, score: float) -> InventorySearchHit:
+        curated_metadata = self._build_curated_vector_metadata(item)
+        metadata = dict(item.metadata)
+        for key, value in curated_metadata.items():
+            metadata.setdefault(key, value)
         return InventorySearchHit(
             product_id=item.product_id,
             sku=item.sku,
@@ -4217,7 +4301,7 @@ class InventoryService:
             updated_at=item.updated_at,
             snippet=self._build_snippet(item),
             attributes=dict(item.attributes),
-            metadata=dict(item.metadata),
+            metadata=metadata,
             score=round(score, 4),
         )
 
@@ -4323,6 +4407,8 @@ class InventoryService:
 
         boolean_aliases = {
             "gps_support": ("gps",),
+            "anc_support": ("anc", "noise_cancellation", "noise_cancelling", "noise_canceling"),
+            "inverter_support": ("inverter", "inverter_support"),
             "stylus_support": ("stylus_support",),
             "voice_support": ("voice_support",),
         }
@@ -4375,6 +4461,10 @@ class InventoryService:
 
         if curated_metadata.get("gps_support") is True:
             fragments.append("gps")
+        if curated_metadata.get("anc_support") is True:
+            fragments.append("anc noise cancellation")
+        if curated_metadata.get("inverter_support") is True:
+            fragments.append("inverter")
         if curated_metadata.get("stylus_support") is True:
             fragments.append("stylus support")
         if curated_metadata.get("voice_support") is True:

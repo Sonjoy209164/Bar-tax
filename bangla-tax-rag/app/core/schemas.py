@@ -718,6 +718,57 @@ class InventorySearchResponse(BaseModel):
     hits: list[InventorySearchHit] = Field(default_factory=list)
 
 
+class InventoryFactProvenance(BaseModel):
+    source_type: Literal["catalog", "business_signal", "reranker", "inferred"]
+    source_field: str
+    source_updated_at: str | None = None
+    note: str | None = None
+
+
+class InventoryFact(BaseModel):
+    key: str
+    value: Any | None = None
+    status: Literal["present", "missing", "conflicting", "inferred"] = "present"
+    unit: str | None = None
+    provenance: list[InventoryFactProvenance] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class InventoryProductEvidence(BaseModel):
+    product_id: str
+    sku: str
+    name: str
+    category: str | None = None
+    brand: str | None = None
+    currency: str | None = None
+    price: float | None = None
+    stock: int | None = None
+    tags: list[str] = Field(default_factory=list)
+    snippet: str | None = None
+    role: Literal["primary", "alternative", "cross_sell", "rejected", "candidate"] = "candidate"
+    score: float | None = None
+    score_breakdown: dict[str, Any] = Field(default_factory=dict)
+    inclusion_reasons: list[str] = Field(default_factory=list)
+    rejection_reasons: list[str] = Field(default_factory=list)
+    facts: list[InventoryFact] = Field(default_factory=list)
+    allowed_claims: list[str] = Field(default_factory=list)
+    contradictions: list[str] = Field(default_factory=list)
+    missing_facts: list[str] = Field(default_factory=list)
+
+
+class InventoryEvidenceContract(BaseModel):
+    question: str | None = None
+    primary_product_id: str | None = None
+    primary_candidate_ids: list[str] = Field(default_factory=list)
+    rejected_candidate_ids: list[str] = Field(default_factory=list)
+    candidate_evidence: list[InventoryProductEvidence] = Field(default_factory=list)
+    required_tradeoffs: list[str] = Field(default_factory=list)
+    missing_facts: list[str] = Field(default_factory=list)
+    contradictions: list[str] = Field(default_factory=list)
+    allowed_claims: list[str] = Field(default_factory=list)
+    follow_up_question_rules: list[str] = Field(default_factory=list)
+
+
 class InventoryAnswerPlan(BaseModel):
     intent: str = "unknown"
     detected_intent: str | None = None
@@ -740,6 +791,7 @@ class InventoryAnswerPlan(BaseModel):
     confidence_breakdown: dict[str, Any] = Field(default_factory=dict)
     reasoning_steps: list[str] = Field(default_factory=list)
     metadata_used: list[str] = Field(default_factory=list)
+    evidence_contract: InventoryEvidenceContract | None = None
     abstain: bool = False
     abstention_reason: str | None = None
 

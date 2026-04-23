@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.schemas import InventoryAnswerPlan, InventorySearchHit
+from app.core.schemas import InventoryAnswerPlan, InventoryEvidenceContract, InventoryProductEvidence
 from app.inventory.intent import InventoryIntentResult
 from app.inventory.ontology import ProductOntology
 from app.inventory.preferences import InventoryPreferenceProfile
@@ -20,23 +20,23 @@ class InventoryAnswerPlanner:
         self,
         *,
         answer_plan: InventoryAnswerPlan,
-        hits: list[InventorySearchHit],
+        evidence_contract: InventoryEvidenceContract,
         intent_result: InventoryIntentResult,
         preferences: InventoryPreferenceProfile,
         strategy: str | None,
         next_best_question: str | None,
     ) -> InventoryAnswerPlan:
-        hit_by_id = {hit.product_id: hit for hit in hits}
-        primary = hit_by_id.get(answer_plan.primary_product_id or "")
+        candidate_by_id = {candidate.product_id: candidate for candidate in evidence_contract.candidate_evidence}
+        primary = candidate_by_id.get(answer_plan.primary_product_id or "")
         alternatives = [
-            hit_by_id[product_id]
+            candidate_by_id[product_id]
             for product_id in answer_plan.alternative_product_ids
-            if product_id in hit_by_id
+            if product_id in candidate_by_id
         ]
         cross_sells = [
-            hit_by_id[product_id]
+            candidate_by_id[product_id]
             for product_id in answer_plan.cross_sell_product_ids
-            if product_id in hit_by_id
+            if product_id in candidate_by_id
         ]
         plan_intent = answer_plan.intent if answer_plan.intent != "unknown" else intent_result.intent
 
@@ -59,7 +59,7 @@ class InventoryAnswerPlanner:
         risk_notes = self._build_risk_notes(
             answer_plan=answer_plan,
             primary=primary,
-            hits=hits,
+            evidence_contract=evidence_contract,
             preferences=preferences,
         )
         resolved_next_question = next_best_question or self._build_next_best_question(
@@ -75,6 +75,16 @@ class InventoryAnswerPlanner:
             reasoning_steps = self._append_unique(reasoning_steps, alternative_reason)
         if cross_sell_reason:
             reasoning_steps = self._append_unique(reasoning_steps, cross_sell_reason)
+
+        contract_follow_up_rules = list(evidence_contract.follow_up_question_rules)
+        if resolved_next_question:
+            contract_follow_up_rules = self._append_unique(contract_follow_up_rules, resolved_next_question)
+        enriched_contract = evidence_contract.model_copy(
+            update={
+                "required_tradeoffs": tradeoffs,
+                "follow_up_question_rules": contract_follow_up_rules,
+            }
+        )
 
         return answer_plan.model_copy(
             update={
@@ -94,12 +104,13 @@ class InventoryAnswerPlanner:
                 "next_best_question": resolved_next_question,
                 "confidence_breakdown": confidence_breakdown,
                 "reasoning_steps": reasoning_steps,
+                "evidence_contract": enriched_contract,
             }
         )
 
     def _build_primary_reason(
         self,
-        primary: InventorySearchHit | None,
+        primary: InventoryProductEvidence | None,
         preferences: InventoryPreferenceProfile,
     ) -> str | None:
         if primary is None:
@@ -113,8 +124,8 @@ class InventoryAnswerPlanner:
 
     def _build_alternative_reason(
         self,
-        primary: InventorySearchHit | None,
-        alternatives: list[InventorySearchHit],
+        primary: InventoryProductEvidence | None,
+        alternatives: list[InventoryProductEvidence],
     ) -> str | None:
         if primary is None or not alternatives:
             return None
@@ -131,21 +142,24 @@ class InventoryAnswerPlanner:
 
     def _build_cross_sell_reason(
         self,
-        primary: InventorySearchHit | None,
-        cross_sells: list[InventorySearchHit],
+        primary: InventoryProductEvidence | None,
+        cross_sells: list[InventoryProductEvidence],
     ) -> str | None:
         if primary is None or not cross_sells:
             return None
         cross_sell = cross_sells[0]
         relationship = self.ontology.explain_relationship(primary, cross_sell)
+        reasons = self._evidence_reasons(cross_sell)
+        if reasons:
+            return f"Cross-sell is {cross_sell.name} because {relationship} " + "; ".join(reasons[:2]) + "."
         return f"Cross-sell is {cross_sell.name} because {relationship}"
 
     def _build_tradeoffs(
         self,
         *,
-        primary: InventorySearchHit | None,
-        alternatives: list[InventorySearchHit],
-        cross_sells: list[InventorySearchHit],
+        primary: InventoryProductEvidence | None,
+        alternatives: list[InventoryProductEvidence],
+        cross_sells: list[InventoryProductEvidence],
         preferences: InventoryPreferenceProfile,
     ) -> list[str]:
         return self.tradeoff_reasoner.build_tradeoffs(
@@ -159,25 +173,30 @@ class InventoryAnswerPlanner:
         self,
         *,
         answer_plan: InventoryAnswerPlan,
-        primary: InventorySearchHit | None,
-        hits: list[InventorySearchHit],
+        primary: InventoryProductEvidence | None,
+        evidence_contract: InventoryEvidenceContract,
         preferences: InventoryPreferenceProfile,
     ) -> list[str]:
         risk_notes: list[str] = []
         if answer_plan.abstain:
             risk_notes.append(answer_plan.abstention_reason or "The plan abstains because evidence is weak.")
-        if not hits:
+        if not evidence_contract.candidate_evidence:
             risk_notes.append("No retrieved catalog evidence is available for this answer.")
-        if primary is None and hits:
+        if primary is None and evidence_contract.candidate_evidence:
             risk_notes.append("No primary product was selected even though retrieval returned candidates.")
+        risk_notes.extend(evidence_contract.missing_facts[:3])
+        risk_notes.extend(evidence_contract.contradictions[:2])
         if primary is not None:
             final_score = self._evidence_number(primary, "final_score")
             if final_score is not None and final_score < 0.35:
                 risk_notes.append(f"{primary.name} has a weak ecommerce fit score.")
-            if primary.price is None:
+            if self._fact_value(primary, "price") is None:
                 risk_notes.append(f"{primary.name} has no listed price.")
-            if primary.stock is None:
+            stock_fact = self._fact(primary, "stock")
+            if stock_fact is None or stock_fact.status == "missing":
                 risk_notes.append(f"{primary.name} has no listed stock quantity.")
+            if stock_fact is not None and stock_fact.status == "conflicting":
+                risk_notes.append(f"{primary.name} has conflicting stock data across catalog and business snapshot.")
             if preferences.product_type:
                 primary_type = self.ontology.detect_product_type(product=primary)
                 if primary_type and primary_type != preferences.product_type:
@@ -189,9 +208,9 @@ class InventoryAnswerPlanner:
     def _build_confidence_breakdown(
         self,
         *,
-        primary: InventorySearchHit | None,
-        alternatives: list[InventorySearchHit],
-        cross_sells: list[InventorySearchHit],
+        primary: InventoryProductEvidence | None,
+        alternatives: list[InventoryProductEvidence],
+        cross_sells: list[InventoryProductEvidence],
         intent_result: InventoryIntentResult,
         preferences: InventoryPreferenceProfile,
     ) -> dict[str, Any]:
@@ -222,7 +241,7 @@ class InventoryAnswerPlanner:
         *,
         intent: str,
         preferences: InventoryPreferenceProfile,
-        primary: InventorySearchHit | None,
+        primary: InventoryProductEvidence | None,
     ) -> str | None:
         if intent in {"small_talk", "support_no_match", "sales_no_match"}:
             return "What product type, category, budget, or brand should I focus on?"
@@ -234,8 +253,8 @@ class InventoryAnswerPlanner:
             return f"Do you want a cheaper fallback, a premium step-up, or an add-on for {primary.name}?"
         return None
 
-    def _score_summary(self, hit: InventorySearchHit) -> dict[str, Any]:
-        scores = hit.evidence_scores or {}
+    def _score_summary(self, evidence: InventoryProductEvidence) -> dict[str, Any]:
+        scores = evidence.score_breakdown or {}
         keys = (
             "final_score",
             "semantic_score",
@@ -246,6 +265,7 @@ class InventoryAnswerPlanner:
             "price_fit",
             "stock_fit",
             "metadata_match",
+            "structured_spec_match",
             "unrelated_category_penalty",
             "out_of_stock_penalty",
         )
@@ -254,29 +274,32 @@ class InventoryAnswerPlanner:
             summary["reasons"] = scores["reasons"]
         return summary
 
-    def _evidence_reasons(self, hit: InventorySearchHit) -> list[str]:
-        reasons = hit.evidence_scores.get("reasons") if hit.evidence_scores else None
-        return [reason for reason in reasons if isinstance(reason, str)] if isinstance(reasons, list) else []
+    @staticmethod
+    def _evidence_reasons(evidence: InventoryProductEvidence) -> list[str]:
+        return list(evidence.inclusion_reasons)
 
-    def _price_relationship(self, primary: InventorySearchHit, candidate: InventorySearchHit) -> str | None:
-        if primary.price is None or candidate.price is None:
+    def _price_relationship(self, primary: InventoryProductEvidence, candidate: InventoryProductEvidence) -> str | None:
+        primary_price = self._fact_value(primary, "price")
+        candidate_price = self._fact_value(candidate, "price")
+        if primary_price is None or candidate_price is None:
             return None
-        if candidate.price < primary.price:
+        if candidate_price < primary_price:
             return f"it is cheaper than {primary.name} at {self._format_price(candidate)} versus {self._format_price(primary)}"
-        if candidate.price > primary.price:
+        if candidate_price > primary_price:
             return f"it is a step-up from {primary.name} at {self._format_price(candidate)} versus {self._format_price(primary)}"
         return f"it is priced the same as {primary.name} at {self._format_price(candidate)}"
 
-    @staticmethod
-    def _format_price(hit: InventorySearchHit) -> str:
-        if hit.price is None:
+    def _format_price(self, evidence: InventoryProductEvidence) -> str:
+        price = self._fact_value(evidence, "price")
+        currency = self._fact_unit(evidence, "price") or "USD"
+        if price is None:
             return "price not listed"
-        return f"{hit.currency or 'USD'} {hit.price:.2f}"
+        return f"{currency} {price:.2f}"
 
     @staticmethod
-    def _evidence_number(hit: InventorySearchHit, key: str) -> float | None:
-        value = hit.evidence_scores.get(key) if hit.evidence_scores else None
-        return float(value) if isinstance(value, int | float) else None
+    def _evidence_number(evidence: InventoryProductEvidence, key: str) -> float | None:
+        value = evidence.score_breakdown.get(key) if evidence.score_breakdown else None
+        return float(value) if isinstance(value, (int, float)) else None
 
     @staticmethod
     def _append_unique(values: list[str], value: str) -> list[str]:
@@ -294,3 +317,18 @@ class InventoryAnswerPlanner:
             seen.add(value)
             deduped.append(value)
         return deduped
+
+    @staticmethod
+    def _fact(evidence: InventoryProductEvidence, key: str):
+        for fact in evidence.facts:
+            if fact.key == key:
+                return fact
+        return None
+
+    def _fact_value(self, evidence: InventoryProductEvidence, key: str) -> Any | None:
+        fact = self._fact(evidence, key)
+        return fact.value if fact is not None and fact.status == "present" else None
+
+    def _fact_unit(self, evidence: InventoryProductEvidence, key: str) -> str | None:
+        fact = self._fact(evidence, key)
+        return fact.unit if fact is not None else None

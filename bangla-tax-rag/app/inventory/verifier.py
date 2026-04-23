@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from itertools import combinations
 
-from app.core.schemas import InventoryAnswerPlan, InventoryAnswerVerification, InventorySearchHit
+from app.core.schemas import InventoryAnswerPlan, InventoryEvidenceContract, InventoryAnswerVerification, InventorySearchHit
 from app.inventory.ontology import ProductOntology, normalize_inventory_text
 
 
@@ -55,13 +55,14 @@ class InventoryFinalAnswerVerifier:
     ) -> InventoryAnswerVerification:
         normalized_answer = normalize_inventory_text(answer)
         hit_by_id = {hit.product_id: hit for hit in hits}
+        contract = answer_plan.evidence_contract
         issues: list[str] = []
 
         issues.extend(self._check_excluded_products(normalized_answer, answer_plan, hit_by_id))
         issues.extend(self._check_invented_product_names(answer, hits))
-        issues.extend(self._check_prices(answer, hits))
-        issues.extend(self._check_stock(answer, hits))
-        issues.extend(self._check_unsupported_claims(normalized_answer, hits))
+        issues.extend(self._check_prices(answer, hits, contract))
+        issues.extend(self._check_stock(answer, hits, contract))
+        issues.extend(self._check_unsupported_claims(normalized_answer, contract, hits))
         issues.extend(self._check_abstention(normalized_answer, answer_plan))
         issues.extend(self._check_cross_sell_boundary(normalized_answer, answer_plan, hit_by_id))
         issues.extend(self._check_near_alternative_caveats(normalized_answer, answer_plan, hit_by_id))
@@ -107,11 +108,16 @@ class InventoryFinalAnswerVerifier:
                 issues.append(f"Final answer may contain unsupported product name: {phrase.strip()}.")
         return issues
 
-    def _check_prices(self, answer: str, hits: list[InventorySearchHit]) -> list[str]:
+    def _check_prices(
+        self,
+        answer: str,
+        hits: list[InventorySearchHit],
+        contract: InventoryEvidenceContract | None,
+    ) -> list[str]:
         mentioned_prices = self._extract_prices(answer)
         if not mentioned_prices:
             return []
-        supported_prices = {round(hit.price, 2) for hit in hits if hit.price is not None}
+        supported_prices = self._supported_prices(contract, hits)
         for first, second in combinations(sorted(supported_prices), 2):
             supported_prices.add(round(abs(first - second), 2))
         issues: list[str] = []
@@ -120,7 +126,12 @@ class InventoryFinalAnswerVerifier:
                 issues.append(f"Final answer mentions unsupported price amount {price:.2f}.")
         return issues
 
-    def _check_stock(self, answer: str, hits: list[InventorySearchHit]) -> list[str]:
+    def _check_stock(
+        self,
+        answer: str,
+        hits: list[InventorySearchHit],
+        contract: InventoryEvidenceContract | None,
+    ) -> list[str]:
         stock_mentions = [
             int(match.group(1))
             for match in re.finditer(
@@ -135,14 +146,24 @@ class InventoryFinalAnswerVerifier:
         )
         if not stock_mentions:
             return []
-        supported_stock = {hit.stock for hit in hits if hit.stock is not None}
+        supported_stock = self._supported_stock(contract, hits)
         issues: list[str] = []
         for stock in stock_mentions:
             if stock not in supported_stock:
                 issues.append(f"Final answer mentions unsupported stock quantity {stock}.")
         return issues
 
-    def _check_unsupported_claims(self, normalized_answer: str, hits: list[InventorySearchHit]) -> list[str]:
+    def _check_unsupported_claims(
+        self,
+        normalized_answer: str,
+        contract: InventoryEvidenceContract | None,
+        hits: list[InventorySearchHit],
+    ) -> list[str]:
+        normalized_allowed_claims = (
+            normalize_inventory_text(" ".join(contract.allowed_claims))
+            if contract is not None and contract.allowed_claims
+            else ""
+        )
         evidence_text = normalize_inventory_text(
             " ".join(
                 " ".join(
@@ -163,7 +184,9 @@ class InventoryFinalAnswerVerifier:
         )
         issues: list[str] = []
         for claim in self.SUSPICIOUS_UNSUPPORTED_CLAIMS:
-            if claim in normalized_answer and claim not in evidence_text:
+            allowed = claim in normalized_allowed_claims if normalized_allowed_claims else False
+            supported_by_hits = claim in evidence_text
+            if claim in normalized_answer and not allowed and not supported_by_hits:
                 issues.append(f"Final answer contains unsupported claim: {claim}.")
         return issues
 
@@ -241,11 +264,13 @@ class InventoryFinalAnswerVerifier:
         )
 
     @staticmethod
-    def _mention_window(normalized_answer: str, normalized_name: str, *, radius: int = 90) -> str:
-        index = normalized_answer.find(normalized_name)
+    def _mention_window(normalized_answer: str, phrase: str, radius: int = 96) -> str:
+        if not phrase:
+            return normalized_answer[:radius]
+        index = normalized_answer.find(phrase)
         if index < 0:
-            return ""
-        return normalized_answer[max(0, index - radius): index + len(normalized_name) + radius]
+            return normalized_answer
+        return normalized_answer[max(0, index - radius): index + len(phrase) + radius]
 
     @staticmethod
     def _dedupe(issues: list[str]) -> list[str]:
@@ -257,3 +282,37 @@ class InventoryFinalAnswerVerifier:
             seen.add(issue)
             deduped.append(issue)
         return deduped
+
+    def _supported_prices(
+        self,
+        contract: InventoryEvidenceContract | None,
+        hits: list[InventorySearchHit],
+    ) -> set[float]:
+        supported = {round(hit.price, 2) for hit in hits if hit.price is not None}
+        if contract is None:
+            return supported
+        for candidate in contract.candidate_evidence:
+            for fact in candidate.facts:
+                if fact.key == "price" and fact.status == "present" and isinstance(fact.value, (int, float)):
+                    supported.add(round(float(fact.value), 2))
+        return supported
+
+    def _supported_stock(
+        self,
+        contract: InventoryEvidenceContract | None,
+        hits: list[InventorySearchHit],
+    ) -> set[int]:
+        supported = {hit.stock for hit in hits if hit.stock is not None}
+        if contract is None:
+            return supported
+        for candidate in contract.candidate_evidence:
+            for fact in candidate.facts:
+                if fact.key != "stock":
+                    continue
+                if fact.status == "present" and isinstance(fact.value, int):
+                    supported.add(int(fact.value))
+                if fact.status == "conflicting" and isinstance(fact.value, dict):
+                    for value in fact.value.values():
+                        if isinstance(value, int):
+                            supported.add(value)
+        return supported

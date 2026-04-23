@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.inventory.ontology import ProductOntology, normalize_inventory_text
-from app.inventory.preferences import InventoryPreferenceProfile
+from app.inventory.preferences import InventoryPreferenceProfile, InventorySpecRequirement
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,7 @@ class ProductEvidenceScore:
     price_fit: float = 0.0
     stock_fit: float = 0.0
     metadata_match: float = 0.0
+    structured_spec_match: float = 0.0
     premium_fit: float = 0.0
     budget_fit: float = 0.0
     unrelated_category_penalty: float = 0.0
@@ -40,6 +41,7 @@ class ProductEvidenceScore:
             "price_fit": self.price_fit,
             "stock_fit": self.stock_fit,
             "metadata_match": self.metadata_match,
+            "structured_spec_match": self.structured_spec_match,
             "premium_fit": self.premium_fit,
             "budget_fit": self.budget_fit,
             "unrelated_category_penalty": self.unrelated_category_penalty,
@@ -105,6 +107,7 @@ class EcommerceReranker:
         price_fit = self._price_fit(product, preferences)
         stock_fit = self._stock_fit(product)
         metadata_match = self._metadata_match(searchable_text, preferences)
+        structured_spec_match = self._structured_spec_match(product, preferences)
         premium_fit = self._premium_fit(searchable_text, preferences)
         budget_fit = self._budget_fit(product, preferences)
         unrelated_category_penalty = self._unrelated_category_penalty(
@@ -120,18 +123,19 @@ class EcommerceReranker:
         )
 
         raw_score = (
-            (normalized_semantic * 0.18)
-            + (normalized_lexical * 0.2)
+            (normalized_semantic * 0.15)
+            + (normalized_lexical * 0.14)
             + (normalized_exact_name * 0.12)
             + (normalized_exact_sku * 0.14)
-            + (product_type_match * 0.2)
-            + (family_match * 0.1)
+            + (product_type_match * 0.18)
+            + (family_match * 0.08)
             + (category_match * 0.08)
             + (brand_match * 0.05)
-            + (price_fit * 0.08)
-            + (stock_fit * 0.04)
+            + (price_fit * 0.07)
+            + (stock_fit * 0.03)
             + (metadata_match * 0.04)
-            + (premium_fit * 0.03)
+            + (structured_spec_match * 0.18)
+            + (premium_fit * 0.02)
             + (budget_fit * 0.03)
             - unrelated_category_penalty
             - out_of_stock_penalty
@@ -150,6 +154,7 @@ class EcommerceReranker:
             price_fit=round(price_fit, 4),
             stock_fit=round(stock_fit, 4),
             metadata_match=round(metadata_match, 4),
+            structured_spec_match=round(structured_spec_match, 4),
             premium_fit=round(premium_fit, 4),
             budget_fit=round(budget_fit, 4),
             unrelated_category_penalty=round(unrelated_category_penalty, 4),
@@ -166,6 +171,7 @@ class EcommerceReranker:
                 price_fit=price_fit,
                 stock_fit=stock_fit,
                 metadata_match=metadata_match,
+                structured_spec_match=structured_spec_match,
                 unrelated_category_penalty=unrelated_category_penalty,
             ),
         )
@@ -183,6 +189,7 @@ class EcommerceReranker:
         price_fit: float,
         stock_fit: float,
         metadata_match: float,
+        structured_spec_match: float,
         unrelated_category_penalty: float,
     ) -> tuple[str, ...]:
         reasons: list[str] = []
@@ -202,6 +209,8 @@ class EcommerceReranker:
             reasons.append("price is inside requested budget")
         if stock_fit >= 1.0:
             reasons.append("in stock")
+        if structured_spec_match > 0:
+            reasons.append("structured specs satisfy the request")
         if metadata_match > 0:
             reasons.append("metadata/features match requested need")
         if unrelated_category_penalty > 0:
@@ -256,6 +265,50 @@ class EcommerceReranker:
             if any(term in searchable_text for term in terms):
                 matched += 1
         return matched / len(requirements)
+
+    def _structured_spec_match(self, product: object, preferences: InventoryPreferenceProfile) -> float:
+        scores: list[float] = []
+
+        for requirement in preferences.spec_requirements:
+            scores.append(self._spec_requirement_score(product, requirement))
+
+        if "battery_life" in preferences.feature_requirements and not any(
+            requirement.key == "battery_hours" for requirement in preferences.spec_requirements
+        ):
+            battery_hours = self._numeric_metadata(product, "battery_hours")
+            if battery_hours is not None:
+                scores.append(self._clamp(battery_hours / 16.0))
+
+        if not scores:
+            return 0.0
+        return sum(scores) / len(scores)
+
+    def _spec_requirement_score(self, product: object, requirement: InventorySpecRequirement) -> float:
+        actual = self._metadata_value(product, requirement.key)
+        if actual is None:
+            return 0.0
+        if requirement.operator == "eq":
+            if isinstance(requirement.value, bool):
+                actual_bool = self._bool_value(actual)
+                return 1.0 if actual_bool is requirement.value else 0.0
+            if isinstance(requirement.value, str):
+                return 1.0 if normalize_inventory_text(str(actual)) == normalize_inventory_text(requirement.value) else 0.0
+            actual_number = self._number_from_value(actual)
+            expected_number = self._number_from_value(requirement.value)
+            if actual_number is None or expected_number is None:
+                return 0.0
+            return 1.0 if actual_number == expected_number else 0.0
+        if requirement.operator == "gte":
+            actual_number = self._number_from_value(actual)
+            expected_number = self._number_from_value(requirement.value)
+            if actual_number is None or expected_number is None:
+                return 0.0
+            if actual_number < expected_number:
+                return 0.0
+            overage = max(actual_number - expected_number, 0.0)
+            slack_ratio = overage / max(expected_number, 1.0)
+            return self._clamp(1.0 - min(0.35, slack_ratio * 0.35))
+        return 0.0
 
     def _premium_fit(self, searchable_text: str, preferences: InventoryPreferenceProfile) -> float:
         if preferences.quality_level != "premium":
@@ -341,6 +394,40 @@ class EcommerceReranker:
         if isinstance(value, int | float):
             return float(value)
         return None
+
+    @staticmethod
+    def _metadata_value(product: object, key: str) -> Any:
+        metadata = getattr(product, "metadata", None)
+        if isinstance(metadata, dict) and key in metadata:
+            return metadata.get(key)
+        attributes = getattr(product, "attributes", None)
+        if isinstance(attributes, dict) and key in attributes:
+            return attributes.get(key)
+        return None
+
+    @staticmethod
+    def _number_from_value(value: Any) -> float | None:
+        if isinstance(value, bool) or value is None:
+            return None
+        if isinstance(value, int | float):
+            return float(value)
+        try:
+            return float(str(value))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _bool_value(value: Any) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        normalized = normalize_inventory_text(str(value))
+        if not normalized:
+            return None
+        if normalized in {"false", "no", "off", "unsupported", "not supported", "none", "0"}:
+            return False
+        if normalized in {"true", "yes", "on", "supported", "available", "included", "1"}:
+            return True
+        return True
 
     @staticmethod
     def _clamp(value: float) -> float:

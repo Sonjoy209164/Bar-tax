@@ -65,6 +65,15 @@ class SpecKeywordEmbedder(TextEmbedder):
         "creator",
         "business",
         "ultrabook",
+        "battery",
+        "life",
+        "hours",
+        "gps",
+        "watch",
+        "earbuds",
+        "anc",
+        "noise",
+        "inverter",
     ]
 
     def embed_texts(self, texts: list[str]) -> EmbeddingBatch:
@@ -165,6 +174,8 @@ def test_inventory_vector_record_normalizes_curated_spec_metadata(tmp_path) -> N
             "connectivity": "Wi-Fi 6 and Bluetooth",
             "water_resistance": "10ATM",
             "gps": "multi-band",
+            "anc": "yes",
+            "inverter": "yes",
             "stylus_support": "yes",
         },
         metadata={
@@ -175,6 +186,8 @@ def test_inventory_vector_record_normalizes_curated_spec_metadata(tmp_path) -> N
                 "connectivity": "Wi-Fi 6 and Bluetooth",
                 "water_resistance": "10ATM",
                 "gps": "multi-band",
+                "anc": True,
+                "inverter": True,
                 "stylus_support": True,
             }
         },
@@ -189,11 +202,15 @@ def test_inventory_vector_record_normalizes_curated_spec_metadata(tmp_path) -> N
     assert record.metadata["connectivity"] == "wi fi 6 and bluetooth"
     assert record.metadata["water_resistance"] == "10atm"
     assert record.metadata["gps_support"] is True
+    assert record.metadata["anc_support"] is True
+    assert record.metadata["inverter_support"] is True
     assert record.metadata["gps_mode"] == "multi band"
     assert record.metadata["stylus_support"] is True
     assert "32 gb ram" in (record.text or "")
     assert "1024 gb storage" in (record.text or "")
     assert "16 inch screen" in (record.text or "")
+    assert "anc noise cancellation" in (record.text or "")
+    assert "inverter" in (record.text or "")
 
 
 def test_inventory_search_uses_normalized_spec_aliases_for_vector_matches(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -263,6 +280,172 @@ def test_inventory_search_uses_normalized_spec_aliases_for_vector_matches(tmp_pa
         "creator-512gb",
         "business-14",
     ]
+
+
+def test_inventory_search_uses_structured_specs_for_battery_life_reranking(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_spec_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="battery-hero",
+                sku="CMP-LTP-990",
+                name="TravelMate LongRun",
+                category="Computing",
+                brand="TravelMate",
+                short_description="Compact travel laptop for all day work.",
+                price=1299.0,
+                currency="USD",
+                stock=8,
+                status="Active",
+                tags=["laptop", "travel"],
+                attributes={"battery_hours": "14"},
+                metadata={"raw_attributes": {"battery_hours": 14}},
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="battery-noisy",
+                sku="CMP-LTP-991",
+                name="TravelMate Buzz",
+                category="Computing",
+                brand="TravelMate",
+                short_description="Battery life battery life battery life laptop for marketing copy.",
+                price=1249.0,
+                currency="USD",
+                stock=8,
+                status="Active",
+                tags=["laptop", "travel"],
+                attributes={"battery_hours": "6"},
+                metadata={"raw_attributes": {"battery_hours": 6}},
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    response = service.search(
+        InventorySearchRequest(
+            query_text="recommend a laptop with good battery life",
+            top_k=3,
+        )
+    )
+
+    assert response.hits[0].product_id == "battery-hero"
+    assert response.hits[0].evidence_scores["structured_spec_match"] > response.hits[1].evidence_scores["structured_spec_match"]
+
+
+def test_inventory_search_hard_filters_numeric_spec_requirements_before_reranking(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_spec_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="laptop-8-256",
+                sku="CMP-LTP-801",
+                name="CompactBook 13",
+                category="Computing",
+                brand="CompactBook",
+                short_description="Portable laptop for daily work.",
+                price=899.0,
+                currency="USD",
+                stock=10,
+                status="Active",
+                tags=["laptop", "portable"],
+                attributes={"ram": "8GB", "storage": "256GB SSD"},
+                metadata={"raw_attributes": {"ram": "8GB", "storage": "256GB SSD"}},
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="laptop-16-512",
+                sku="CMP-LTP-802",
+                name="CompactBook 14 Pro",
+                category="Computing",
+                brand="CompactBook",
+                short_description="Portable laptop for demanding work.",
+                price=1199.0,
+                currency="USD",
+                stock=7,
+                status="Active",
+                tags=["laptop", "portable"],
+                attributes={"ram": "16GB", "storage": "512GB SSD"},
+                metadata={"raw_attributes": {"ram": "16GB", "storage": "512GB SSD"}},
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="laptop-16-1tb",
+                sku="CMP-LTP-803",
+                name="CompactBook 15 Ultra",
+                category="Computing",
+                brand="CompactBook",
+                short_description="Portable laptop for creative workloads.",
+                price=1499.0,
+                currency="USD",
+                stock=5,
+                status="Active",
+                tags=["laptop", "portable"],
+                attributes={"ram": "16GB", "storage": "1TB SSD"},
+                metadata={"raw_attributes": {"ram": "16GB", "storage": "1TB SSD"}},
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    response, retrieval_stage_counts = service._search_with_diagnostics(
+        InventorySearchRequest(
+            query_text="show laptops with 16GB RAM and 1TB storage",
+            top_k=5,
+        )
+    )
+
+    assert [hit.product_id for hit in response.hits] == ["laptop-16-1tb"]
+    assert retrieval_stage_counts["spec_filtered_candidates"] == 1
+
+
+def test_inventory_search_hard_filters_boolean_spec_requirements_before_reranking(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_spec_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="earbuds-anc",
+                sku="AUD-EBD-401",
+                name="QuietBuds ANC",
+                category="Audio",
+                brand="QuietBuds",
+                short_description="Wireless earbuds with active noise cancellation.",
+                price=149.0,
+                currency="USD",
+                stock=14,
+                status="Active",
+                tags=["earbuds", "wireless", "audio"],
+                attributes={"anc": "yes", "battery_hours": "8"},
+                metadata={"raw_attributes": {"anc": True, "battery_hours": 8}},
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="earbuds-basic",
+                sku="AUD-EBD-402",
+                name="QuietBuds Lite",
+                category="Audio",
+                brand="QuietBuds",
+                short_description="Wireless earbuds for everyday listening.",
+                price=99.0,
+                currency="USD",
+                stock=18,
+                status="Active",
+                tags=["earbuds", "wireless", "audio"],
+                attributes={"anc": "no", "battery_hours": "10"},
+                metadata={"raw_attributes": {"anc": False, "battery_hours": 10}},
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    response, retrieval_stage_counts = service._search_with_diagnostics(
+        InventorySearchRequest(
+            query_text="show noise cancelling earbuds",
+            top_k=5,
+        )
+    )
+
+    assert [hit.product_id for hit in response.hits] == ["earbuds-anc"]
+    assert retrieval_stage_counts["spec_filtered_candidates"] == 1
 
 
 def test_inventory_search_recovers_compact_sku_aliases_for_exact_lookup(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -2136,6 +2319,14 @@ async def test_inventory_agentic_uses_business_signals_for_restock_reasoning(
     assert "sold quantity 64" in payload["answer"]
     assert "supplier lead time 21 day(s)" in payload["answer"]
     assert not any("Missing data domain" in fact for fact in payload["missing_facts"])
+    evidence_contract = payload["answer_plan"]["evidence_contract"]
+    primary_candidate = next(
+        candidate for candidate in evidence_contract["candidate_evidence"] if candidate["product_id"] == "prod-mic"
+    )
+    fact_by_key = {fact["key"]: fact for fact in primary_candidate["facts"]}
+    assert fact_by_key["demand_score"]["value"] == pytest.approx(0.91)
+    assert fact_by_key["gross_margin_rate"]["value"] == pytest.approx(0.33)
+    assert fact_by_key["supplier_lead_time_days"]["value"] == 21
 
     assert trace_response.status_code == 200
     trace_payload = trace_response.json()

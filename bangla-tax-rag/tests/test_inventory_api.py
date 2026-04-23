@@ -1552,11 +1552,23 @@ async def test_inventory_route_prefers_normal_rag_for_direct_catalog_question(mo
     assert response.status_code == 200
     payload = response.json()
     assert payload["recommended_path"] == "normal_rag"
+    assert payload["policy_version"] == "inventory-contract-v1"
     assert payload["normal_rag_contract"]["implementation_status"] == "implemented"
     assert payload["agentic_contract"]["implementation_status"] == "implemented"
     assert payload["agentic_contract"]["endpoint"] == "/inventory/agentic/ask"
     assert payload["signals"]["detected_intent"] == "product_search"
     assert payload["signals"]["question_family"] == "exact_lookup"
+    assert payload["family_contract"]["family"] == "exact_lookup"
+    assert payload["family_contract"]["reasoning_mode"] == "deterministic"
+    assert payload["family_contract"]["canonical_eval_case_ids"] == [
+        "exact-product-detail",
+        "lexical-miss-recovery",
+        "alias-recovery",
+    ]
+    assert any(
+        trigger["trigger_id"] == "exact_lookup_without_catalog_match"
+        for trigger in payload["applicable_hard_abstain_triggers"]
+    )
     assert payload["signals"]["family_confidence"] >= 0.78
     assert payload["signals"]["simple_catalog_lookup"] is True
     assert "catalog/support question" in payload["reason_summary"].lower()
@@ -1616,6 +1628,13 @@ async def test_inventory_route_classifies_diagnosis_question_family(monkeypatch:
     assert payload["recommended_path"] == "agentic"
     assert payload["signals"]["question_family"] == "diagnosis_root_cause"
     assert payload["signals"]["detected_intent"] == "business_analysis"
+    assert payload["family_contract"]["family"] == "diagnosis_root_cause"
+    assert payload["family_contract"]["default_execution_path"] == "agentic"
+    assert payload["family_contract"]["reasoning_mode"] == "bounded_agentic"
+    assert any(
+        trigger["trigger_id"] == "missing_required_data_domains"
+        for trigger in payload["applicable_hard_abstain_triggers"]
+    )
     assert payload["signals"]["family_confidence"] >= 0.84
     assert payload["signals"]["needs_root_cause_reasoning"] is True
 
@@ -2362,6 +2381,7 @@ async def test_inventory_routes_are_present_in_openapi(monkeypatch: pytest.Monke
     assert "/inventory/agentic/ask" in paths
     assert "/inventory/agentic/ask/stream" in paths
     assert "/inventory/items/upsert" in paths
+    assert "/inventory/policy" in paths
     assert "/inventory/search" in paths
     assert "/inventory/route" in paths
     assert "/inventory/sync/status" in paths
@@ -2370,6 +2390,7 @@ async def test_inventory_routes_are_present_in_openapi(monkeypatch: pytest.Monke
     assert "/inventory/production/status" in paths
     assert "/inventory/business/status" in paths
     assert "/inventory/business/signals" in paths
+    assert "/inventory/business/signals/delete" in paths
     assert "/inventory/business/signals/upsert" in paths
     assert "/inventory/chat/trace/{trace_id}" in paths
     assert "/inventory/ask" in paths
@@ -2556,6 +2577,56 @@ async def test_inventory_business_signal_endpoints(monkeypatch: pytest.MonkeyPat
     assert list_payload["total_signals"] == 1
     assert list_payload["signals"][0]["product_id"] == "prod-mic"
     assert list_payload["signals"][0]["customer_segments"] == ["podcasters", "webinar teams"]
+
+
+@pytest.mark.anyio
+async def test_inventory_business_signal_delete_endpoint(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.api import routes_inventory
+
+    service = _build_inventory_service(tmp_path)
+    monkeypatch.setattr(routes_inventory, "get_inventory_service", lambda: service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/inventory/business/signals/upsert",
+            json={
+                "signals": [
+                    {
+                        "product_id": "prod-mic",
+                        "period_end": "2026-04-15",
+                        "units_sold": 64,
+                        "inventory_on_hand": 2,
+                    },
+                    {
+                        "product_id": "prod-speaker",
+                        "period_end": "2026-04-15",
+                        "units_sold": 18,
+                        "inventory_on_hand": 11,
+                    },
+                ]
+            },
+        )
+        delete_response = await client.post(
+            "/inventory/business/signals/delete",
+            json={"product_ids": ["prod-mic"]},
+        )
+        list_response = await client.get("/inventory/business/signals")
+        status_response = await client.get("/inventory/business/status")
+
+    assert delete_response.status_code == 200
+    delete_payload = delete_response.json()
+    assert delete_payload["deleted_count"] == 1
+    assert delete_payload["total_signals"] == 1
+
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    assert list_payload["total_signals"] == 1
+    assert list_payload["signals"][0]["product_id"] == "prod-speaker"
+
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["total_signals"] == 1
+    assert status_payload["product_count"] == 1
 
 
 @pytest.mark.anyio

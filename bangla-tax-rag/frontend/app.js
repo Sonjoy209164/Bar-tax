@@ -25,6 +25,20 @@ const state = {
   focusedProductIds: [],
   activeFilters: null,
   lastAnswerPlan: null,
+  debugSessions: [],
+  sampleSyncState: {
+    checking: false,
+    syncing: false,
+    done: false,
+    itemsSynced: false,
+    signalsSynced: null,
+    needsReset: false,
+    existingItemCount: 0,
+    existingSignalCount: 0,
+    extraItemCount: 0,
+    extraSignalCount: 0,
+    message: "Sample JSON has not been synced to this backend yet."
+  },
   busy: false
 };
 
@@ -61,6 +75,8 @@ const elements = {
   messages: document.querySelector("#messages"),
   chatForm: document.querySelector("#chatForm"),
   questionInput: document.querySelector("#questionInput"),
+  clearDebugSessionsButton: document.querySelector("#clearDebugSessionsButton"),
+  turnDebugSessions: document.querySelector("#turnDebugSessions"),
   lastTraceId: document.querySelector("#lastTraceId"),
   runTestsButton: document.querySelector("#runTestsButton"),
   testResults: document.querySelector("#testResults"),
@@ -85,10 +101,13 @@ async function boot() {
     wireEvents();
     await loadLocalConfig();
     applySettingsToInputs();
+    renderSyncCatalogButtonState();
     renderStatusCards();
     await loadSampleData();
+    renderSyncCatalogButtonState();
     renderProducts();
     renderFocusedProducts();
+    renderDebugSessions();
     resetRouteSummary();
     addMessage(
       "bot",
@@ -116,6 +135,7 @@ function wireEvents() {
   elements.loadConfigButtonSecondary.addEventListener("click", () => void loadRuntimeConfig());
   elements.clearFocusButton.addEventListener("click", clearFocusedProducts);
   elements.chatForm.addEventListener("submit", askFromForm);
+  elements.clearDebugSessionsButton.addEventListener("click", clearDebugSessions);
   elements.runTestsButton.addEventListener("click", () => void runQualityTests());
   elements.loadTraceButton.addEventListener("click", () => void loadTrace(state.lastTraceId));
 }
@@ -161,6 +181,7 @@ function applySettingsToInputs() {
 }
 
 function saveSettings() {
+  const previousBaseUrl = state.apiBaseUrl;
   state.apiBaseUrl = normalizeBaseUrl(elements.apiBaseUrl.value);
   state.apiKey = elements.apiKey.value.trim();
   state.dataDomains = elements.availableDomains.value.trim() || DEFAULT_DATA_DOMAINS.join(", ");
@@ -172,6 +193,22 @@ function saveSettings() {
     sessionStorage.setItem("inventoryDemo.apiKey", state.apiKey);
   } else {
     sessionStorage.removeItem("inventoryDemo.apiKey");
+  }
+  if (previousBaseUrl !== state.apiBaseUrl) {
+    state.sampleSyncState = {
+      checking: false,
+      syncing: false,
+      done: false,
+      itemsSynced: false,
+      signalsSynced: null,
+      needsReset: false,
+      existingItemCount: 0,
+      existingSignalCount: 0,
+      extraItemCount: 0,
+      extraSignalCount: 0,
+      message: "Backend changed. Sample sync state needs to be checked again."
+    };
+    renderSyncCatalogButtonState();
   }
   setConnection("neutral", "Settings saved", "API settings are stored in this browser tab session.");
 }
@@ -189,7 +226,10 @@ async function checkStatus(options = {}) {
       if (!catalog.unavailable) {
         state.liveCatalog = catalog.items || [];
         renderProducts();
+        await refreshSampleSyncState({ catalog });
       }
+    } else {
+      await refreshSampleSyncState();
     }
 
     const inventoryStatus = snapshot.inventoryStatus;
@@ -342,6 +382,7 @@ async function loadBackendCatalog(options = {}) {
     const catalog = await apiGet("/inventory/items");
     state.liveCatalog = catalog.items || [];
     renderProducts();
+    await refreshSampleSyncState({ catalog });
     setConnection(
       "good",
       "Backend catalog loaded",
@@ -356,15 +397,47 @@ async function loadBackendCatalog(options = {}) {
 async function syncSampleData() {
   saveSettings();
   await withBusy(async () => {
-    const upsertCatalog = await apiPost("/inventory/items/upsert", { items: state.sampleData.items });
+    await refreshSampleSyncState(
+      state.liveCatalog.length ? { catalog: { items: state.liveCatalog } } : {}
+    );
+    if (state.sampleSyncState.done) {
+      setConnection("neutral", "Sample already synced", state.sampleSyncState.message);
+      elements.traceOutput.textContent = JSON.stringify(
+        {
+          sample_sync_state: state.sampleSyncState,
+          note: "Sample JSON sync is locked because this sample version is already present on the current backend."
+        },
+        null,
+        2
+      );
+      return;
+    }
+
+    state.sampleSyncState = {
+      ...state.sampleSyncState,
+      syncing: true,
+      message: "Syncing sample data to the current backend."
+    };
+    renderSyncCatalogButtonState();
+
+    const upsertCatalog = await apiPost("/inventory/items/upsert", { items: buildSampleSyncItemsPayload() });
     const upsertBusiness = await optionalApiPost("/inventory/business/signals/upsert", {
-      signals: state.sampleData.business_signals || []
+      signals: buildSampleSyncBusinessSignalsPayload()
     });
     const syncStatus = await optionalApiGet("/inventory/sync/status");
     const catalog = await apiGet("/inventory/items");
+    const businessSignals = await optionalApiGet("/inventory/business/signals");
     state.liveCatalog = catalog.items || [];
     renderProducts();
     renderStatusCards(await fetchRuntimeSnapshot());
+    rememberSampleSyncRecord({
+      apiBaseUrl: state.apiBaseUrl,
+      sampleVersion: state.sampleData?.version || "unknown",
+      syncedAt: new Date().toISOString(),
+      itemCount: state.sampleData?.items?.length || 0,
+      signalCount: state.sampleData?.business_signals?.length || 0
+    });
+    await refreshSampleSyncState({ catalog, businessSignals });
 
     const businessDetail = upsertBusiness.unavailable
       ? "business signal endpoint unavailable on this server"
@@ -378,7 +451,14 @@ async function syncSampleData() {
       `${upsertCatalog.upserted_count} products synced; ${businessDetail}; ${syncDetail}.`
     );
     elements.traceOutput.textContent = JSON.stringify(
-      { upsertCatalog, upsertBusiness, syncStatus, catalog },
+      {
+        upsertCatalog,
+        upsertBusiness,
+        syncStatus,
+        catalog,
+        businessSignals,
+        sampleSyncState: state.sampleSyncState
+      },
       null,
       2
     );
@@ -398,6 +478,291 @@ async function rebuildSync() {
     );
     elements.traceOutput.textContent = JSON.stringify({ rebuild, snapshot }, null, 2);
   }, "Sync rebuild failed");
+}
+
+function renderSyncCatalogButtonState() {
+  if (!elements.syncCatalogButton) {
+    return;
+  }
+
+  const stateLabel = state.sampleSyncState || {};
+  let text = "Sync Sample JSON";
+  let disabled = false;
+  let title = "Sync the bundled sample catalog and business signals into the current backend.";
+
+  if (!state.sampleData) {
+    text = "Loading Sample JSON...";
+    disabled = true;
+    title = "Frontend sample data is still loading.";
+  } else if (stateLabel.syncing) {
+    text = "Resetting + Syncing...";
+    disabled = true;
+    title = stateLabel.message || "Sample sync is currently running.";
+  } else if (stateLabel.checking) {
+    text = "Checking Sample...";
+    disabled = true;
+    title = stateLabel.message || "Checking whether this backend already has the current sample version.";
+  } else if (stateLabel.done) {
+    text = "Sample Synced Once";
+    disabled = true;
+    title = stateLabel.message || "This backend already matches the exact bundled sample state.";
+  } else if (stateLabel.needsReset || stateLabel.existingItemCount || stateLabel.existingSignalCount) {
+    text = "Reset + Sync Sample JSON";
+    title =
+      stateLabel.message ||
+      "This will clear the current backend catalog and business signals, then load the bundled sample once.";
+  }
+
+  elements.syncCatalogButton.textContent = text;
+  elements.syncCatalogButton.disabled = disabled;
+  elements.syncCatalogButton.title = title;
+  elements.syncCatalogButton.classList.toggle("secondary", stateLabel.done);
+  elements.syncCatalogButton.classList.toggle("accent", !stateLabel.done);
+}
+
+async function refreshSampleSyncState(options = {}) {
+  if (!state.sampleData) {
+    state.sampleSyncState = {
+      checking: false,
+      syncing: false,
+      done: false,
+      itemsSynced: false,
+      signalsSynced: null,
+      needsReset: false,
+      existingItemCount: 0,
+      existingSignalCount: 0,
+      extraItemCount: 0,
+      extraSignalCount: 0,
+      message: "Frontend sample data is not loaded yet."
+    };
+    renderSyncCatalogButtonState();
+    return state.sampleSyncState;
+  }
+
+  state.sampleSyncState = {
+    ...state.sampleSyncState,
+    checking: true,
+    syncing: false,
+    message: "Checking whether this backend exactly matches the bundled sample version."
+  };
+  renderSyncCatalogButtonState();
+
+  let catalog = options.catalog;
+  if (!catalog || catalog.unavailable) {
+    catalog = await optionalApiGet("/inventory/items");
+  }
+
+  let businessSignals = options.businessSignals;
+  if (
+    (!businessSignals || businessSignals.unavailable) &&
+    Array.isArray(state.sampleData.business_signals) &&
+    state.sampleData.business_signals.length
+  ) {
+    businessSignals = await optionalApiGet("/inventory/business/signals");
+  }
+
+  const catalogItems = catalog?.unavailable ? [] : catalog.items || [];
+  const signalItems =
+    businessSignals?.unavailable || !Array.isArray(businessSignals?.signals) ? [] : businessSignals.signals;
+  const itemState = analyzeSampleCatalogState(catalogItems);
+  const signalState =
+    !Array.isArray(state.sampleData.business_signals) || !state.sampleData.business_signals.length
+      ? {
+          synced: true,
+          missingProductIds: [],
+          mismatchedProductIds: [],
+          extraProductIds: [],
+          totalSignals: 0
+        }
+      : businessSignals?.unavailable
+        ? {
+            synced: null,
+            missingProductIds: [],
+            mismatchedProductIds: [],
+            extraProductIds: [],
+            totalSignals: 0
+          }
+        : analyzeSampleBusinessSignalState(signalItems);
+
+  const itemsSynced = itemState.synced === true;
+  const signalsSynced = signalState.synced;
+  const existingItemCount = catalog?.unavailable ? 0 : catalogItems.length;
+  const existingSignalCount =
+    businessSignals?.unavailable || !Array.isArray(state.sampleData.business_signals) ? 0 : signalItems.length;
+  const extraItemCount = itemState.extraProductIds.length;
+  const extraSignalCount = signalState.extraProductIds.length;
+  const done =
+    itemsSynced === true &&
+    signalsSynced === true &&
+    extraItemCount === 0 &&
+    extraSignalCount === 0;
+  const needsReset = !done && (existingItemCount > 0 || existingSignalCount > 0);
+
+  state.sampleSyncState = {
+    checking: false,
+    syncing: false,
+    done,
+    itemsSynced,
+    signalsSynced,
+    needsReset,
+    existingItemCount,
+    existingSignalCount,
+    extraItemCount,
+    extraSignalCount,
+    message: done
+      ? buildSampleSyncDoneMessage()
+      : buildSampleSyncPendingMessage({
+          catalogUnavailable: Boolean(catalog?.unavailable),
+          businessSignalsUnavailable: Boolean(businessSignals?.unavailable),
+          itemState,
+          signalState,
+          existingItemCount,
+          existingSignalCount
+        })
+  };
+
+  renderSyncCatalogButtonState();
+  return state.sampleSyncState;
+}
+
+function buildSampleSyncItemsPayload() {
+  return (state.sampleData?.items || []).map((item) => ({
+    ...item,
+    metadata: {
+      ...(item.metadata || {}),
+      sample_sync_origin: "frontend-demo-json",
+      sample_sync_version: state.sampleData?.version || "unknown"
+    }
+  }));
+}
+
+function buildSampleSyncBusinessSignalsPayload() {
+  return (state.sampleData?.business_signals || []).map((signal) => ({
+    ...signal,
+    metadata: {
+      ...(signal.metadata || {}),
+      sample_sync_origin: "frontend-demo-json",
+      sample_sync_version: state.sampleData?.version || "unknown"
+    }
+  }));
+}
+
+function analyzeSampleCatalogState(catalogItems) {
+  const sampleItems = state.sampleData?.items || [];
+  const sampleVersion = state.sampleData?.version || "unknown";
+  const sampleIds = new Set(sampleItems.map((item) => item.product_id));
+  const catalogById = new Map((catalogItems || []).map((item) => [item.product_id, item]));
+
+  const missingProductIds = [];
+  const mismatchedProductIds = [];
+  for (const sampleItem of sampleItems) {
+    const backendItem = catalogById.get(sampleItem.product_id);
+    if (!backendItem) {
+      missingProductIds.push(sampleItem.product_id);
+      continue;
+    }
+    if ((backendItem.metadata || {}).sample_sync_version !== sampleVersion) {
+      mismatchedProductIds.push(sampleItem.product_id);
+    }
+  }
+
+  const extraProductIds = (catalogItems || [])
+    .map((item) => item.product_id)
+    .filter((productId) => !sampleIds.has(productId));
+
+  return {
+    synced: missingProductIds.length === 0 && mismatchedProductIds.length === 0,
+    missingProductIds,
+    mismatchedProductIds,
+    extraProductIds,
+    totalItems: (catalogItems || []).length
+  };
+}
+
+function analyzeSampleBusinessSignalState(signalRecords) {
+  const sampleSignals = state.sampleData?.business_signals || [];
+  const sampleVersion = state.sampleData?.version || "unknown";
+  const sampleIds = new Set(sampleSignals.map((signal) => signal.product_id));
+  const signalByProductId = new Map((signalRecords || []).map((signal) => [signal.product_id, signal]));
+
+  const missingProductIds = [];
+  const mismatchedProductIds = [];
+  for (const sampleSignal of sampleSignals) {
+    const backendSignal = signalByProductId.get(sampleSignal.product_id);
+    if (!backendSignal) {
+      missingProductIds.push(sampleSignal.product_id);
+      continue;
+    }
+    if ((backendSignal.metadata || {}).sample_sync_version !== sampleVersion) {
+      mismatchedProductIds.push(sampleSignal.product_id);
+    }
+  }
+
+  const extraProductIds = (signalRecords || [])
+    .map((signal) => signal.product_id)
+    .filter((productId) => !sampleIds.has(productId));
+
+  return {
+    synced: missingProductIds.length === 0 && mismatchedProductIds.length === 0,
+    missingProductIds,
+    mismatchedProductIds,
+    extraProductIds,
+    totalSignals: (signalRecords || []).length
+  };
+}
+
+function buildSampleSyncDoneMessage() {
+  return `Backend exactly matches bundled sample ${state.sampleData?.version || "unknown"}. Sync is now locked.`;
+}
+
+function buildSampleSyncPendingMessage({
+  catalogUnavailable,
+  businessSignalsUnavailable,
+  itemState,
+  signalState,
+  existingItemCount,
+  existingSignalCount
+}) {
+  if (catalogUnavailable) {
+    return "Could not inspect the backend catalog yet, so sample sync cannot be locked.";
+  }
+
+  const parts = [];
+  if (existingItemCount || existingSignalCount) {
+    parts.push(
+      `backend currently holds ${existingItemCount} products and ${existingSignalCount} business signals`
+    );
+  }
+  if (itemState.missingProductIds.length) {
+    parts.push(`${itemState.missingProductIds.length} sample products are missing`);
+  }
+  if (itemState.mismatchedProductIds.length) {
+    parts.push(`${itemState.mismatchedProductIds.length} sample products are stale or mismatched`);
+  }
+  if (itemState.extraProductIds.length) {
+    parts.push(`${itemState.extraProductIds.length} non-sample products must be cleared`);
+  }
+  if (signalState.synced === null) {
+    parts.push(
+      businessSignalsUnavailable
+        ? "business signals could not be verified on this backend"
+        : "business signals still need verification"
+    );
+  } else {
+    if (signalState.missingProductIds.length) {
+      parts.push(`${signalState.missingProductIds.length} sample business signals are missing`);
+    }
+    if (signalState.mismatchedProductIds.length) {
+      parts.push(`${signalState.mismatchedProductIds.length} sample business signals are stale or mismatched`);
+    }
+    if (signalState.extraProductIds.length) {
+      parts.push(`${signalState.extraProductIds.length} non-sample business signals must be cleared`);
+    }
+  }
+  if (!parts.length) {
+    parts.push("Bundled sample data has not been applied yet.");
+  }
+  return `${parts.join("; ")}. Reset + sync will rebuild this backend into the exact bundled sample state.`;
 }
 
 function renderProducts() {
@@ -503,14 +868,27 @@ async function askQuestion({
 }) {
   saveSettings();
   const requestContext = buildRequestContext(question);
+  let debugSession = null;
 
   return await withBusy(
     async () => {
       let routeDecision = null;
       let resolvedEndpoint = endpoint;
+      let routeRequestPayload = null;
+
+      if (render) {
+        debugSession = startDebugSession({
+          question,
+          endpoint,
+          assistantMode,
+          replyStyle,
+          answerEngine,
+          requestContext
+        });
+      }
 
       if (endpoint === "route") {
-        routeDecision = await apiPost("/inventory/route", {
+        routeRequestPayload = {
           question,
           assistant_mode: assistantMode,
           reply_style: replyStyle,
@@ -519,13 +897,30 @@ async function askQuestion({
           prefer_fast_response: elements.preferFastResponse.checked,
           allow_agentic: elements.allowAgentic.checked,
           available_data_domains: parseAvailableDomains()
-        });
+        };
+        if (debugSession) {
+          debugSession.routeRequest = safeClone(routeRequestPayload);
+          debugSession.status = "routing";
+          syncDebugSession(debugSession);
+        }
+        routeDecision = await apiPost("/inventory/route", routeRequestPayload);
         resolvedEndpoint = mapRoutePath(routeDecision.recommended_path);
         state.lastRouteDecision = routeDecision;
         renderRouteSummary(routeDecision, resolvedEndpoint);
+        if (debugSession) {
+          debugSession.routeDecision = safeClone(routeDecision);
+          debugSession.resolvedEndpoint = resolvedEndpoint;
+          debugSession.status = "requesting";
+          syncDebugSession(debugSession);
+        }
       } else {
         state.lastRouteDecision = null;
         resetRouteSummary();
+        if (debugSession) {
+          debugSession.resolvedEndpoint = resolvedEndpoint;
+          debugSession.status = "requesting";
+          syncDebugSession(debugSession);
+        }
       }
 
       const payload = buildChatPayload({
@@ -537,6 +932,15 @@ async function askQuestion({
         resolvedEndpoint
       });
       const traceHint = resolvedEndpoint === "agentic" ? "inventory_agentic" : "inventory_ask";
+      if (debugSession) {
+        debugSession.traceHint = traceHint;
+        debugSession.requestContext = safeClone(requestContext);
+        debugSession.chatPath = getChatPath(resolvedEndpoint, {
+          stream: render && elements.streamMode.value === "stream"
+        });
+        debugSession.chatRequest = safeClone(payload);
+        syncDebugSession(debugSession);
+      }
 
       let response;
       if (render && elements.streamMode.value === "stream") {
@@ -545,7 +949,8 @@ async function askQuestion({
           payload,
           requestContext,
           routeDecision,
-          liveMessage
+          liveMessage,
+          debugSession
         });
       } else {
         response = await apiPost(getChatPath(resolvedEndpoint), payload);
@@ -553,6 +958,11 @@ async function askQuestion({
         response.demo_route = routeDecision;
         if (render && liveMessage) {
           finalizeLiveMessage(liveMessage, response);
+        }
+        if (debugSession) {
+          debugSession.response = safeClone(response);
+          debugSession.status = "response_ready";
+          syncDebugSession(debugSession);
         }
       }
 
@@ -572,7 +982,16 @@ async function askQuestion({
         rememberConversation(question, response, requestContext);
       }
       if (render && response.trace_id) {
-        await loadTrace(response.trace_id, { quiet: true, traceHint });
+        await loadTrace(response.trace_id, {
+          quiet: true,
+          traceHint,
+          debugSession,
+          allowWhileBusy: true
+        });
+      } else if (debugSession) {
+        debugSession.status = "done";
+        debugSession.completedAt = new Date().toISOString();
+        syncDebugSession(debugSession);
       }
       return response;
     },
@@ -580,6 +999,12 @@ async function askQuestion({
     {
       quiet: !render,
       onError: (error) => {
+        if (debugSession) {
+          debugSession.status = "failed";
+          debugSession.error = error instanceof Error ? error.message : String(error);
+          debugSession.completedAt = new Date().toISOString();
+          syncDebugSession(debugSession);
+        }
         if (render && liveMessage) {
           failLiveMessage(
             liveMessage,
@@ -629,7 +1054,8 @@ async function askQuestionStream({
   payload,
   requestContext,
   routeDecision,
-  liveMessage
+  liveMessage,
+  debugSession
 }) {
   let finalResponse = null;
   let partialMetadata = null;
@@ -638,14 +1064,25 @@ async function askQuestionStream({
     onStatus(payloadStatus) {
       if (payloadStatus?.status) {
         updateLiveMessageText(liveMessage, `Backend stream started (${payloadStatus.status})...`);
+        if (debugSession) {
+          debugSession.streamStatuses = [...(debugSession.streamStatuses || []), safeClone(payloadStatus)];
+          syncDebugSession(debugSession);
+        }
       }
     },
     onMetadata(payloadMetadata) {
       partialMetadata = payloadMetadata;
       updateLiveMessageMeta(liveMessage, payloadMetadata, routeDecision);
+      if (debugSession) {
+        debugSession.streamMetadata = safeClone(payloadMetadata);
+        syncDebugSession(debugSession);
+      }
     },
     onDelta(delta) {
       streamIntoLiveMessage(liveMessage, delta);
+      if (debugSession) {
+        debugSession.streamDeltaCount = (debugSession.streamDeltaCount || 0) + 1;
+      }
     },
     onFinal(payloadFinal) {
       finalResponse = {
@@ -664,6 +1101,11 @@ async function askQuestionStream({
     updateLiveMessageText(liveMessage, finalResponse.answer || "");
   }
   finalizeLiveMessage(liveMessage, finalResponse);
+  if (debugSession) {
+    debugSession.response = safeClone(finalResponse);
+    debugSession.status = "response_ready";
+    syncDebugSession(debugSession);
+  }
   return finalResponse;
 }
 
@@ -692,23 +1134,37 @@ async function loadTrace(traceId, options = {}) {
     }
     return;
   }
-  if (state.busy) {
+  if (state.busy && !options.allowWhileBusy) {
     return;
   }
 
-  state.busy = true;
-  setButtonsDisabled(true);
+  const managesBusyState = !state.busy;
+  if (managesBusyState) {
+    state.busy = true;
+    setButtonsDisabled(true);
+  }
   try {
-    const traceResult = await apiGetFirstAvailableTrace(
-      traceId,
-      options.traceHint || state.lastTraceHint || elements.endpointMode.value
-    );
+    const traceResult = await fetchTraceResult(traceId, {
+      traceHint: options.traceHint || state.lastTraceHint || elements.endpointMode.value
+    });
     if (traceResult.unavailable) {
+      if (options.debugSession) {
+        options.debugSession.traceResult = safeClone(traceResult);
+        options.debugSession.status = options.debugSession.error ? "failed" : "done";
+        options.debugSession.completedAt = new Date().toISOString();
+        syncDebugSession(options.debugSession);
+      }
       if (!options.quiet) {
         setConnection("neutral", "Trace unavailable", traceResult.message);
         elements.traceOutput.textContent = traceResult.message;
       }
       return;
+    }
+    if (options.debugSession) {
+      options.debugSession.traceResult = safeClone(traceResult);
+      options.debugSession.status = options.debugSession.error ? "failed" : "done";
+      options.debugSession.completedAt = new Date().toISOString();
+      syncDebugSession(options.debugSession);
     }
     if (!options.quiet) {
       setConnection("good", "Trace loaded", `Loaded from ${traceResult.endpoint}.`);
@@ -723,6 +1179,15 @@ async function loadTrace(traceId, options = {}) {
       2
     );
   } catch (error) {
+    if (options.debugSession) {
+      options.debugSession.traceResult = {
+        unavailable: true,
+        message: error instanceof Error ? error.message : String(error)
+      };
+      options.debugSession.status = options.debugSession.error ? "failed" : "done";
+      options.debugSession.completedAt = new Date().toISOString();
+      syncDebugSession(options.debugSession);
+    }
     setConnection("bad", "Trace load failed", error instanceof Error ? error.message : String(error));
     if (!options.quiet) {
       elements.traceOutput.textContent = `Trace load failed: ${
@@ -730,9 +1195,18 @@ async function loadTrace(traceId, options = {}) {
       }`;
     }
   } finally {
-    state.busy = false;
-    setButtonsDisabled(false);
+    if (managesBusyState) {
+      state.busy = false;
+      setButtonsDisabled(false);
+    }
   }
+}
+
+async function fetchTraceResult(traceId, options = {}) {
+  return await apiGetFirstAvailableTrace(
+    traceId,
+    options.traceHint || state.lastTraceHint || elements.endpointMode.value
+  );
 }
 
 function renderTestResult(testCase, response) {
@@ -1034,6 +1508,523 @@ function resetRouteSummary() {
   elements.routeSummary.classList.add("hidden");
   elements.routeSummary.innerHTML = "";
   elements.lastRoutePath.textContent = "No route";
+}
+
+function startDebugSession({
+  question,
+  endpoint,
+  assistantMode,
+  replyStyle,
+  answerEngine,
+  requestContext
+}) {
+  const session = {
+    id: createLocalId(),
+    question,
+    endpointMode: endpoint,
+    assistantMode,
+    replyStyle,
+    answerEngine,
+    audience: elements.audienceMode.value,
+    deliveryMode: elements.streamMode.value,
+    preferFastResponse: elements.preferFastResponse.checked,
+    allowAgentic: elements.allowAgentic.checked,
+    availableDataDomains: parseAvailableDomains(),
+    requestContext: safeClone(requestContext),
+    routeRequest: null,
+    routeDecision: null,
+    resolvedEndpoint: null,
+    chatPath: null,
+    chatRequest: null,
+    streamStatuses: [],
+    streamMetadata: null,
+    streamDeltaCount: 0,
+    response: null,
+    traceHint: null,
+    traceResult: null,
+    error: null,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    status: "pending"
+  };
+  state.debugSessions = [session, ...state.debugSessions].slice(0, 12);
+  syncDebugSession(session);
+  return session;
+}
+
+function syncDebugSession(session) {
+  if (!session) {
+    return;
+  }
+  renderDebugSessions();
+  elements.traceOutput.textContent = JSON.stringify(buildDebugSessionInspectorPayload(session), null, 2);
+}
+
+function clearDebugSessions() {
+  state.debugSessions = [];
+  renderDebugSessions();
+  elements.traceOutput.textContent =
+    "Trace details, route decisions, status snapshots, and runtime config will appear here.";
+}
+
+function renderDebugSessions() {
+  elements.turnDebugSessions.innerHTML = "";
+  if (!state.debugSessions.length) {
+    const empty = document.createElement("article");
+    empty.className = "debug-empty-state";
+    empty.textContent =
+      "Every chat turn will append the route decision, backend payload, response summary, and trace steps here.";
+    elements.turnDebugSessions.appendChild(empty);
+    return;
+  }
+
+  state.debugSessions.forEach((session) => {
+    elements.turnDebugSessions.appendChild(renderDebugSession(session));
+  });
+}
+
+function renderDebugSession(session) {
+  const wrapper = document.createElement("article");
+  wrapper.className = `debug-session ${session.status === "failed" ? "failed" : ""} ${
+    session.status === "pending" || session.status === "routing" || session.status === "requesting"
+      ? "pending"
+      : ""
+  }`;
+
+  const header = document.createElement("div");
+  header.className = "debug-session-header";
+
+  const titleWrap = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = session.question;
+  titleWrap.appendChild(title);
+
+  const subtitle = document.createElement("small");
+  subtitle.textContent = [
+    `Started ${formatTimestamp(session.startedAt)}`,
+    session.completedAt ? `Finished ${formatTimestamp(session.completedAt)}` : null,
+    session.chatPath || null
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  titleWrap.appendChild(subtitle);
+  header.appendChild(titleWrap);
+
+  const meta = document.createElement("div");
+  meta.className = "debug-session-meta";
+  const headerPills = [
+    session.status.replaceAll("_", " "),
+    session.resolvedEndpoint ? `path ${session.resolvedEndpoint}` : `mode ${session.endpointMode}`,
+    session.response?.trace_id ? `trace ${shortId(session.response.trace_id)}` : null
+  ].filter(Boolean);
+  headerPills.forEach((value) => meta.appendChild(buildDebugPill(value)));
+  header.appendChild(meta);
+  wrapper.appendChild(header);
+
+  const steps = document.createElement("div");
+  steps.className = "debug-step-list";
+  steps.appendChild(
+    buildDebugStepCard({
+      title: "Frontend Inputs",
+      summary: "The exact controls and focus context used for this turn.",
+      keyValues: {
+        mode: session.assistantMode,
+        reply: session.replyStyle,
+        engine: session.answerEngine,
+        delivery: session.deliveryMode,
+        audience: session.audience,
+        focused_products: (session.requestContext?.focusedProductIds || []).join(", ") || "none"
+      },
+      pills: [
+        session.preferFastResponse ? "prefer fast" : "full depth",
+        session.allowAgentic ? "agentic allowed" : "agentic blocked"
+      ],
+      raw: {
+        endpoint_mode: session.endpointMode,
+        available_data_domains: session.availableDataDomains,
+        request_context: session.requestContext
+      }
+    })
+  );
+
+  if (session.routeRequest) {
+    steps.appendChild(
+      buildDebugStepCard({
+        title: "Route Request",
+        summary: "Payload sent to `/inventory/route` before the chat endpoint was chosen.",
+        keyValues: {
+          prefer_fast_response: String(session.routeRequest.prefer_fast_response),
+          allow_agentic: String(session.routeRequest.allow_agentic),
+          filters: formatCompactValue(session.routeRequest.filters),
+          domains: (session.routeRequest.available_data_domains || []).join(", ") || "catalog"
+        },
+        raw: session.routeRequest
+      })
+    );
+  }
+
+  if (session.routeDecision) {
+    steps.appendChild(
+      buildDebugStepCard({
+        title: "Route Decision",
+        summary: session.routeDecision.reason_summary || "Backend route summary unavailable.",
+        keyValues: {
+          recommended_path: session.routeDecision.recommended_path,
+          fallback_path: session.routeDecision.fallback_path,
+          question_family: session.routeDecision.signals?.question_family || "unknown",
+          confidence:
+            typeof session.routeDecision.decision_confidence === "number"
+              ? `${Math.round(session.routeDecision.decision_confidence * 100)}%`
+              : "unknown",
+          policy_version: session.routeDecision.policy_version || "unknown"
+        },
+        pills: [
+          ...(session.routeDecision.required_data_domains || []).map((domain) => `needs ${domain}`),
+          ...((session.routeDecision.missing_data_domains || []).map((domain) => `missing ${domain}`))
+        ],
+        lines: [
+          ...(session.routeDecision.decision_factors || []),
+          session.routeDecision.family_contract
+            ? `Policy family: ${session.routeDecision.family_contract.family} (${session.routeDecision.family_contract.reasoning_mode})`
+            : null
+        ],
+        raw: session.routeDecision
+      })
+    );
+  }
+
+  if (session.chatRequest) {
+    steps.appendChild(
+      buildDebugStepCard({
+        title: "Chat Payload",
+        summary: `Payload sent to ${session.chatPath || "the backend chat endpoint"}.`,
+        keyValues: {
+          top_k: String(session.chatRequest.top_k ?? 0),
+          max_reasoning_steps: session.chatRequest.max_reasoning_steps
+            ? String(session.chatRequest.max_reasoning_steps)
+            : "n/a",
+          filters: formatCompactValue(session.chatRequest.filters),
+          conversation_turns: String((session.chatRequest.conversation_history || []).length)
+        },
+        raw: session.chatRequest
+      })
+    );
+  }
+
+  if ((session.streamStatuses || []).length || session.streamMetadata || session.streamDeltaCount) {
+    steps.appendChild(
+      buildDebugStepCard({
+        title: "Streaming Events",
+        summary: "SSE metadata emitted before the final response landed.",
+        keyValues: {
+          status_events: String((session.streamStatuses || []).length),
+          delta_chunks: String(session.streamDeltaCount || 0),
+          answer_engine: session.streamMetadata?.answer_engine || "unknown",
+          retrieval_steps_used: session.streamMetadata?.retrieval_steps_used
+            ? String(session.streamMetadata.retrieval_steps_used)
+            : "n/a"
+        },
+        raw: {
+          statuses: session.streamStatuses,
+          metadata: session.streamMetadata
+        }
+      })
+    );
+  }
+
+  if (session.response) {
+    steps.appendChild(renderResponseDebugStep(session.response));
+  }
+
+  if (session.traceResult?.unavailable) {
+    steps.appendChild(
+      buildDebugStepCard({
+        title: "Trace Load",
+        summary: session.traceResult.message || "Trace endpoint was unavailable.",
+        raw: session.traceResult
+      })
+    );
+  } else if (session.traceResult?.payload) {
+    steps.appendChild(renderTraceDebugStep(session.traceResult));
+  }
+
+  if (session.error) {
+    steps.appendChild(
+      buildDebugStepCard({
+        title: "Error",
+        summary: session.error,
+        raw: { error: session.error }
+      })
+    );
+  }
+
+  wrapper.appendChild(steps);
+  return wrapper;
+}
+
+function buildDebugStepCard({ title, summary, keyValues = null, pills = [], lines = [], raw = null }) {
+  const card = document.createElement("article");
+  card.className = "debug-step";
+
+  const header = document.createElement("header");
+  const heading = document.createElement("strong");
+  heading.textContent = title;
+  header.appendChild(heading);
+  if (summary) {
+    const sub = document.createElement("small");
+    sub.textContent = summary;
+    header.appendChild(sub);
+  }
+  card.appendChild(header);
+
+  if (keyValues && Object.keys(keyValues).length) {
+    const grid = document.createElement("div");
+    grid.className = "debug-kv-grid";
+    Object.entries(keyValues).forEach(([label, value]) => {
+      const row = document.createElement("div");
+      row.className = "debug-kv";
+      const key = document.createElement("span");
+      key.textContent = label.replaceAll("_", " ");
+      const strong = document.createElement("strong");
+      strong.textContent = value || "n/a";
+      row.appendChild(key);
+      row.appendChild(strong);
+      grid.appendChild(row);
+    });
+    card.appendChild(grid);
+  }
+
+  if (pills.length) {
+    const pillWrap = document.createElement("div");
+    pillWrap.className = "debug-step-pills";
+    pills.filter(Boolean).forEach((value) => pillWrap.appendChild(buildDebugPill(value)));
+    card.appendChild(pillWrap);
+  }
+
+  if (lines.length) {
+    const list = document.createElement("ul");
+    lines.filter(Boolean).forEach((line) => {
+      const item = document.createElement("li");
+      item.textContent = line;
+      list.appendChild(item);
+    });
+    card.appendChild(list);
+  }
+
+  if (raw) {
+    const rawWrap = document.createElement("div");
+    rawWrap.className = "debug-raw";
+    const details = document.createElement("details");
+    const summaryEl = document.createElement("summary");
+    summaryEl.textContent = "Show raw JSON";
+    const pre = document.createElement("pre");
+    pre.className = "debug-json";
+    pre.textContent = JSON.stringify(raw, null, 2);
+    details.appendChild(summaryEl);
+    details.appendChild(pre);
+    rawWrap.appendChild(details);
+    card.appendChild(rawWrap);
+  }
+
+  return card;
+}
+
+function renderResponseDebugStep(response) {
+  const lines = [];
+  if (response.reasoning_summary?.length) {
+    lines.push(...response.reasoning_summary);
+  }
+  if (response.missing_facts?.length) {
+    lines.push(...response.missing_facts.map((value) => `Missing fact: ${value}`));
+  }
+  if (response.abstention_reason) {
+    lines.push(`Abstention: ${response.abstention_reason}`);
+  }
+
+  return buildDebugStepCard({
+    title: "Final Response",
+    summary: response.answer || "No answer returned.",
+    keyValues: {
+      answer_engine: response.answer_engine || "unknown",
+      confidence:
+        typeof response.confidence_score === "number"
+          ? `${Math.round(response.confidence_score * 100)}%`
+          : "unknown",
+      hits: String(response.total_hits ?? 0),
+      retrieval_steps_used: response.retrieval_steps_used
+        ? String(response.retrieval_steps_used)
+        : "n/a",
+      primary_product: response.answer_plan?.primary_product_id || "none",
+      abstained: response.abstained ? "yes" : "no"
+    },
+    pills: [
+      ...(response.recommended_product_ids || []).map((value) => `recommended ${value}`),
+      ...(response.cross_sell_product_ids || []).map((value) => `cross-sell ${value}`)
+    ],
+    lines,
+    raw: response
+  });
+}
+
+function renderTraceDebugStep(traceResult) {
+  const trace = traceResult.payload || {};
+  const card = buildDebugStepCard({
+    title: "Trace Summary",
+    summary: `Loaded from ${traceResult.endpoint}.`,
+    keyValues: {
+      execution_path: trace.execution_path || "unknown",
+      trace_id: trace.trace_id || "unknown",
+      retrieval_steps: String((trace.retrieval_steps || []).length),
+      confidence:
+        typeof trace.confidence_score === "number"
+          ? `${Math.round(trace.confidence_score * 100)}%`
+          : "unknown"
+    },
+    lines: [
+      ...(trace.reasoning_summary || []),
+      ...((trace.missing_facts || []).map((value) => `Missing fact: ${value}`))
+    ],
+    raw: {
+      loaded_from_endpoint: traceResult.endpoint,
+      trace_id: trace.trace_id,
+      route_decision: trace.route_decision,
+      retrieval_stage_counts: trace.retrieval_stage_counts
+    }
+  });
+
+  if ((trace.retrieval_steps || []).length) {
+    const traceSteps = document.createElement("div");
+    traceSteps.className = "debug-trace-steps";
+    trace.retrieval_steps.forEach((step) => {
+      traceSteps.appendChild(renderTraceRetrievalStep(step));
+    });
+    card.appendChild(traceSteps);
+  }
+
+  return card;
+}
+
+function renderTraceRetrievalStep(step) {
+  const card = document.createElement("article");
+  card.className = "debug-trace-step";
+
+  const heading = document.createElement("strong");
+  heading.textContent = `Step ${step.step_number} · ${step.action}`;
+  card.appendChild(heading);
+
+  const pills = document.createElement("div");
+  pills.className = "debug-trace-step-pills";
+  [
+    `hits ${step.total_hits ?? 0}`,
+    step.query_text ? `query ${step.query_text}` : null,
+    (step.selected_product_ids || []).length
+      ? `selected ${(step.selected_product_ids || []).length}`
+      : null,
+    (step.rejected_candidates || []).length
+      ? `rejected ${(step.rejected_candidates || []).length}`
+      : null
+  ]
+    .filter(Boolean)
+    .forEach((value) => pills.appendChild(buildDebugPill(value)));
+  card.appendChild(pills);
+
+  if (step.observation) {
+    const observation = document.createElement("p");
+    observation.textContent = step.observation;
+    card.appendChild(observation);
+  }
+
+  if (step.selected_candidates?.length) {
+    const selected = document.createElement("div");
+    selected.className = "debug-candidate-list";
+    step.selected_candidates.slice(0, 5).forEach((candidate) => {
+      selected.appendChild(
+        renderTraceCandidate(candidate, {
+          fallbackTitle: "Selected candidate",
+          showReasons: false
+        })
+      );
+    });
+    card.appendChild(selected);
+  }
+
+  if (step.rejected_candidates?.length) {
+    const rejected = document.createElement("div");
+    rejected.className = "debug-candidate-list";
+    step.rejected_candidates.slice(0, 5).forEach((candidate) => {
+      rejected.appendChild(
+        renderTraceCandidate(candidate, {
+          fallbackTitle: "Rejected candidate",
+          showReasons: true
+        })
+      );
+    });
+    card.appendChild(rejected);
+  }
+
+  const details = document.createElement("details");
+  const summary = document.createElement("summary");
+  summary.textContent = "Show step JSON";
+  const pre = document.createElement("pre");
+  pre.className = "debug-json";
+  pre.textContent = JSON.stringify(step, null, 2);
+  details.appendChild(summary);
+  details.appendChild(pre);
+  card.appendChild(details);
+
+  return card;
+}
+
+function renderTraceCandidate(candidate, options = {}) {
+  const card = document.createElement("article");
+  card.className = "debug-candidate";
+  const title = document.createElement("strong");
+  title.textContent = candidate.name || candidate.product_id || options.fallbackTitle || "Candidate";
+  card.appendChild(title);
+  const meta = document.createElement("small");
+  meta.textContent = [
+    candidate.product_id || null,
+    candidate.category || null,
+    typeof candidate.score === "number" ? `score ${candidate.score}` : null
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  card.appendChild(meta);
+  if (options.showReasons && candidate.rejection_reasons?.length) {
+    const reasons = document.createElement("small");
+    reasons.textContent = candidate.rejection_reasons.join(" | ");
+    card.appendChild(reasons);
+  }
+  return card;
+}
+
+function buildDebugPill(value) {
+  const pill = document.createElement("span");
+  pill.className = "debug-pill";
+  pill.textContent = value;
+  return pill;
+}
+
+function buildDebugSessionInspectorPayload(session) {
+  return {
+    session_id: session.id,
+    question: session.question,
+    status: session.status,
+    started_at: session.startedAt,
+    completed_at: session.completedAt,
+    endpoint_mode: session.endpointMode,
+    resolved_endpoint: session.resolvedEndpoint,
+    route_request: session.routeRequest,
+    route_decision: session.routeDecision,
+    chat_path: session.chatPath,
+    chat_request: session.chatRequest,
+    stream_statuses: session.streamStatuses,
+    stream_metadata: session.streamMetadata,
+    stream_delta_count: session.streamDeltaCount,
+    response: session.response,
+    trace_result: session.traceResult,
+    error: session.error
+  };
 }
 
 function buildRequestContext(question) {
@@ -1378,6 +2369,9 @@ function setButtonsDisabled(disabled) {
   for (const button of document.querySelectorAll("button")) {
     button.disabled = disabled;
   }
+  if (!disabled) {
+    renderSyncCatalogButtonState();
+  }
 }
 
 function setConnection(kind, label, detail) {
@@ -1422,6 +2416,13 @@ function shortId(value) {
   return String(value).slice(0, 8);
 }
 
+function createLocalId() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `debug-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
 function dedupe(values) {
   const output = [];
   const seen = new Set();
@@ -1449,4 +2450,54 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function safeClone(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+function formatTimestamp(value) {
+  if (!value) {
+    return "unknown time";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+}
+
+function formatCompactValue(value) {
+  if (!value) {
+    return "none";
+  }
+  if (Array.isArray(value)) {
+    return value.length ? value.join(", ") : "none";
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value)
+      .filter(([, entryValue]) => {
+        if (entryValue == null) {
+          return false;
+        }
+        if (Array.isArray(entryValue)) {
+          return entryValue.length > 0;
+        }
+        return String(entryValue).trim() !== "";
+      })
+      .map(([key, entryValue]) =>
+        `${key}=${
+          Array.isArray(entryValue) ? entryValue.join("|") : typeof entryValue === "object" ? JSON.stringify(entryValue) : entryValue
+        }`
+      );
+    return entries.length ? entries.join(", ") : "none";
+  }
+  return String(value);
 }

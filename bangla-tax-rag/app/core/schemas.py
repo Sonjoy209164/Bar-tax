@@ -623,6 +623,14 @@ class InventoryBusinessSignalsResponse(BaseModel):
     signals: list[InventoryBusinessSignalRecord] = Field(default_factory=list)
 
 
+class InventoryBusinessSignalsDeleteResponse(BaseModel):
+    status: str
+    deleted_count: int
+    total_signals: int
+    product_count: int
+    business_signal_path: str
+
+
 class InventoryBusinessStatusResponse(BaseModel):
     status: str
     ready: bool
@@ -975,6 +983,50 @@ class InventoryAskResponse(BaseModel):
     memory_resolution: InventoryMemoryResolution = Field(default_factory=InventoryMemoryResolution)
 
 
+class InventoryQuestionFamilyContract(BaseModel):
+    family: str
+    supported: bool = True
+    description: str
+    classifier_intents: list[str] = Field(default_factory=list)
+    default_execution_path: Literal["normal_rag", "agentic", "clarify_or_abstain"]
+    supported_execution_paths: list[str] = Field(default_factory=list)
+    reasoning_mode: Literal[
+        "deterministic",
+        "deterministic_with_optional_agentic",
+        "bounded_agentic",
+        "abstain_or_clarify",
+    ]
+    external_data_required: bool = False
+    canonical_eval_case_ids: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class InventoryAbstainTriggerContract(BaseModel):
+    trigger_id: str
+    description: str
+    stage: Literal["routing", "retrieval", "planning", "verification"]
+    applies_to_families: list[str] = Field(default_factory=list)
+    examples: list[str] = Field(default_factory=list)
+
+
+class InventoryCanonicalEvalContractCase(BaseModel):
+    case_id: str
+    family: str
+    example_question: str
+    purpose: str
+    expected_execution_path: str
+
+
+class InventoryPolicyContractResponse(BaseModel):
+    status: str
+    version: str
+    summary: str
+    supported_question_families: list[InventoryQuestionFamilyContract] = Field(default_factory=list)
+    hard_abstain_triggers: list[InventoryAbstainTriggerContract] = Field(default_factory=list)
+    canonical_eval_cases: list[InventoryCanonicalEvalContractCase] = Field(default_factory=list)
+    canonical_eval_case_ids: list[str] = Field(default_factory=list)
+
+
 class InventoryRouteRequest(BaseModel):
     question: str = Field(..., description="Inventory chat question to route between normal RAG and agentic handling.")
     assistant_mode: str = Field(default="support", description="Intended assistant tone for the eventual answer.")
@@ -1074,6 +1126,7 @@ class InventoryExecutionContract(BaseModel):
 class InventoryRouteResponse(BaseModel):
     status: str
     question: str
+    policy_version: str | None = None
     recommended_path: str
     fallback_path: str
     decision_confidence: float
@@ -1082,6 +1135,8 @@ class InventoryRouteResponse(BaseModel):
     required_data_domains: list[str] = Field(default_factory=list)
     missing_data_domains: list[str] = Field(default_factory=list)
     signals: InventoryRouteSignals = Field(default_factory=InventoryRouteSignals)
+    family_contract: InventoryQuestionFamilyContract | None = None
+    applicable_hard_abstain_triggers: list[InventoryAbstainTriggerContract] = Field(default_factory=list)
     normal_rag_contract: InventoryExecutionContract
     agentic_contract: InventoryExecutionContract
 

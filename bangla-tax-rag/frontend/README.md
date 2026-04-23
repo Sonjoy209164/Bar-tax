@@ -91,10 +91,20 @@ Use `Engine: Natural` only when the RAG server has a working LLM generation prov
 
 The page now keeps recent product context, lets you manually focus products from the catalog column, sends `focused_product_ids` plus `filters.product_ids`, and can ask the backend router to choose the right execution path before sending the actual chat request.
 
+It also now appends a scrollable **Full System Steps** timeline directly below the chatbot so each turn shows:
+
+- frontend inputs and focused scope
+- route request plus route decision
+- final backend chat payload
+- streaming metadata
+- final response summary
+- trace retrieval steps and raw JSON
+
 ## What This Frontend Now Tests Well
 
 - direct status and health checks against the live backend
 - sample catalog sync plus business-signal sync
+- one-time sample bootstrap detection, so the same sample version is not blindly replayed into the same backend
 - full sync rebuild behavior
 - backend catalog loading
 - normal RAG answers

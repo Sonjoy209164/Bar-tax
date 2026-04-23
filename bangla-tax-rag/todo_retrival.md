@@ -42,12 +42,12 @@ question
 
 ## Phase 0: Freeze The Retrieval Architecture
 
-- [ ] Finalize the supported question families for inventory chat.
-- [ ] Finalize which question types stay deterministic.
-- [ ] Finalize which question types require agentic decomposition.
-- [ ] Finalize when the system must abstain.
+- [x] Finalize the supported question families for inventory chat.
+- [x] Finalize which question types stay deterministic.
+- [x] Finalize which question types require agentic decomposition.
+- [x] Finalize when the system must abstain.
 - [x] Finalize the evidence contract schema used by the answer layer.
-- [ ] Finalize the evaluation questions for complex reasoning.
+- [x] Finalize the evaluation questions for complex reasoning.
 
 Success criteria:
 

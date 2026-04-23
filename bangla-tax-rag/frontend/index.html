@@ -189,6 +189,23 @@
             />
             <button type="submit">Ask</button>
           </form>
+
+          <section class="turn-debug-panel">
+            <div class="section-title compact">
+              <div>
+                <p class="eyebrow">Live Debug</p>
+                <h2>Full System Steps</h2>
+              </div>
+              <div class="button-row compact">
+                <button id="clearDebugSessionsButton" class="secondary" type="button">Clear Steps</button>
+              </div>
+            </div>
+            <div id="turnDebugSessions" class="turn-debug-sessions">
+              <article class="debug-empty-state">
+                Every chat turn will append the route decision, backend payload, response summary, and trace steps here.
+              </article>
+            </div>
+          </section>
         </section>
       </section>
 

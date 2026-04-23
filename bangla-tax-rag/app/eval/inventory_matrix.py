@@ -26,6 +26,7 @@ from app.retrieval import (
     VectorStoreConfig,
     VectorStoreProvider,
 )
+from app.inventory.policy import inventory_policy_contract
 from app.services.inventory_service import InventoryService, InventoryServiceConfig
 
 
@@ -115,7 +116,11 @@ class InventoryEvalCase:
 
 
 def run_inventory_eval_matrix(*, case_ids: list[str] | None = None) -> dict[str, object]:
+    policy_contract = inventory_policy_contract()
     selected_cases = _select_cases(case_ids)
+    available_case_ids = [case.case_id for case in inventory_eval_cases()]
+    contract_case_ids = list(policy_contract.canonical_eval_case_ids)
+    contract_case_id_set = set(contract_case_ids)
     case_results: list[dict[str, object]] = []
     answer_engine_counts: Counter[str] = Counter()
     execution_path_counts: Counter[str] = Counter()
@@ -168,7 +173,11 @@ def run_inventory_eval_matrix(*, case_ids: list[str] | None = None) -> dict[str,
 
     return {
         "suite_name": "inventory_phase8_eval_matrix",
-        "available_case_ids": [case.case_id for case in inventory_eval_cases()],
+        "policy_version": policy_contract.version,
+        "available_case_ids": available_case_ids,
+        "contract_eval_case_ids": contract_case_ids,
+        "missing_contract_case_ids": [case_id for case_id in contract_case_ids if case_id not in available_case_ids],
+        "untracked_eval_case_ids": [case_id for case_id in available_case_ids if case_id not in contract_case_id_set],
         "selected_case_ids": [case.case_id for case in selected_cases],
         "total_cases": total_cases,
         "passed_cases": passed_cases,

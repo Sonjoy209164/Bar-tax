@@ -12,10 +12,13 @@ def test_inventory_eval_matrix_passes_phase8_cases() -> None:
     summary = run_inventory_eval_matrix()
 
     assert summary["suite_name"] == "inventory_phase8_eval_matrix"
+    assert summary["policy_version"] == "inventory-contract-v1"
     assert summary["total_cases"] == 16
     assert summary["passed_cases"] == 16
     assert summary["failed_cases"] == 0
     assert summary["accuracy"] == 1.0
+    assert summary["missing_contract_case_ids"] == []
+    assert summary["untracked_eval_case_ids"] == []
     assert summary["retrieval_stage_failures"] == 0
     assert summary["answer_stage_failures"] == 0
     assert summary["abstain_metrics"]["false_positive_abstains"] == 0

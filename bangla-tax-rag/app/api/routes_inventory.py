@@ -11,6 +11,7 @@ from app.core.schemas import (
     InventoryAgenticTraceResponse,
     InventoryAskRequest,
     InventoryAskResponse,
+    InventoryBusinessSignalsDeleteResponse,
     InventoryBusinessSignalsResponse,
     InventoryBusinessSignalsUpsertRequest,
     InventoryBusinessSignalsUpsertResponse,
@@ -20,6 +21,7 @@ from app.core.schemas import (
     InventoryDeleteRequest,
     InventoryDeleteResponse,
     InventoryItemRecord,
+    InventoryPolicyContractResponse,
     InventoryProductionStatusResponse,
     InventoryRouteRequest,
     InventoryRouteResponse,
@@ -33,6 +35,7 @@ from app.core.schemas import (
     InventoryUpsertRequest,
     InventoryUpsertResponse,
 )
+from app.inventory.policy import inventory_policy_contract
 from app.services.inventory_service import get_inventory_service
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -227,6 +230,19 @@ async def delete_inventory_items(request: InventoryDeleteRequest) -> InventoryDe
         ) from exc
 
 
+@router.post("/business/signals/delete", response_model=InventoryBusinessSignalsDeleteResponse)
+async def delete_inventory_business_signals(
+    request: InventoryDeleteRequest,
+) -> InventoryBusinessSignalsDeleteResponse:
+    try:
+        return get_inventory_service().delete_business_signals(request.product_ids)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "inventory_business_signal_delete_failed", "message": str(exc)},
+        ) from exc
+
+
 @router.post("/search", response_model=InventorySearchResponse)
 async def search_inventory(request: InventorySearchRequest) -> InventorySearchResponse:
     try:
@@ -257,6 +273,11 @@ async def route_inventory_question(request: InventoryRouteRequest) -> InventoryR
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "inventory_route_failed", "message": str(exc)},
         ) from exc
+
+
+@router.get("/policy", response_model=InventoryPolicyContractResponse)
+async def get_inventory_policy() -> InventoryPolicyContractResponse:
+    return inventory_policy_contract()
 
 
 @router.post("/agentic/ask", response_model=InventoryAgenticResponse)

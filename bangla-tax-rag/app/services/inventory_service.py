@@ -25,6 +25,7 @@ from app.core.schemas import (
     InventoryAskRequest,
     InventoryAskResponse,
     InventoryBusinessSignalRecord,
+    InventoryBusinessSignalsDeleteResponse,
     InventoryBusinessSignalsResponse,
     InventoryBusinessSignalsUpsertResponse,
     InventoryBusinessStatusResponse,
@@ -67,6 +68,11 @@ from app.inventory import (
     InventoryPreferenceProfile,
     InventorySpecRequirement,
     ProductOntology,
+)
+from app.inventory.policy import (
+    INVENTORY_POLICY_VERSION,
+    inventory_family_abstain_triggers,
+    inventory_question_family_contract,
 )
 from app.inventory.storage import InventoryMirrorStore, build_inventory_mirror_store
 from app.retrieval import TextEmbedder, VectorRecord, VectorStore, build_embedder, build_vector_store
@@ -762,6 +768,20 @@ class InventoryService:
             business_signal_path=str(self._business_signal_path()),
         )
 
+    def delete_business_signals(self, product_ids: list[str]) -> InventoryBusinessSignalsDeleteResponse:
+        existing_signals = self._load_business_signals()
+        deleted_ids = [product_id for product_id in product_ids if product_id in existing_signals]
+        for product_id in deleted_ids:
+            existing_signals.pop(product_id, None)
+        self._persist_business_signals(existing_signals)
+        return InventoryBusinessSignalsDeleteResponse(
+            status="success",
+            deleted_count=len(deleted_ids),
+            total_signals=len(existing_signals),
+            product_count=len(existing_signals),
+            business_signal_path=str(self._business_signal_path()),
+        )
+
     def list_items(self) -> InventoryCatalogResponse:
         items = sorted(self._load_catalog().values(), key=self._catalog_sort_key, reverse=True)
         return InventoryCatalogResponse(status="success", total_items=len(items), items=items)
@@ -1043,6 +1063,7 @@ class InventoryService:
             question=request.question,
             filters=request.filters,
         )
+        family_contract = inventory_question_family_contract(signals.question_family)
         required_data_domains = self._required_data_domains_for_route(
             question=request.question,
             signals=signals,
@@ -1062,6 +1083,7 @@ class InventoryService:
         return InventoryRouteResponse(
             status="success",
             question=request.question,
+            policy_version=INVENTORY_POLICY_VERSION,
             recommended_path=recommended_path,
             fallback_path="normal_rag",
             decision_confidence=decision_confidence,
@@ -1070,6 +1092,8 @@ class InventoryService:
             required_data_domains=required_data_domains,
             missing_data_domains=missing_data_domains,
             signals=signals,
+            family_contract=family_contract,
+            applicable_hard_abstain_triggers=inventory_family_abstain_triggers(signals.question_family),
             normal_rag_contract=self._build_normal_rag_contract(request=request),
             agentic_contract=self._build_agentic_contract(
                 request=request,
@@ -2789,6 +2813,7 @@ class InventoryService:
     @staticmethod
     def _serialize_route_response(route_response: InventoryRouteResponse) -> dict[str, object]:
         return {
+            "policy_version": route_response.policy_version,
             "recommended_path": route_response.recommended_path,
             "fallback_path": route_response.fallback_path,
             "decision_confidence": route_response.decision_confidence,
@@ -2797,6 +2822,15 @@ class InventoryService:
             "required_data_domains": list(route_response.required_data_domains),
             "missing_data_domains": list(route_response.missing_data_domains),
             "signals": route_response.signals.model_dump(mode="json"),
+            "family_contract": (
+                route_response.family_contract.model_dump(mode="json")
+                if route_response.family_contract is not None
+                else None
+            ),
+            "applicable_hard_abstain_triggers": [
+                trigger.model_dump(mode="json")
+                for trigger in route_response.applicable_hard_abstain_triggers
+            ],
         }
 
     @staticmethod

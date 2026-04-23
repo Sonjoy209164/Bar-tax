@@ -48,6 +48,20 @@ async def test_config_endpoint() -> None:
 
 
 @pytest.mark.anyio
+async def test_inventory_policy_endpoint() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/inventory/policy")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["version"] == "inventory-contract-v1"
+    assert any(family["family"] == "exact_lookup" for family in payload["supported_question_families"])
+    assert any(family["family"] == "planning_agentic_workflow" for family in payload["supported_question_families"])
+    assert any(trigger["trigger_id"] == "hard_constraint_violation" for trigger in payload["hard_abstain_triggers"])
+    assert "agentic-restock" in payload["canonical_eval_case_ids"]
+
+
+@pytest.mark.anyio
 async def test_invalid_query_retrieval_mode() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(

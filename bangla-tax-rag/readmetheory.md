@@ -301,6 +301,7 @@ Key responsibilities are split here:
 - `intent.py`: question-family classification
 - `preferences.py`: budget, product type, style, and other preference extraction
 - `ontology.py`: product type/family/category relationships
+- `policy.py`: the frozen contract for supported families, default execution paths, abstain triggers, and canonical evals
 - `reranker.py`: inventory-aware ranking features
 - `evidence_contract.py`: normalized product facts and allowed-claim package
 - `decisioning.py`: deterministic scoring for recommendation, comparison, restock
@@ -447,15 +448,16 @@ Based on `todo_retrival.md`, the project has already moved well beyond a basic r
 
 Current status in plain language:
 
-- Phase 1 is largely done: question classification and routing exist
-- Phase 2 is largely done: multi-stage retrieval exists, including reranking and metadata-aware handling
-- Phase 3 is done in spirit: the answer layer can work from structured facts, not just raw hits
-- Phase 4 is partly done: compare, restock, and bundle decomposition exist; deeper diagnosis/planning still remains
-- Phase 5 is done in spirit: evidence contracts exist and feed the answer layer
-- Phase 6 is mostly done: deterministic scoring exists for recommendation, comparison, prioritization, and restock
-- Phase 7 is partial: verification exists, but product-fit and forced-abstain policy are not fully closed out
-- Phase 8 is still a gap: stronger evaluation automation is still needed
-- Phase 9 is only partly reflected so far
+- Phase 0 is now done: inventory chat has an explicit policy contract for families, execution paths, abstain rules, and eval coverage
+- Phase 1 is done: question classification and routing exist
+- Phase 2 is done: multi-stage retrieval exists, including lexical recovery, alias handling, reranking, and metadata-aware filtering
+- Phase 3 is done: the answer layer works from structured evidence contracts instead of raw hits alone
+- Phase 4 is done: compare, bundle, restock, diagnosis, and operational planning all have bounded decomposition paths
+- Phase 5 is done: evidence contracts feed planning and verification
+- Phase 6 is done: deterministic scoring exists for recommendation, comparison, prioritization, restock, and alternatives
+- Phase 7 is done: product-fit verification and hard-abstain behavior are enforced
+- Phase 8 is done: the eval matrix now covers the major agentic and hard-constraint families
+- Phase 9 is done: traces expose rejected candidates and score breakdowns
 
 The important strategic point:
 

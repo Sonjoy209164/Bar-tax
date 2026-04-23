@@ -3917,6 +3917,11 @@ class InventoryService:
                 low_stock_threshold=low_stock_threshold,
                 reply_style=reply_style,
             )
+            plan_hits = self._annotate_sales_alternative_scores(
+                hits=plan_hits,
+                primary_product_id=reply.answer_plan.primary_product_id,
+                sales_style=sales_style,
+            )
         else:
             reply = self._build_support_answer(
                 question=question,
@@ -4461,7 +4466,7 @@ class InventoryService:
             elif reason_parts:
                 answer_parts.append(reason_parts[0])
 
-        alternative = self._select_sales_alternative(
+        alternative = self.decision_scorer.select_sales_alternative(
             primary=primary,
             hits=coherent_hits[1:],
             sales_style=sales_style,
@@ -5528,6 +5533,26 @@ class InventoryService:
             ),
         )
 
+    def _annotate_sales_alternative_scores(
+        self,
+        *,
+        hits: list[InventorySearchHit],
+        primary_product_id: str | None,
+        sales_style: str,
+    ) -> list[InventorySearchHit]:
+        if not hits or not primary_product_id:
+            return hits
+        primary = next((hit for hit in hits if hit.product_id == primary_product_id), None)
+        if primary is None:
+            return hits
+        ranked_alternatives = self.decision_scorer.rank_sales_alternatives(
+            primary=primary,
+            hits=[hit for hit in hits if hit.product_id != primary_product_id],
+            sales_style=sales_style,
+        )
+        alternative_by_id = {hit.product_id: hit for hit in ranked_alternatives}
+        return [alternative_by_id.get(hit.product_id, hit) for hit in hits]
+
     def _build_sales_intro(self, *, primary: InventorySearchHit, sales_style: str) -> str:
         if sales_style == "budget":
             return f"I would lead with {primary.name}. It is the strongest budget-friendly match in the current catalog."
@@ -5587,51 +5612,6 @@ class InventoryService:
         if metadata_sentence:
             reasons.append(metadata_sentence)
         return reasons
-
-    def _select_sales_alternative(
-        self,
-        *,
-        primary: InventorySearchHit,
-        hits: list[InventorySearchHit],
-        sales_style: str,
-    ) -> InventorySearchHit | None:
-        if not hits:
-            return None
-        quality_hits = [hit for hit in hits if self._quality_score(hit) >= 3]
-        candidate_hits = quality_hits or hits
-        if sales_style == "premium":
-            lower_priced_hits = [
-                hit
-                for hit in candidate_hits
-                if hit.price is not None and (primary.price is None or hit.price < primary.price)
-            ]
-            if lower_priced_hits:
-                return min(
-                    lower_priced_hits,
-                    key=lambda hit: (-self._quality_score(hit), abs((primary.price or 0.0) - hit.price), -hit.score),
-                )
-        if sales_style == "budget":
-            higher_priced_hits = [
-                hit
-                for hit in candidate_hits
-                if hit.price is not None and (primary.price is None or hit.price > primary.price)
-            ]
-            if higher_priced_hits:
-                return min(
-                    higher_priced_hits,
-                    key=lambda hit: (-self._quality_score(hit), hit.price, -hit.score),
-                )
-        cheaper_hits = [
-            hit
-            for hit in candidate_hits
-            if hit.price is not None and (primary.price is None or hit.price < primary.price)
-        ]
-        if cheaper_hits:
-            return min(
-                cheaper_hits,
-                key=lambda hit: (-self._quality_score(hit), hit.price, -hit.score),
-            )
-        return candidate_hits[0]
 
     def _build_sales_alternative_line(
         self,

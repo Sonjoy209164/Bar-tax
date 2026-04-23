@@ -225,7 +225,7 @@ Apply deterministic logic for:
 - [x] recommendation
 - [x] prioritization
 - [x] restock ranking
-- [ ] alternative suggestion
+- [x] alternative suggestion
 
 Implementation tasks:
 

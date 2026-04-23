@@ -11,14 +11,17 @@ from app.inventory.ontology import ProductOntology
 class InventoryDecisionScore:
     strategy: str
     score: float = 0.0
-    components: dict[str, float] = field(default_factory=dict)
+    components: dict[str, float | str] = field(default_factory=dict)
     reasons: tuple[str, ...] = field(default_factory=tuple)
 
     def to_debug_dict(self) -> dict[str, Any]:
         prefix = f"deterministic_{self.strategy}"
         return {
             f"{prefix}_score": round(self.score, 4),
-            f"{prefix}_components": {key: round(value, 4) for key, value in self.components.items()},
+            f"{prefix}_components": {
+                key: round(value, 4) if isinstance(value, (int, float)) else value
+                for key, value in self.components.items()
+            },
             f"{prefix}_reasons": list(self.reasons),
         }
 
@@ -64,6 +67,62 @@ class InventoryDecisionScorer:
                 ),
             )
         ]
+
+    def rank_sales_alternatives(
+        self,
+        *,
+        primary: InventorySearchHit,
+        hits: list[InventorySearchHit],
+        sales_style: str,
+    ) -> list[InventorySearchHit]:
+        if not hits:
+            return []
+        eligible_hits = [
+            hit
+            for hit in hits
+            if hit.product_id != primary.product_id and self.ontology.valid_alternative(primary, hit)
+        ]
+        if not eligible_hits:
+            return []
+        scored_hits: list[tuple[InventorySearchHit, float]] = []
+        for hit in eligible_hits:
+            decision = self._alternative_score(
+                primary=primary,
+                candidate=hit,
+                sales_style=sales_style,
+            )
+            scored_hits.append((self._merge_decision(hit=hit, decision=decision), decision.score))
+        return [
+            hit
+            for hit, _ in sorted(
+                scored_hits,
+                key=lambda item: (
+                    -item[1],
+                    self._is_out_of_stock(item[0]),
+                    -self._score_value(
+                        item[0],
+                        "deterministic_recommendation_score",
+                        fallback=self._score_value(item[0], "final_score", fallback=item[0].score),
+                    ),
+                    self._alternative_distance_sort_key(primary=primary, candidate=item[0], sales_style=sales_style),
+                    item[0].name.casefold(),
+                ),
+            )
+        ]
+
+    def select_sales_alternative(
+        self,
+        *,
+        primary: InventorySearchHit,
+        hits: list[InventorySearchHit],
+        sales_style: str,
+    ) -> InventorySearchHit | None:
+        ranked = self.rank_sales_alternatives(
+            primary=primary,
+            hits=hits,
+            sales_style=sales_style,
+        )
+        return ranked[0] if ranked else None
 
     def select_comparison_pair(
         self,
@@ -280,6 +339,71 @@ class InventoryDecisionScorer:
             reasons=tuple(reasons[:4]),
         )
 
+    def _alternative_score(
+        self,
+        *,
+        primary: object,
+        candidate: object,
+        sales_style: str,
+    ) -> InventoryDecisionScore:
+        relationship_fit = self._alternative_relationship_fit(primary=primary, candidate=candidate)
+        availability = self._entity_availability_support(candidate)
+        recommendation_fit = max(
+            self._entity_score_value(candidate, "deterministic_recommendation_score"),
+            self._entity_score_value(candidate, "final_score", fallback=self._entity_score(candidate)),
+        )
+        role_fit = self._alternative_role_fit(
+            primary=primary,
+            candidate=candidate,
+            sales_style=sales_style,
+        )
+        quality_support = self._entity_quality_support(candidate)
+        components = {
+            "relationship_fit": relationship_fit,
+            "availability": availability,
+            "recommendation_fit": recommendation_fit,
+            "role_fit": role_fit,
+            "quality_support": quality_support,
+        }
+        if sales_style == "budget":
+            total = (
+                relationship_fit * 0.30
+                + availability * 0.18
+                + recommendation_fit * 0.16
+                + role_fit * 0.26
+                + quality_support * 0.10
+            )
+        elif sales_style == "premium":
+            total = (
+                relationship_fit * 0.34
+                + availability * 0.22
+                + recommendation_fit * 0.18
+                + role_fit * 0.18
+                + quality_support * 0.08
+            )
+        else:
+            total = (
+                relationship_fit * 0.32
+                + availability * 0.24
+                + recommendation_fit * 0.20
+                + role_fit * 0.14
+                + quality_support * 0.10
+            )
+        if self._entity_out_of_stock(candidate):
+            total *= 0.6
+        reasons = self._alternative_reasons(
+            primary=primary,
+            candidate=candidate,
+            sales_style=sales_style,
+            components=components,
+        )
+        return InventoryDecisionScore(
+            strategy="alternative",
+            score=self._clamp(total),
+            components={**components, "role": self._alternative_role(primary=primary, candidate=candidate, sales_style=sales_style)},
+            reasons=tuple(reasons[:4]),
+        )
+
     def _recommendation_style_fit(
         self,
         *,
@@ -345,6 +469,34 @@ class InventoryDecisionScorer:
             reasons.append("structured evidence support is stronger than the nearby options")
         return reasons[:4]
 
+    def _alternative_reasons(
+        self,
+        *,
+        primary: object,
+        candidate: object,
+        sales_style: str,
+        components: dict[str, float],
+    ) -> list[str]:
+        reasons: list[str] = []
+        role = self._alternative_role(primary=primary, candidate=candidate, sales_style=sales_style)
+        if components["relationship_fit"] >= 0.95:
+            reasons.append("it stays in the exact same product type")
+        elif components["relationship_fit"] >= 0.75:
+            reasons.append("it stays in the closest product family")
+        if role == "fallback":
+            reasons.append(f"it gives you a more accessible fallback than {self._entity_name(primary)}")
+        elif role == "step_up":
+            reasons.append(f"it creates a cleaner step-up from {self._entity_name(primary)}")
+        if components["recommendation_fit"] >= 0.72:
+            reasons.append("its overall recommendation support is still strong")
+        if components["availability"] >= 0.8:
+            reasons.append("stock is healthy enough to keep it sellable")
+        elif not self._entity_out_of_stock(candidate) and self._entity_stock(candidate) is not None:
+            reasons.append(f"current stock of {self._entity_stock(candidate)} keeps it usable")
+        if components["quality_support"] >= 0.65:
+            reasons.append("the catalog evidence is complete enough to pitch confidently")
+        return reasons[:4]
+
     @staticmethod
     def _merge_decision(hit: InventorySearchHit, decision: InventoryDecisionScore) -> InventorySearchHit:
         merged_evidence = {
@@ -360,6 +512,191 @@ class InventoryDecisionScorer:
         if isinstance(value, (int, float)):
             return max(0.0, min(1.0, float(value)))
         return max(0.0, min(1.0, float(fallback)))
+
+    @staticmethod
+    def _entity_scores(entity: object) -> dict[str, Any]:
+        if isinstance(getattr(entity, "evidence_scores", None), dict):
+            return getattr(entity, "evidence_scores")
+        if isinstance(getattr(entity, "score_breakdown", None), dict):
+            return getattr(entity, "score_breakdown")
+        return {}
+
+    def _entity_score_value(self, entity: object, key: str, fallback: float = 0.0) -> float:
+        value = self._entity_scores(entity).get(key)
+        if isinstance(value, (int, float)):
+            return max(0.0, min(1.0, float(value)))
+        return max(0.0, min(1.0, float(fallback)))
+
+    @staticmethod
+    def _entity_score(entity: object) -> float:
+        value = getattr(entity, "score", 0.0)
+        if isinstance(value, (int, float)):
+            return float(value)
+        return 0.0
+
+    @staticmethod
+    def _entity_name(entity: object) -> str:
+        value = getattr(entity, "name", None)
+        return value if isinstance(value, str) and value else "this option"
+
+    @staticmethod
+    def _entity_price(entity: object) -> float | None:
+        value = getattr(entity, "price", None)
+        return float(value) if isinstance(value, (int, float)) else None
+
+    @staticmethod
+    def _entity_stock(entity: object) -> int | None:
+        value = getattr(entity, "stock", None)
+        return int(value) if isinstance(value, int) else None
+
+    @staticmethod
+    def _entity_snippet(entity: object) -> str:
+        value = getattr(entity, "snippet", None)
+        return value if isinstance(value, str) else ""
+
+    @staticmethod
+    def _entity_tags(entity: object) -> list[str]:
+        tags = getattr(entity, "tags", None)
+        if isinstance(tags, list):
+            return [tag for tag in tags if isinstance(tag, str)]
+        return []
+
+    def _entity_availability_support(self, entity: object) -> float:
+        stock = self._entity_stock(entity)
+        if stock is None:
+            return 0.15
+        if stock <= 0:
+            return 0.0
+        if stock <= 2:
+            return 0.55
+        if stock <= 5:
+            return 0.75
+        if stock <= 10:
+            return 0.9
+        return 1.0
+
+    def _entity_out_of_stock(self, entity: object) -> bool:
+        stock = self._entity_stock(entity)
+        return stock is None or stock <= 0
+
+    def _entity_quality_support(self, entity: object) -> float:
+        score = 0
+        name = self._entity_name(entity)
+        if len(name.strip()) >= 4:
+            score += 2
+        category = getattr(entity, "category", None)
+        if isinstance(category, str) and len(category.strip()) >= 3:
+            score += 1
+        brand = getattr(entity, "brand", None)
+        if isinstance(brand, str) and len(brand.strip()) >= 3:
+            score += 1
+        if len(self._entity_snippet(entity).strip()) >= 18:
+            score += 2
+        if self._entity_price(entity) is not None:
+            score += 1
+        if self._entity_stock(entity) is not None:
+            score += 1
+        if self._entity_tags(entity):
+            score += 1
+        return self._clamp(score / 9.0)
+
+    def _alternative_relationship_fit(self, *, primary: object, candidate: object) -> float:
+        primary_type = self.ontology.detect_product_type(product=primary)
+        candidate_type = self.ontology.detect_product_type(product=candidate)
+        if primary_type and candidate_type:
+            if primary_type == candidate_type:
+                return 1.0
+            if self.ontology.product_family(primary_type) == self.ontology.product_family(candidate_type):
+                return 0.82
+        if self.ontology.valid_alternative(primary, candidate):
+            return 0.68
+        return 0.0
+
+    def _alternative_role(
+        self,
+        *,
+        primary: object,
+        candidate: object,
+        sales_style: str,
+    ) -> str:
+        primary_price = self._entity_price(primary)
+        candidate_price = self._entity_price(candidate)
+        if sales_style == "premium":
+            if candidate_price is not None and primary_price is not None and candidate_price < primary_price:
+                return "fallback"
+            if self._entity_score_value(candidate, "budget_fit") >= 0.7:
+                return "fallback"
+        if sales_style == "budget":
+            if candidate_price is not None and primary_price is not None and candidate_price > primary_price:
+                return "step_up"
+            if self._entity_score_value(candidate, "premium_fit") >= 0.7:
+                return "step_up"
+        return "alternative"
+
+    def _alternative_role_fit(
+        self,
+        *,
+        primary: object,
+        candidate: object,
+        sales_style: str,
+    ) -> float:
+        primary_price = self._entity_price(primary)
+        candidate_price = self._entity_price(candidate)
+        recommendation_fit = max(
+            self._entity_score_value(candidate, "deterministic_recommendation_score"),
+            self._entity_score_value(candidate, "final_score", fallback=self._entity_score(candidate)),
+        )
+        if sales_style == "premium":
+            if candidate_price is None or primary_price is None:
+                return max(0.45, self._entity_score_value(candidate, "budget_fit", fallback=recommendation_fit))
+            if candidate_price < primary_price:
+                relative_gap = min((primary_price - candidate_price) / max(primary_price, 1.0), 1.0)
+                return min(1.0, 0.72 + (1.0 - relative_gap) * 0.18 + self._entity_score_value(candidate, "budget_fit") * 0.10)
+            if candidate_price == primary_price:
+                return 0.42
+            return 0.12
+        if sales_style == "budget":
+            premium_support = max(
+                self._entity_score_value(candidate, "premium_fit"),
+                self._entity_score_value(candidate, "structured_spec_match"),
+                self._entity_score_value(candidate, "metadata_match"),
+            )
+            if candidate_price is None or primary_price is None:
+                return max(0.4, premium_support)
+            if candidate_price > primary_price:
+                relative_gap = min((candidate_price - primary_price) / max(primary_price, 1.0), 1.0)
+                return min(1.0, 0.58 + (1.0 - relative_gap) * 0.16 + premium_support * 0.26)
+            if candidate_price == primary_price:
+                return min(0.55, 0.35 + premium_support * 0.20)
+            return 0.1
+        if candidate_price is None or primary_price is None:
+            return 0.5
+        relative_gap = min(abs(candidate_price - primary_price) / max(primary_price, 1.0), 1.0)
+        closeness = 1.0 - relative_gap
+        if sales_style == "availability":
+            return min(1.0, 0.4 + self._entity_availability_support(candidate) * 0.4 + closeness * 0.2)
+        if sales_style == "urgency":
+            return min(1.0, 0.35 + self._entity_availability_support(candidate) * 0.45 + closeness * 0.2)
+        return max(0.35, closeness)
+
+    def _alternative_distance_sort_key(
+        self,
+        *,
+        primary: object,
+        candidate: object,
+        sales_style: str,
+    ) -> tuple[float, float]:
+        primary_price = self._entity_price(primary)
+        candidate_price = self._entity_price(candidate)
+        if primary_price is None or candidate_price is None:
+            return (1.0, 0.0)
+        price_gap = abs(candidate_price - primary_price)
+        direction_bias = 0.0
+        if sales_style == "premium" and candidate_price >= primary_price:
+            direction_bias = 1.0
+        if sales_style == "budget" and candidate_price <= primary_price:
+            direction_bias = 1.0
+        return (direction_bias, price_gap)
 
     @staticmethod
     def _availability_support(hit: InventorySearchHit, *, max_stock: int) -> float:

@@ -273,6 +273,160 @@ def test_inventory_decision_scorer_prefers_premium_recommendation_over_hit_order
     ]
 
 
+def test_inventory_decision_scorer_selects_premium_fallback_deterministically() -> None:
+    scorer = InventoryDecisionScorer()
+    premium = InventorySearchHit(
+        product_id="premium",
+        sku="CMP-LAP-002",
+        name="Nimbus 14 Elite",
+        category="Computing",
+        brand="Nimbus",
+        price=1799.0,
+        currency="USD",
+        stock=11,
+        tags=["computing", "laptop", "premium"],
+        snippet="Premium laptop with OLED display",
+        evidence_scores={
+            "final_score": 0.82,
+            "product_type_match": 1.0,
+            "premium_fit": 1.0,
+            "structured_spec_match": 0.8,
+            "stock_fit": 1.0,
+        },
+        score=0.82,
+    )
+    fallback = InventorySearchHit(
+        product_id="fallback",
+        sku="CMP-LAP-011",
+        name="Nimbus 14 Plus",
+        category="Computing",
+        brand="Nimbus",
+        price=1399.0,
+        currency="USD",
+        stock=15,
+        tags=["computing", "laptop"],
+        snippet="Well-equipped laptop with strong battery life",
+        evidence_scores={
+            "final_score": 0.77,
+            "product_type_match": 1.0,
+            "budget_fit": 0.82,
+            "price_fit": 0.75,
+            "stock_fit": 1.0,
+        },
+        score=0.77,
+    )
+    overpriced = InventorySearchHit(
+        product_id="overpriced",
+        sku="CMP-LAP-099",
+        name="Nimbus 14 Studio Max",
+        category="Computing",
+        brand="Nimbus",
+        price=2199.0,
+        currency="USD",
+        stock=13,
+        tags=["computing", "laptop", "premium"],
+        snippet="Higher-priced creator laptop",
+        evidence_scores={
+            "final_score": 0.79,
+            "product_type_match": 1.0,
+            "premium_fit": 1.0,
+            "stock_fit": 1.0,
+        },
+        score=0.79,
+    )
+
+    ranked = scorer.rank_recommendations(hits=[premium, fallback, overpriced], sales_style="premium")
+    primary = next(hit for hit in ranked if hit.product_id == "premium")
+    alternatives = scorer.rank_sales_alternatives(
+        primary=primary,
+        hits=[hit for hit in ranked if hit.product_id != primary.product_id],
+        sales_style="premium",
+    )
+
+    assert alternatives[0].product_id == "fallback"
+    assert alternatives[0].evidence_scores["deterministic_alternative_components"]["role"] == "fallback"
+    assert alternatives[0].evidence_scores["deterministic_alternative_score"] > alternatives[1].evidence_scores[
+        "deterministic_alternative_score"
+    ]
+
+
+def test_inventory_decision_scorer_selects_budget_step_up_deterministically() -> None:
+    scorer = InventoryDecisionScorer()
+    budget = InventorySearchHit(
+        product_id="budget",
+        sku="CMP-LAP-001",
+        name="Nimbus 14 Essential",
+        category="Computing",
+        brand="Nimbus",
+        price=899.0,
+        currency="USD",
+        stock=16,
+        tags=["computing", "laptop"],
+        snippet="Lower-cost business laptop",
+        evidence_scores={
+            "final_score": 0.8,
+            "product_type_match": 1.0,
+            "price_fit": 0.9,
+            "budget_fit": 1.0,
+            "stock_fit": 1.0,
+        },
+        score=0.8,
+    )
+    step_up = InventorySearchHit(
+        product_id="step-up",
+        sku="CMP-LAP-010",
+        name="Nimbus 14 Pro",
+        category="Computing",
+        brand="Nimbus",
+        price=1149.0,
+        currency="USD",
+        stock=14,
+        tags=["computing", "laptop", "premium"],
+        snippet="Higher-resolution display and faster processor",
+        evidence_scores={
+            "final_score": 0.76,
+            "product_type_match": 1.0,
+            "premium_fit": 0.95,
+            "structured_spec_match": 0.7,
+            "stock_fit": 1.0,
+        },
+        score=0.76,
+    )
+    weak_jump = InventorySearchHit(
+        product_id="weak-jump",
+        sku="CMP-LAP-020",
+        name="Nimbus 14 Luxury",
+        category="Computing",
+        brand="Nimbus",
+        price=1699.0,
+        currency="USD",
+        stock=6,
+        tags=["computing", "laptop"],
+        snippet="More expensive but only lightly described",
+        evidence_scores={
+            "final_score": 0.67,
+            "product_type_match": 1.0,
+            "premium_fit": 0.45,
+            "stock_fit": 0.7,
+        },
+        score=0.67,
+    )
+
+    ranked = scorer.rank_recommendations(hits=[budget, step_up, weak_jump], sales_style="budget")
+    primary = next(hit for hit in ranked if hit.product_id == "budget")
+    alternatives = scorer.rank_sales_alternatives(
+        primary=primary,
+        hits=[hit for hit in ranked if hit.product_id != primary.product_id],
+        sales_style="budget",
+    )
+
+    assert alternatives[0].product_id == "step-up"
+    assert alternatives[0].evidence_scores["deterministic_alternative_components"]["role"] == "step_up"
+    assert alternatives[0].evidence_scores["deterministic_alternative_score"] > alternatives[1].evidence_scores[
+        "deterministic_alternative_score"
+    ]
+
+
 def test_inventory_answer_planner_builds_rich_decision_metadata() -> None:
     ontology = ProductOntology()
     preferences = InventoryPreferenceExtractor(ontology).extract(
@@ -363,6 +517,99 @@ def test_inventory_answer_planner_builds_rich_decision_metadata() -> None:
     assert rich_plan.confidence_breakdown["decision"]["strategy"] == "recommendation"
     assert rich_plan.evidence_contract is not None
     assert rich_plan.evidence_contract.required_tradeoffs
+
+
+def test_inventory_answer_planner_explains_deterministic_step_up_scorecard() -> None:
+    ontology = ProductOntology()
+    scorer = InventoryDecisionScorer(ontology)
+    preferences = InventoryPreferenceExtractor(ontology).extract(
+        "Need a budget laptop, but show me the next stronger option too"
+    )
+    intent = InventoryIntentClassifier(ontology).classify(
+        "Need a budget laptop, but show me the next stronger option too"
+    )
+    contract_builder = InventoryEvidenceContractBuilder(ontology)
+    planner = InventoryAnswerPlanner(ontology)
+    ranked = scorer.rank_recommendations(
+        hits=[
+            InventorySearchHit(
+                product_id="budget",
+                sku="CMP-LAP-001",
+                name="Nimbus 14 Essential",
+                category="Computing",
+                brand="Nimbus",
+                price=899.0,
+                currency="USD",
+                stock=16,
+                tags=["computing", "laptop"],
+                snippet="Lower-cost business laptop",
+                evidence_scores={
+                    "final_score": 0.8,
+                    "product_type_match": 1.0,
+                    "price_fit": 0.9,
+                    "budget_fit": 1.0,
+                    "stock_fit": 1.0,
+                },
+                score=0.8,
+            ),
+            InventorySearchHit(
+                product_id="step-up",
+                sku="CMP-LAP-010",
+                name="Nimbus 14 Pro",
+                category="Computing",
+                brand="Nimbus",
+                price=1149.0,
+                currency="USD",
+                stock=14,
+                tags=["computing", "laptop", "premium"],
+                snippet="Higher-resolution display and faster processor",
+                evidence_scores={
+                    "final_score": 0.76,
+                    "product_type_match": 1.0,
+                    "premium_fit": 0.95,
+                    "structured_spec_match": 0.7,
+                    "stock_fit": 1.0,
+                },
+                score=0.76,
+            ),
+        ],
+        sales_style="budget",
+    )
+    primary = next(hit for hit in ranked if hit.product_id == "budget")
+    alternative = scorer.select_sales_alternative(
+        primary=primary,
+        hits=[hit for hit in ranked if hit.product_id != primary.product_id],
+        sales_style="budget",
+    )
+
+    assert alternative is not None
+    plan = InventoryAnswerPlan(
+        intent="sales_budget",
+        primary_product_id=primary.product_id,
+        alternative_product_ids=[alternative.product_id],
+    )
+    evidence_contract = contract_builder.build(
+        question="Need a budget laptop, but show me the next stronger option too",
+        answer_plan=plan,
+        hits=[primary, alternative],
+        preferences=preferences,
+        business_signals={},
+        next_best_question=None,
+    )
+
+    rich_plan = planner.enrich_plan(
+        answer_plan=plan,
+        evidence_contract=evidence_contract,
+        intent_result=intent,
+        preferences=preferences,
+        strategy="sales_budget",
+        next_best_question=None,
+    )
+
+    assert rich_plan.alternative_reason is not None
+    assert "Nimbus 14 Pro" in rich_plan.alternative_reason
+    assert "step-up scorecard" in rich_plan.alternative_reason.lower()
+    assert rich_plan.confidence_breakdown["alternative"]["deterministic_alternative_score"] > 0
 
 
 def test_inventory_answer_planner_explains_deterministic_comparison_scores() -> None:

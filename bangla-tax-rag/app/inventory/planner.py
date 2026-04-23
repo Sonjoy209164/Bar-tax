@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.schemas import InventoryAnswerPlan, InventoryEvidenceContract, InventoryProductEvidence
+from app.inventory.decisioning import InventoryDecisionScorer
 from app.inventory.intent import InventoryIntentResult
 from app.inventory.ontology import ProductOntology
 from app.inventory.preferences import InventoryPreferenceProfile
@@ -14,6 +15,7 @@ class InventoryAnswerPlanner:
 
     def __init__(self, ontology: ProductOntology | None = None) -> None:
         self.ontology = ontology or ProductOntology()
+        self.decision_scorer = InventoryDecisionScorer(self.ontology)
         self.tradeoff_reasoner = InventoryTradeoffReasoner(self.ontology)
 
     def enrich_plan(
@@ -152,14 +154,15 @@ class InventoryAnswerPlanner:
         if primary is None or not alternatives:
             return None
         alternative = alternatives[0]
+        intro_label = self._alternative_intro_label(alternative, decision_strategy)
         relationship = self.ontology.explain_relationship(primary, alternative)
         price_note = self._price_relationship(primary, alternative)
-        parts = [f"Alternative is {alternative.name} because {relationship}"]
-        decision_score = self._decision_score(alternative, decision_strategy)
-        decision_reasons = self._decision_reasons(alternative, decision_strategy)
-        if decision_score is not None and decision_reasons:
+        parts = [f"{intro_label} is {alternative.name} because {relationship}"]
+        alternative_score = self._alternative_score(alternative, decision_strategy)
+        alternative_reasons = self._alternative_reasons(alternative, decision_strategy)
+        if alternative_score is not None and alternative_reasons:
             parts.append(
-                f"it follows on the {self._decision_label(decision_strategy)} at {decision_score:.2f} for {self._natural_reason_join(decision_reasons[:2])}"
+                f"it leads the {self._alternative_label(alternative, decision_strategy)} at {alternative_score:.2f} for {self._natural_reason_join(alternative_reasons[:2])}"
             )
         if price_note:
             parts.append(price_note)
@@ -308,6 +311,7 @@ class InventoryAnswerPlanner:
             "structured_spec_match",
             "unrelated_category_penalty",
             "out_of_stock_penalty",
+            "deterministic_alternative_score",
             "deterministic_recommendation_score",
             "deterministic_comparison_score",
             "deterministic_restock_score",
@@ -315,7 +319,7 @@ class InventoryAnswerPlanner:
         summary = {key: scores[key] for key in keys if key in scores}
         if scores.get("reasons"):
             summary["reasons"] = scores["reasons"]
-        for strategy in ("recommendation", "comparison", "restock"):
+        for strategy in ("alternative", "recommendation", "comparison", "restock"):
             components = scores.get(f"deterministic_{strategy}_components")
             reasons = scores.get(f"deterministic_{strategy}_reasons")
             if isinstance(components, dict):
@@ -361,6 +365,7 @@ class InventoryAnswerPlanner:
             primary=primary,
             candidates=ranked_candidates[1:],
             decision_strategy=decision_strategy,
+            alternative_style=self._recommendation_style(answer_plan),
         )
         alternative_ids = [candidate.product_id for candidate in alternatives[:2]]
         primary_candidate_ids = [primary.product_id, *alternative_ids]
@@ -417,13 +422,30 @@ class InventoryAnswerPlanner:
         primary: InventoryProductEvidence,
         candidates: list[InventoryProductEvidence],
         decision_strategy: str,
+        alternative_style: str | None,
     ) -> list[InventoryProductEvidence]:
         if decision_strategy == "comparison":
             related = [candidate for candidate in candidates if self.ontology.valid_alternative(primary, candidate)]
-            return related or candidates[:1]
+            ranked_related = sorted(
+                related or candidates[:1],
+                key=lambda candidate: (
+                    -(self._alternative_score(candidate, decision_strategy) or self._decision_score(candidate, decision_strategy) or 0.0),
+                    -(self._evidence_number(candidate, "final_score") or candidate.score or 0.0),
+                    candidate.name.casefold(),
+                ),
+            )
+            return ranked_related[:1]
         if decision_strategy == "recommendation":
             related = [candidate for candidate in candidates if self.ontology.valid_alternative(primary, candidate)]
-            return related[:2]
+            ranked_related = sorted(
+                related,
+                key=lambda candidate: self._recommendation_alternative_sort_key(
+                    primary=primary,
+                    candidate=candidate,
+                    alternative_style=alternative_style,
+                ),
+            )
+            return ranked_related[:2]
         return []
 
     def _build_decision_reasoning_steps(
@@ -444,13 +466,83 @@ class InventoryAnswerPlanner:
             )
         if alternatives:
             alternative = alternatives[0]
-            alternative_score = self._decision_score(alternative, decision_strategy)
-            alternative_reasons = self._decision_reasons(alternative, decision_strategy)
+            alternative_score = self._alternative_score(alternative, decision_strategy)
+            alternative_reasons = self._alternative_reasons(alternative, decision_strategy)
             if alternative_score is not None and alternative_reasons:
                 steps.append(
-                    f"Next-best option was {alternative.name} at {alternative_score:.2f} because {self._natural_reason_join(alternative_reasons[:2])}."
+                    f"{self._alternative_intro_label(alternative, decision_strategy)} was {alternative.name} at {alternative_score:.2f} on the {self._alternative_label(alternative, decision_strategy)} because {self._natural_reason_join(alternative_reasons[:2])}."
                 )
         return steps
+
+    def _recommendation_style(self, answer_plan: InventoryAnswerPlan) -> str | None:
+        plan_intent = answer_plan.intent or ""
+        plan_strategy = answer_plan.strategy or ""
+        combined = f"{plan_intent} {plan_strategy}"
+        if "sales_premium" in combined:
+            return "premium"
+        if "sales_budget" in combined:
+            return "budget"
+        if "sales_availability" in combined:
+            return "availability"
+        if "sales_urgency" in combined:
+            return "urgency"
+        if "sales" in combined:
+            return "general"
+        return None
+
+    def _recommendation_alternative_sort_key(
+        self,
+        *,
+        primary: InventoryProductEvidence,
+        candidate: InventoryProductEvidence,
+        alternative_style: str | None,
+    ) -> tuple[float, float, float, float, str]:
+        alternative_score = self._alternative_score(candidate, "recommendation")
+        recommendation_score = self._decision_score(candidate, "recommendation") or 0.0
+        direction_penalty = self._alternative_direction_penalty(
+            primary=primary,
+            candidate=candidate,
+            alternative_style=alternative_style,
+        )
+        price_gap = self._price_gap(primary=primary, candidate=candidate)
+        return (
+            -(alternative_score if alternative_score is not None else recommendation_score),
+            direction_penalty,
+            price_gap,
+            -recommendation_score,
+            candidate.name.casefold(),
+        )
+
+    def _alternative_direction_penalty(
+        self,
+        *,
+        primary: InventoryProductEvidence,
+        candidate: InventoryProductEvidence,
+        alternative_style: str | None,
+    ) -> float:
+        primary_price = self._fact_value(primary, "price")
+        candidate_price = self._fact_value(candidate, "price")
+        if alternative_style == "premium":
+            if candidate_price is None or primary_price is None:
+                return 0.25
+            return 0.0 if candidate_price < primary_price else 1.0
+        if alternative_style == "budget":
+            if candidate_price is None or primary_price is None:
+                return 0.25
+            return 0.0 if candidate_price > primary_price else 1.0
+        return 0.0
+
+    def _price_gap(
+        self,
+        *,
+        primary: InventoryProductEvidence,
+        candidate: InventoryProductEvidence,
+    ) -> float:
+        primary_price = self._fact_value(primary, "price")
+        candidate_price = self._fact_value(candidate, "price")
+        if primary_price is None or candidate_price is None:
+            return float("inf")
+        return abs(candidate_price - primary_price)
 
     @staticmethod
     def _decision_label(decision_strategy: str | None) -> str:
@@ -459,6 +551,34 @@ class InventoryAnswerPlanner:
         if decision_strategy == "comparison":
             return "comparison scorecard"
         return "recommendation scorecard"
+
+    def _alternative_label(
+        self,
+        evidence: InventoryProductEvidence,
+        decision_strategy: str | None,
+    ) -> str:
+        if decision_strategy == "comparison":
+            return "comparison scorecard"
+        role = self._alternative_role(evidence)
+        if role == "fallback":
+            return "fallback scorecard"
+        if role == "step_up":
+            return "step-up scorecard"
+        return "alternative scorecard"
+
+    def _alternative_intro_label(
+        self,
+        evidence: InventoryProductEvidence,
+        decision_strategy: str | None,
+    ) -> str:
+        if decision_strategy == "comparison":
+            return "Alternative"
+        role = self._alternative_role(evidence)
+        if role == "fallback":
+            return "Fallback option"
+        if role == "step_up":
+            return "Step-up option"
+        return "Alternative"
 
     @staticmethod
     def _natural_reason_join(reasons: list[str]) -> str:
@@ -483,6 +603,31 @@ class InventoryAnswerPlanner:
         if isinstance(value, list):
             return [reason for reason in value if isinstance(reason, str) and reason]
         return []
+
+    def _alternative_score(self, evidence: InventoryProductEvidence, decision_strategy: str | None) -> float | None:
+        if decision_strategy == "recommendation" and evidence.score_breakdown:
+            value = evidence.score_breakdown.get("deterministic_alternative_score")
+            if isinstance(value, (int, float)):
+                return float(value)
+        return self._decision_score(evidence, decision_strategy)
+
+    def _alternative_reasons(self, evidence: InventoryProductEvidence, decision_strategy: str | None) -> list[str]:
+        if decision_strategy == "recommendation" and evidence.score_breakdown:
+            value = evidence.score_breakdown.get("deterministic_alternative_reasons")
+            if isinstance(value, list):
+                return [reason for reason in value if isinstance(reason, str) and reason]
+        return self._decision_reasons(evidence, decision_strategy)
+
+    @staticmethod
+    def _alternative_role(evidence: InventoryProductEvidence) -> str | None:
+        if not evidence.score_breakdown:
+            return None
+        components = evidence.score_breakdown.get("deterministic_alternative_components")
+        if isinstance(components, dict):
+            role = components.get("role")
+            if isinstance(role, str) and role:
+                return role
+        return None
 
     @staticmethod
     def _evidence_reasons(evidence: InventoryProductEvidence) -> list[str]:

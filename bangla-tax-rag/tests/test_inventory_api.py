@@ -873,6 +873,85 @@ def test_inventory_sales_answer_uses_deterministic_recommendation_scorecard(tmp_
     assert "recommendation scorecard" in (reply.answer_plan.primary_reason or "").lower()
 
 
+def test_inventory_sales_answer_uses_deterministic_step_up_alternative_scorecard(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+
+    reply = service._build_answer(
+        question="Recommend a budget laptop for this customer, but show the next stronger option too",
+        hits=[
+            InventorySearchHit(
+                product_id="budget",
+                sku="CMP-LAP-001",
+                name="Nimbus 14 Essential",
+                category="Computing",
+                brand="Nimbus",
+                price=899.0,
+                currency="USD",
+                stock=16,
+                tags=["computing", "laptop"],
+                snippet="Lower-cost business laptop",
+                evidence_scores={
+                    "final_score": 0.88,
+                    "product_type_match": 1.0,
+                    "price_fit": 0.9,
+                    "budget_fit": 1.0,
+                    "stock_fit": 1.0,
+                },
+                score=0.88,
+            ),
+            InventorySearchHit(
+                product_id="step-up",
+                sku="CMP-LAP-010",
+                name="Nimbus 14 Pro",
+                category="Computing",
+                brand="Nimbus",
+                price=1149.0,
+                currency="USD",
+                stock=14,
+                tags=["computing", "laptop", "premium"],
+                snippet="Higher-resolution display and faster processor",
+                evidence_scores={
+                    "final_score": 0.68,
+                    "product_type_match": 1.0,
+                    "premium_fit": 0.95,
+                    "structured_spec_match": 0.7,
+                    "stock_fit": 1.0,
+                },
+                score=0.68,
+            ),
+            InventorySearchHit(
+                product_id="weak-jump",
+                sku="CMP-LAP-020",
+                name="Nimbus 14 Luxury",
+                category="Computing",
+                brand="Nimbus",
+                price=1699.0,
+                currency="USD",
+                stock=6,
+                tags=["computing", "laptop"],
+                snippet="More expensive but only lightly described",
+                evidence_scores={
+                    "final_score": 0.61,
+                    "product_type_match": 1.0,
+                    "premium_fit": 0.45,
+                    "stock_fit": 0.7,
+                },
+                score=0.61,
+            ),
+        ],
+        filters=InventorySearchFilters(),
+        low_stock_threshold=10,
+        assistant_mode="sales",
+        reply_style="detailed",
+    )
+
+    assert reply.answer_plan.primary_product_id == "budget"
+    assert reply.answer_plan.alternative_product_ids == ["step-up"]
+    assert "the next option to show is Nimbus 14 Pro" in reply.answer
+    assert "step-up scorecard" in (reply.answer_plan.alternative_reason or "").lower()
+    assert reply.answer_plan.confidence_breakdown["alternative"]["deterministic_alternative_score"] > 0
+
+
 def test_inventory_natural_prompt_uses_writer_contract_and_plan_fields(tmp_path) -> None:  # type: ignore[no-untyped-def]
     service = _build_inventory_service(tmp_path)
     hit = InventorySearchHit(
@@ -1180,9 +1259,12 @@ async def test_inventory_sales_mode_recommends_grounded_product(monkeypatch: pyt
     assert payload["assistant_mode"] == "sales"
     assert payload["reply_style"] == "detailed"
     assert payload["recommended_product_ids"][0] == "prod-headphones-pro"
+    assert payload["answer_plan"]["alternative_product_ids"] == ["prod-headphones-lite"]
     assert "start with Wireless Headphones Pro Max as the premium option" in payload["answer"]
     assert "Wireless Headphones Lite ready as the fallback" in payload["answer"]
     assert "watch ready as the fallback" not in payload["answer"]
+    assert "fallback scorecard" in payload["answer_plan"]["alternative_reason"].lower()
+    assert payload["answer_plan"]["confidence_breakdown"]["alternative"]["deterministic_alternative_score"] > 0
     assert "grounded in the current catalog only" in payload["answer"]
 
 

@@ -1,6 +1,6 @@
 # Inventory RAG Frontend Demo
 
-This is a static demo frontend for testing the inventory chatbot without adding another backend.
+This frontend is now best used through the FastAPI backend mount so it shares the same origin as the live API and can exercise the full pipeline cleanly.
 
 It uses:
 
@@ -15,7 +15,24 @@ It uses:
 - `GET /health`, `GET /config`, `GET /inventory/status`, `GET /inventory/sync/status`, `GET /inventory/business/status`, and `GET /inventory/production/status` for runtime diagnostics.
 - `GET /inventory/chat/trace/{trace_id}` to inspect why an answer behaved the way it did.
 
-## Run
+## Preferred Run
+
+Start the backend:
+
+```bash
+cd "/home/sonjoy/Bar tax/bangla-tax-rag"
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 4893
+```
+
+Open:
+
+```text
+http://127.0.0.1:4893/frontend/
+```
+
+That path is the preferred setup. The frontend will auto-detect the same-origin backend, use the live FastAPI app directly, and avoid cross-origin drift.
+
+## Fallback Static Run
 
 From the `bangla-tax-rag` repo root:
 
@@ -28,6 +45,8 @@ Open:
 ```text
 http://localhost:5173
 ```
+
+In this fallback mode, point the page at `http://127.0.0.1:4893` or use `frontend/config.local.json`.
 
 Do not test from a browser-saved `Inventory RAG Chat Demo.html` file. That is only a snapshot and can keep old JavaScript and old chat messages. Use the local server URL above and hard refresh after code changes.
 
@@ -46,6 +65,8 @@ http://marshalmind.codemarshal.com:4893
 If API key protection is enabled, paste the key into the page. The key is only stored in browser `sessionStorage`.
 
 ## Optional Local Config
+
+This is mainly for the fallback static run on port `5173`. When you use `http://127.0.0.1:4893/frontend/`, the backend now serves a safe runtime config and the frontend auto-targets the same origin.
 
 For faster local testing, create:
 
@@ -103,8 +124,8 @@ It also now appends a scrollable **Full System Steps** timeline directly below t
 ## What This Frontend Now Tests Well
 
 - direct status and health checks against the live backend
-- sample catalog sync plus business-signal sync
-- one-time sample bootstrap detection, so the same sample version is not blindly replayed into the same backend
+- destructive sample reset plus business-signal sync
+- backend-truth one-time sample bootstrap detection, so the same sample version is only locked when the backend exactly matches the bundled sample and contains no extra data
 - full sync rebuild behavior
 - backend catalog loading
 - normal RAG answers

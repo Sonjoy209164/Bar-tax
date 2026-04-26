@@ -48,6 +48,32 @@ async def test_config_endpoint() -> None:
 
 
 @pytest.mark.anyio
+async def test_frontend_runtime_config_endpoint() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/frontend/runtime-config.json")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["apiBaseUrl"] == "http://test"
+    assert payload["sameOriginApi"] is True
+    assert payload["apiKeyHeader"] == "X-API-Key"
+
+
+@pytest.mark.anyio
+async def test_frontend_mount_serves_index_and_blocks_local_config() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        redirect_response = await client.get("/frontend", follow_redirects=False)
+        index_response = await client.get("/frontend/")
+        blocked_response = await client.get("/frontend/config.local.json")
+
+    assert redirect_response.status_code == 307
+    assert redirect_response.headers["location"] == "/frontend/"
+    assert index_response.status_code == 200
+    assert "Inventory Backend Test Cockpit" in index_response.text
+    assert blocked_response.status_code == 404
+
+
+@pytest.mark.anyio
 async def test_inventory_policy_endpoint() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/inventory/policy")

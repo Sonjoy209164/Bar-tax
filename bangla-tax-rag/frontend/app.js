@@ -9,11 +9,15 @@ const DEFAULT_DATA_DOMAINS = [
   "customers"
 ];
 
+const DEFAULT_LOCAL_BACKEND_URL = "http://localhost:4893";
+
 const state = {
-  apiBaseUrl: sessionStorage.getItem("inventoryDemo.apiBaseUrl") || "http://localhost:4893",
+  apiBaseUrl: sessionStorage.getItem("inventoryDemo.apiBaseUrl") || defaultApiBaseUrl(),
   apiKey: sessionStorage.getItem("inventoryDemo.apiKey") || "",
   dataDomains:
     sessionStorage.getItem("inventoryDemo.dataDomains") || DEFAULT_DATA_DOMAINS.join(", "),
+  frontendRuntimeConfig: null,
+  servedByBackend: false,
   sampleData: null,
   liveCatalog: [],
   runtimeConfig: null,
@@ -99,6 +103,7 @@ void boot();
 async function boot() {
   try {
     wireEvents();
+    await loadRuntimeFrontendConfig();
     await loadLocalConfig();
     applySettingsToInputs();
     renderSyncCatalogButtonState();
@@ -148,7 +153,35 @@ async function loadSampleData() {
   state.sampleData = await response.json();
 }
 
+async function loadRuntimeFrontendConfig() {
+  try {
+    const response = await fetch("./runtime-config.json", { cache: "no-store" });
+    if (!response.ok) {
+      return;
+    }
+    const config = await response.json();
+    state.frontendRuntimeConfig = config;
+    state.servedByBackend = Boolean(config.sameOriginApi);
+
+    const storedApiBaseUrl = sessionStorage.getItem("inventoryDemo.apiBaseUrl");
+    if (!storedApiBaseUrl && config.apiBaseUrl) {
+      state.apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl);
+    }
+
+    setConnection(
+      "neutral",
+      "Backend-mounted frontend detected",
+      "Using same-origin FastAPI wiring so streaming, traces, and route selection hit the live pipeline directly."
+    );
+  } catch (error) {
+    console.warn("Could not load frontend runtime config", error);
+  }
+}
+
 async function loadLocalConfig() {
+  if (state.servedByBackend) {
+    return;
+  }
   try {
     const response = await fetch("./config.local.json", { cache: "no-store" });
     if (!response.ok) {
@@ -416,44 +449,58 @@ async function syncSampleData() {
     state.sampleSyncState = {
       ...state.sampleSyncState,
       syncing: true,
-      message: "Syncing sample data to the current backend."
+      message: "Resetting backend data and loading the bundled sample version."
     };
     renderSyncCatalogButtonState();
 
-    const upsertCatalog = await apiPost("/inventory/items/upsert", { items: buildSampleSyncItemsPayload() });
-    const upsertBusiness = await optionalApiPost("/inventory/business/signals/upsert", {
-      signals: buildSampleSyncBusinessSignalsPayload()
+    const existingCatalog = await apiGet("/inventory/items");
+    const existingBusinessSignals = await apiGet("/inventory/business/signals");
+    const resetSummary = await resetBackendForSampleSync({
+      catalog: existingCatalog,
+      businessSignals: existingBusinessSignals
     });
+    const upsertCatalog = await apiPost("/inventory/items/upsert", { items: buildSampleSyncItemsPayload() });
+    const upsertBusiness = Array.isArray(state.sampleData.business_signals) && state.sampleData.business_signals.length
+      ? await apiPost("/inventory/business/signals/upsert", {
+          signals: buildSampleSyncBusinessSignalsPayload()
+        })
+      : {
+          status: "skipped",
+          skipped: true,
+          upserted_count: 0,
+          total_signals: 0,
+          product_count: 0,
+          business_signal_path: null
+        };
+    const rebuild = await optionalApiPost("/inventory/sync/rebuild");
     const syncStatus = await optionalApiGet("/inventory/sync/status");
     const catalog = await apiGet("/inventory/items");
-    const businessSignals = await optionalApiGet("/inventory/business/signals");
+    const businessSignals = await apiGet("/inventory/business/signals");
     state.liveCatalog = catalog.items || [];
     renderProducts();
     renderStatusCards(await fetchRuntimeSnapshot());
-    rememberSampleSyncRecord({
-      apiBaseUrl: state.apiBaseUrl,
-      sampleVersion: state.sampleData?.version || "unknown",
-      syncedAt: new Date().toISOString(),
-      itemCount: state.sampleData?.items?.length || 0,
-      signalCount: state.sampleData?.business_signals?.length || 0
-    });
     await refreshSampleSyncState({ catalog, businessSignals });
 
-    const businessDetail = upsertBusiness.unavailable
-      ? "business signal endpoint unavailable on this server"
+    const businessDetail = upsertBusiness.skipped
+      ? "no bundled business signals"
       : `${upsertBusiness.upserted_count} business signals`;
+    const rebuildDetail = rebuild.unavailable
+      ? "sync-rebuild endpoint unavailable"
+      : `${rebuild.rebuilt_count} vectors rebuilt`;
     const syncDetail = syncStatus.unavailable
       ? "sync-status endpoint unavailable"
       : `${syncStatus.vector_record_count} vectors after sync`;
     setConnection(
-      "good",
-      "Sample JSON synced",
-      `${upsertCatalog.upserted_count} products synced; ${businessDetail}; ${syncDetail}.`
+      state.sampleSyncState.done ? "good" : "bad",
+      state.sampleSyncState.done ? "Backend reset + sample synced" : "Sample sync incomplete",
+      `${resetSummary.deletedCatalogCount} old products cleared; ${resetSummary.deletedSignalCount} old signals cleared; ${upsertCatalog.upserted_count} products synced; ${businessDetail}; ${rebuildDetail}; ${syncDetail}.`
     );
     elements.traceOutput.textContent = JSON.stringify(
       {
+        resetSummary,
         upsertCatalog,
         upsertBusiness,
+        rebuild,
         syncStatus,
         catalog,
         businessSignals,
@@ -463,6 +510,42 @@ async function syncSampleData() {
       2
     );
   }, "Sync failed");
+}
+
+async function resetBackendForSampleSync({ catalog, businessSignals }) {
+  const catalogProductIds = dedupe((catalog?.items || []).map((item) => item.product_id).filter(Boolean));
+  const signalProductIds = dedupe((businessSignals?.signals || []).map((signal) => signal.product_id).filter(Boolean));
+
+  const deleteSignals = signalProductIds.length
+    ? await apiPost("/inventory/business/signals/delete", { product_ids: signalProductIds })
+    : {
+        status: "skipped",
+        skipped: true,
+        deleted_count: 0,
+        total_signals: 0,
+        product_count: 0,
+        business_signal_path: null
+      };
+
+  const deleteCatalog = catalogProductIds.length
+    ? await apiPost("/inventory/items/delete", { product_ids: catalogProductIds })
+    : {
+        status: "skipped",
+        skipped: true,
+        deleted_count: 0,
+        total_items: 0,
+        namespace: null,
+        catalog_path: null
+      };
+
+  return {
+    existingCatalogCount: catalogProductIds.length,
+    existingSignalCount: signalProductIds.length,
+    deletedCatalogCount: deleteCatalog.deleted_count || 0,
+    deletedSignalCount: deleteSignals.deleted_count || 0,
+    deleteCatalog,
+    deleteSignals
+  };
 }
 
 async function rebuildSync() {
@@ -2377,6 +2460,7 @@ function setButtonsDisabled(disabled) {
 function setConnection(kind, label, detail) {
   elements.connectionDot.classList.toggle("good", kind === "good");
   elements.connectionDot.classList.toggle("bad", kind === "bad");
+  elements.connectionDot.classList.toggle("neutral", kind === "neutral");
   elements.connectionLabel.textContent = label;
   elements.connectionDetail.textContent = detail;
 }
@@ -2409,7 +2493,23 @@ function mapRoutePath(value) {
 }
 
 function normalizeBaseUrl(value) {
-  return (value || "http://localhost:4893").trim().replace(/\/+$/, "");
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return defaultApiBaseUrl();
+  }
+  if (normalized === "." || normalized === "/" || normalized.toLowerCase() === "same-origin") {
+    return normalizeBaseUrl(globalThis.location?.origin || DEFAULT_LOCAL_BACKEND_URL);
+  }
+  return normalized.replace(/\/+$/, "");
+}
+
+function defaultApiBaseUrl() {
+  const origin = globalThis.location?.origin || "";
+  const pathname = globalThis.location?.pathname || "";
+  if (origin && pathname.startsWith("/frontend")) {
+    return normalizeBaseUrl(origin);
+  }
+  return DEFAULT_LOCAL_BACKEND_URL;
 }
 
 function shortId(value) {

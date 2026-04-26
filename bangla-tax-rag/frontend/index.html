@@ -13,7 +13,7 @@
           <p class="eyebrow">Inventory Backend Test Cockpit</p>
           <h1>Patch this frontend directly into the current backend and exercise the real system.</h1>
           <p class="hero-copy">
-            This static page now targets the live FastAPI inventory backend for testing. It can sync sample
+            This cockpit now works best when served by the live FastAPI backend at `/frontend/`. It can sync sample
             data, inspect production and sync health, route between normal and agentic chat, stream answers,
             and load traces so you can validate behavior without waiting on the full production UI stack.
           </p>
@@ -46,13 +46,16 @@
           <button id="saveSettingsButton">Save</button>
           <button id="checkStatusButton" class="secondary">Check Status</button>
           <button id="loadCatalogButton" class="secondary">Load Catalog</button>
-          <button id="syncCatalogButton" class="accent">Sync Sample JSON</button>
+          <button id="syncCatalogButton" class="accent">Reset + Sync Sample JSON</button>
           <button id="rebuildSyncButton" class="secondary">Rebuild Sync</button>
           <button id="loadConfigButton" class="secondary">Load Config</button>
         </div>
         <p class="warning">
-          Testing only: this page calls the FastAPI backend directly from the browser. That makes it ideal
-          for fast backend QA, but it is still not the production security model.
+          Preferred wiring: open this page through `http://127.0.0.1:4893/frontend/` so the frontend and backend
+          share one origin.
+          Testing only: this page calls the FastAPI backend directly from the browser. `Reset + Sync Sample JSON`
+          clears the current backend catalog and business signals before loading the bundled sample once, so use it
+          only against a disposable test backend.
         </p>
       </section>
 

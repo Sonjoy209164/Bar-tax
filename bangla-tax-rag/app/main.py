@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes_eval import router as eval_router
 from app.api.routes_agentic import router as agentic_router
@@ -21,6 +23,17 @@ from app.core.settings import get_settings
 configure_logging()
 initial_settings = get_settings()
 logger = get_logger(__name__)
+FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
+
+
+class SafeFrontendFiles(StaticFiles):
+    _DENYLIST = {"config.local.json"}
+
+    async def get_response(self, path: str, scope):  # type: ignore[override]
+        normalized = Path(path).as_posix().lstrip("/")
+        if normalized in self._DENYLIST:
+            return JSONResponse({"detail": {"error": "frontend_asset_not_found"}}, status_code=404)
+        return await super().get_response(path, scope)
 
 
 @asynccontextmanager
@@ -62,9 +75,35 @@ async def custom_swagger_ui():
     return build_swagger_html(openapi_url="/openapi.json", title=f"{app.title} - Swagger UI")
 
 
+@app.get("/frontend", include_in_schema=False)
+async def frontend_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/frontend/", status_code=307)
+
+
+@app.get("/frontend/runtime-config.json", include_in_schema=False)
+async def frontend_runtime_config(request: Request) -> JSONResponse:
+    settings = get_settings()
+    return JSONResponse(
+        {
+            "apiBaseUrl": str(request.base_url).rstrip("/"),
+            "sameOriginApi": True,
+            "apiAuthEnabled": bool(settings.accepted_api_keys()),
+            "apiKeyHeader": "X-API-Key",
+            "frontendPath": "/frontend/",
+        }
+    )
+
+
 app.include_router(health_router)
 app.include_router(ingest_router, dependencies=[Depends(require_api_key)])
 app.include_router(inventory_router, dependencies=[Depends(require_api_key)])
 app.include_router(query_router, dependencies=[Depends(require_api_key)])
 app.include_router(eval_router, dependencies=[Depends(require_api_key)])
 app.include_router(agentic_router, dependencies=[Depends(require_api_key)])
+
+if FRONTEND_DIR.exists():
+    app.mount(
+        "/frontend",
+        SafeFrontendFiles(directory=str(FRONTEND_DIR), html=True),
+        name="inventory_frontend",
+    )

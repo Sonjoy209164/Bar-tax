@@ -21,13 +21,19 @@ Check backend health:
 curl http://127.0.0.1:4893/health
 ```
 
+Open the preferred same-origin frontend:
+
+```text
+http://127.0.0.1:4893/frontend/
+```
+
 Watch backend logs:
 
 ```bash
 tail -f .runtime/backend-4893.log
 ```
 
-## 2. Start Frontend In Background
+## 2. Start Static Frontend In Background
 
 Serve the static frontend on port `5173`:
 
@@ -40,6 +46,8 @@ Open in browser:
 ```text
 http://127.0.0.1:5173
 ```
+
+Use this only if you explicitly want the standalone static mode. The preferred wiring is the backend-served frontend at `http://127.0.0.1:4893/frontend/`.
 
 Watch frontend server logs:
 
@@ -87,6 +95,13 @@ Frontend reachability:
 
 ```bash
 curl -I http://127.0.0.1:5173
+```
+
+Backend-served frontend reachability:
+
+```bash
+curl -I http://127.0.0.1:4893/frontend/
+curl http://127.0.0.1:4893/frontend/runtime-config.json
 ```
 
 ## 5. Stop Background Processes

@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.domain.query_taxonomy import QueryExecutionPath, QueryType
 
@@ -231,6 +231,36 @@ class EvalResponse(BaseModel):
     metrics_summary: dict[str, Any]
 
 
+class InventoryEvalRequest(BaseModel):
+    case_ids: list[str] = Field(default_factory=list)
+    output_dir: str | None = None
+    baseline_summary_path: str | None = None
+
+    @field_validator("case_ids")
+    @classmethod
+    def normalize_case_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for case_id in value:
+            stripped = case_id.strip()
+            if not stripped:
+                continue
+            lowered = stripped.casefold()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(stripped)
+        return normalized
+
+    @field_validator("output_dir", "baseline_summary_path")
+    @classmethod
+    def normalize_optional_eval_paths(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
 class AnnotationCandidate(BaseModel):
     question_id: str
     source_chunk_id: str
@@ -315,6 +345,10 @@ class BuildIndexResponse(BaseModel):
 class ConfigResponse(BaseModel):
     app_name: str
     app_env: str
+    api_auth_enabled: bool = False
+    api_key_rotation_enabled: bool = False
+    api_rate_limit_requests: int = 0
+    api_rate_limit_window_seconds: int = 60
     raw_data_dir: str
     processed_data_dir: str
     sparse_index_dir: str
@@ -335,3 +369,973 @@ class ConfigResponse(BaseModel):
     embedding_model_name: str
     reranker_provider: str
     reranker_model_name: str
+
+
+class InventoryItemRecord(BaseModel):
+    product_id: str = Field(..., description="Stable product identifier from the inventory system.")
+    sku: str = Field(..., description="Human-readable stock keeping unit.")
+    name: str = Field(..., description="Primary product name.")
+    category: str | None = Field(default=None, description="High-level product category.")
+    brand: str | None = Field(default=None, description="Brand or manufacturer name.")
+    short_description: str | None = Field(default=None, description="Short description for list views.")
+    full_description: str | None = Field(default=None, description="Long-form description for retrieval.")
+    price: float | None = Field(default=None, ge=0, description="Current unit price.")
+    currency: str = Field(default="USD", description="Display currency.")
+    stock: int = Field(default=0, ge=0, description="Current stock quantity.")
+    status: str | None = Field(default=None, description="Operational stock status.")
+    tags: list[str] = Field(default_factory=list, description="Free-form tags used for search and filtering.")
+    attributes: dict[str, str] = Field(default_factory=dict, description="Structured product attributes.")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional opaque metadata from the inventory system.")
+    include_in_rag: bool = Field(default=True, description="Whether the product should be indexed for semantic retrieval.")
+    updated_at: str | None = Field(default=None, description="Last updated timestamp from the source system.")
+
+    @field_validator("product_id", "sku", "name")
+    @classmethod
+    def validate_required_text_fields(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Required inventory text fields must not be empty.")
+        return stripped
+
+    @field_validator("category", "brand", "short_description", "full_description", "status", "updated_at")
+    @classmethod
+    def normalize_optional_text_fields(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("currency must not be empty")
+        return stripped.upper()
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, value: list[str]) -> list[str]:
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for tag in value:
+            normalized = tag.strip()
+            if not normalized:
+                continue
+            lowered = normalized.casefold()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            deduped.append(normalized)
+        return deduped
+
+
+class InventoryCatalogResponse(BaseModel):
+    status: str
+    total_items: int
+    items: list[InventoryItemRecord] = Field(default_factory=list)
+
+
+class InventoryStatusResponse(BaseModel):
+    status: str
+    ready: bool
+    total_items: int
+    rag_enabled_items: int
+    vector_record_count: int
+    namespace: str
+    catalog_path: str
+    vector_backend: str
+    vector_store_path: str | None = None
+    storage_backend: str | None = None
+    storage_path: str | None = None
+
+
+class InventorySyncIssue(BaseModel):
+    severity: Literal["info", "warning", "error"]
+    code: str
+    message: str
+    product_id: str | None = None
+
+
+class InventoryProductionStatusResponse(BaseModel):
+    status: str
+    production_ready: bool
+    storage_backend: str
+    storage_path: str | None = None
+    vector_backend: str
+    vector_index_name: str | None = None
+    vector_namespace: str | None = None
+    vector_record_count: int | None = None
+    issues: list[InventorySyncIssue] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
+class InventorySyncStatusResponse(BaseModel):
+    status: str
+    ready: bool
+    catalog_count: int
+    rag_enabled_count: int
+    vector_record_count: int
+    vector_ids_available: bool
+    vector_synced: bool | None = None
+    missing_vector_ids: list[str] = Field(default_factory=list)
+    stale_vector_ids: list[str] = Field(default_factory=list)
+    invalid_catalog_product_ids: list[str] = Field(default_factory=list)
+    issues: list[InventorySyncIssue] = Field(default_factory=list)
+
+
+class InventorySyncValidateRequest(BaseModel):
+    source_product_ids: list[str] = Field(
+        default_factory=list,
+        description="Product IDs from PostgreSQL/source of truth.",
+    )
+    source_items: list[InventoryItemRecord] = Field(
+        default_factory=list,
+        description="Optional full source items from PostgreSQL for deeper stale/data-quality validation.",
+    )
+
+    @field_validator("source_product_ids")
+    @classmethod
+    def normalize_source_product_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for product_id in value:
+            stripped = product_id.strip()
+            if not stripped or stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return normalized
+
+
+class InventorySyncValidateResponse(BaseModel):
+    status: str
+    valid: bool
+    source_count: int
+    catalog_count: int
+    rag_enabled_count: int
+    vector_record_count: int
+    vector_ids_available: bool
+    missing_in_catalog: list[str] = Field(default_factory=list)
+    extra_in_catalog: list[str] = Field(default_factory=list)
+    stale_catalog_product_ids: list[str] = Field(default_factory=list)
+    missing_vector_ids: list[str] = Field(default_factory=list)
+    stale_vector_ids: list[str] = Field(default_factory=list)
+    invalid_catalog_product_ids: list[str] = Field(default_factory=list)
+    issues: list[InventorySyncIssue] = Field(default_factory=list)
+
+
+class InventorySyncRebuildResponse(BaseModel):
+    status: str
+    ready: bool
+    rebuilt_count: int
+    deleted_vector_count: int
+    catalog_count: int
+    rag_enabled_count: int
+    vector_record_count: int
+    vector_ids_available: bool
+    vector_synced: bool | None = None
+    missing_vector_ids: list[str] = Field(default_factory=list)
+    stale_vector_ids: list[str] = Field(default_factory=list)
+    invalid_catalog_product_ids: list[str] = Field(default_factory=list)
+    issues: list[InventorySyncIssue] = Field(default_factory=list)
+    namespace: str
+    catalog_path: str
+
+
+class InventoryBusinessSignalRecord(BaseModel):
+    product_id: str = Field(..., description="Stable product identifier from PostgreSQL/source of truth.")
+    period_start: str | None = Field(default=None, description="Start of the metric window.")
+    period_end: str | None = Field(default=None, description="End of the metric window.")
+    units_sold: int | None = Field(default=None, ge=0)
+    revenue: float | None = Field(default=None, ge=0)
+    order_count: int | None = Field(default=None, ge=0)
+    return_count: int | None = Field(default=None, ge=0)
+    return_rate: float | None = Field(default=None, ge=0, le=1)
+    gross_margin: float | None = None
+    gross_margin_rate: float | None = Field(default=None, ge=-1, le=1)
+    inventory_on_hand: int | None = Field(default=None, ge=0)
+    inventory_snapshot_at: str | None = None
+    supplier_id: str | None = None
+    supplier_name: str | None = None
+    supplier_lead_time_days: int | None = Field(default=None, ge=0)
+    supplier_risk_score: float | None = Field(default=None, ge=0, le=1)
+    customer_segments: list[str] = Field(default_factory=list)
+    demand_score: float | None = Field(default=None, ge=0, le=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    updated_at: str | None = None
+
+    @field_validator("product_id")
+    @classmethod
+    def validate_business_product_id(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("product_id must not be empty")
+        return stripped
+
+    @field_validator(
+        "period_start",
+        "period_end",
+        "inventory_snapshot_at",
+        "supplier_id",
+        "supplier_name",
+        "updated_at",
+    )
+    @classmethod
+    def normalize_business_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("customer_segments")
+    @classmethod
+    def normalize_customer_segments(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for segment in value:
+            stripped = segment.strip()
+            if not stripped:
+                continue
+            lowered = stripped.casefold()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(stripped)
+        return normalized
+
+
+class InventoryBusinessSignalsUpsertRequest(BaseModel):
+    signals: list[InventoryBusinessSignalRecord] = Field(default_factory=list, min_length=1)
+
+
+class InventoryBusinessSignalsUpsertResponse(BaseModel):
+    status: str
+    upserted_count: int
+    total_signals: int
+    product_count: int
+    business_signal_path: str
+
+
+class InventoryBusinessSignalsResponse(BaseModel):
+    status: str
+    total_signals: int
+    signals: list[InventoryBusinessSignalRecord] = Field(default_factory=list)
+
+
+class InventoryBusinessSignalsDeleteResponse(BaseModel):
+    status: str
+    deleted_count: int
+    total_signals: int
+    product_count: int
+    business_signal_path: str
+
+
+class InventoryBusinessStatusResponse(BaseModel):
+    status: str
+    ready: bool
+    total_signals: int
+    product_count: int
+    domains_available: list[str] = Field(default_factory=list)
+    latest_updated_at: str | None = None
+    business_signal_path: str
+
+
+class InventoryUpsertRequest(BaseModel):
+    items: list[InventoryItemRecord] = Field(default_factory=list, min_length=1)
+
+
+class InventoryUpsertResponse(BaseModel):
+    status: str
+    upserted_count: int
+    rag_enabled_count: int
+    total_items: int
+    namespace: str
+    catalog_path: str
+
+
+class InventoryDeleteRequest(BaseModel):
+    product_ids: list[str] = Field(default_factory=list, min_length=1)
+
+    @field_validator("product_ids")
+    @classmethod
+    def normalize_product_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for product_id in value:
+            stripped = product_id.strip()
+            if not stripped:
+                continue
+            if stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        if not normalized:
+            raise ValueError("At least one product_id is required.")
+        return normalized
+
+
+class InventoryDeleteResponse(BaseModel):
+    status: str
+    deleted_count: int
+    total_items: int
+    namespace: str
+    catalog_path: str
+
+
+class InventorySearchFilters(BaseModel):
+    product_ids: list[str] = Field(default_factory=list)
+    categories: list[str] = Field(default_factory=list)
+    brands: list[str] = Field(default_factory=list)
+    statuses: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    min_stock: int | None = Field(default=None, ge=0)
+    max_stock: int | None = Field(default=None, ge=0)
+    min_price: float | None = Field(default=None, ge=0)
+    max_price: float | None = Field(default=None, ge=0)
+    rag_only: bool = Field(default=True, description="Restrict results to products that are indexed for semantic retrieval.")
+
+    @field_validator("product_ids", "categories", "brands", "statuses", "tags")
+    @classmethod
+    def normalize_string_lists(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            stripped = item.strip()
+            if not stripped:
+                continue
+            lowered = stripped.casefold()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(stripped)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> "InventorySearchFilters":
+        if self.min_stock is not None and self.max_stock is not None and self.min_stock > self.max_stock:
+            raise ValueError("min_stock must be less than or equal to max_stock")
+        if self.min_price is not None and self.max_price is not None and self.min_price > self.max_price:
+            raise ValueError("min_price must be less than or equal to max_price")
+        return self
+
+
+class InventorySearchRequest(BaseModel):
+    query_text: str | None = Field(default=None, description="Semantic query over indexed inventory items.")
+    top_k: int = Field(default=5, ge=1, le=50)
+    filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+
+
+class InventorySearchHit(BaseModel):
+    product_id: str
+    sku: str
+    name: str
+    category: str | None = None
+    brand: str | None = None
+    status: str | None = None
+    price: float | None = None
+    currency: str | None = None
+    stock: int | None = None
+    tags: list[str] = Field(default_factory=list)
+    updated_at: str | None = None
+    snippet: str | None = None
+    attributes: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    evidence_scores: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Debug-friendly ecommerce reranking score components.",
+    )
+    score: float
+
+
+class InventorySearchResponse(BaseModel):
+    status: str
+    query_text: str | None = None
+    total_hits: int
+    applied_filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    hits: list[InventorySearchHit] = Field(default_factory=list)
+
+
+class InventoryFactProvenance(BaseModel):
+    source_type: Literal["catalog", "business_signal", "reranker", "inferred"]
+    source_field: str
+    source_updated_at: str | None = None
+    note: str | None = None
+
+
+class InventoryFact(BaseModel):
+    key: str
+    value: Any | None = None
+    status: Literal["present", "missing", "conflicting", "inferred"] = "present"
+    unit: str | None = None
+    provenance: list[InventoryFactProvenance] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class InventoryProductEvidence(BaseModel):
+    product_id: str
+    sku: str
+    name: str
+    category: str | None = None
+    brand: str | None = None
+    currency: str | None = None
+    price: float | None = None
+    stock: int | None = None
+    tags: list[str] = Field(default_factory=list)
+    snippet: str | None = None
+    role: Literal["primary", "alternative", "cross_sell", "rejected", "candidate"] = "candidate"
+    score: float | None = None
+    score_breakdown: dict[str, Any] = Field(default_factory=dict)
+    inclusion_reasons: list[str] = Field(default_factory=list)
+    rejection_reasons: list[str] = Field(default_factory=list)
+    facts: list[InventoryFact] = Field(default_factory=list)
+    allowed_claims: list[str] = Field(default_factory=list)
+    contradictions: list[str] = Field(default_factory=list)
+    missing_facts: list[str] = Field(default_factory=list)
+
+
+class InventoryEvidenceContract(BaseModel):
+    question: str | None = None
+    primary_product_id: str | None = None
+    primary_candidate_ids: list[str] = Field(default_factory=list)
+    rejected_candidate_ids: list[str] = Field(default_factory=list)
+    candidate_evidence: list[InventoryProductEvidence] = Field(default_factory=list)
+    required_tradeoffs: list[str] = Field(default_factory=list)
+    missing_facts: list[str] = Field(default_factory=list)
+    contradictions: list[str] = Field(default_factory=list)
+    allowed_claims: list[str] = Field(default_factory=list)
+    follow_up_question_rules: list[str] = Field(default_factory=list)
+
+
+class InventoryAnswerPlan(BaseModel):
+    intent: str = "unknown"
+    detected_intent: str | None = None
+    intent_confidence: float | None = Field(default=None, ge=0, le=1)
+    intent_reasons: list[str] = Field(default_factory=list)
+    strategy: str | None = None
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    product_type: str | None = None
+    product_family: str | None = None
+    primary_product_id: str | None = None
+    alternative_product_ids: list[str] = Field(default_factory=list)
+    cross_sell_product_ids: list[str] = Field(default_factory=list)
+    excluded_product_ids: list[str] = Field(default_factory=list)
+    primary_reason: str | None = None
+    alternative_reason: str | None = None
+    cross_sell_reason: str | None = None
+    tradeoffs: list[str] = Field(default_factory=list)
+    risk_notes: list[str] = Field(default_factory=list)
+    next_best_question: str | None = None
+    confidence_breakdown: dict[str, Any] = Field(default_factory=dict)
+    reasoning_steps: list[str] = Field(default_factory=list)
+    metadata_used: list[str] = Field(default_factory=list)
+    evidence_contract: InventoryEvidenceContract | None = None
+    abstain: bool = False
+    abstention_reason: str | None = None
+
+
+class InventoryAnswerVerification(BaseModel):
+    passed: bool = True
+    issues: list[str] = Field(default_factory=list)
+    hard_constraint_issues: list[str] = Field(default_factory=list)
+    requires_abstention: bool = False
+    checked_final_answer: bool = False
+    final_answer_issues: list[str] = Field(default_factory=list)
+
+
+class InventoryConversationTurn(BaseModel):
+    role: str
+    content: str
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"user", "assistant"}:
+            raise ValueError("role must be either 'user' or 'assistant'")
+        return normalized
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("content must not be empty")
+        return stripped
+
+
+class InventoryMemoryResolution(BaseModel):
+    used_memory: bool = False
+    reason: str | None = None
+    resolved_product_ids: list[str] = Field(default_factory=list)
+    applied_context_filters: bool = False
+    ignored_memory_reason: str | None = None
+
+
+class InventoryAskRequest(BaseModel):
+    question: str = Field(..., description="Natural-language inventory question.")
+    top_k: int = Field(default=5, ge=1, le=50)
+    filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    low_stock_threshold: int = Field(default=10, ge=0, le=10000)
+    assistant_mode: str = Field(
+        default="support",
+        description="Assistant tone for the answer. Use 'sales' for recommendation-style replies.",
+    )
+    reply_style: str = Field(
+        default="short",
+        description="Response length and detail level. Use 'detailed' for longer guidance with reasoning and follow-up.",
+    )
+    answer_engine: str = Field(
+        default="auto",
+        description="Answer generation strategy. Use 'natural' for grounded LLM synthesis, 'deterministic' for rule-based replies, or 'auto' to let the service choose.",
+    )
+    conversation_history: list[InventoryConversationTurn] = Field(default_factory=list)
+    conversation_summary: str | None = Field(
+        default=None,
+        description="Optional server-built summary of the recent chat state so follow-up answers remain grounded.",
+    )
+    focused_product_ids: list[str] = Field(
+        default_factory=list,
+        description="Product IDs from the current UI/chat focus. Used only for clear follow-up references like 'it' or 'the first one'.",
+    )
+    active_filters: InventorySearchFilters | None = Field(
+        default=None,
+        description="Optional filters from the current chat/search context. Current request filters override these.",
+    )
+    last_answer_plan: InventoryAnswerPlan | None = Field(
+        default=None,
+        description="Previous answer plan from the main backend. Used for safe reference resolution only.",
+    )
+
+    @field_validator("question")
+    @classmethod
+    def validate_question(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("question must not be empty")
+        return stripped
+
+    @field_validator("assistant_mode")
+    @classmethod
+    def validate_assistant_mode(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"support", "sales"}:
+            raise ValueError("assistant_mode must be either 'support' or 'sales'")
+        return normalized
+
+    @field_validator("reply_style")
+    @classmethod
+    def validate_reply_style(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"short", "detailed"}:
+            raise ValueError("reply_style must be either 'short' or 'detailed'")
+        return normalized
+
+    @field_validator("answer_engine")
+    @classmethod
+    def validate_answer_engine(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"auto", "deterministic", "natural"}:
+            raise ValueError("answer_engine must be one of: auto, deterministic, natural")
+        return normalized
+
+    @field_validator("conversation_summary")
+    @classmethod
+    def normalize_conversation_summary(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("focused_product_ids")
+    @classmethod
+    def normalize_focused_product_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for product_id in value:
+            stripped = product_id.strip()
+            if not stripped or stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return normalized
+
+
+class InventoryAskResponse(BaseModel):
+    status: str
+    question: str
+    answer: str
+    assistant_mode: str
+    reply_style: str
+    answer_engine: str
+    confidence_score: float
+    trace_id: str
+    abstained: bool = False
+    abstention_reason: str | None = None
+    total_hits: int
+    applied_filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    hits: list[InventorySearchHit] = Field(default_factory=list)
+    recommended_product_ids: list[str] = Field(default_factory=list)
+    cross_sell_product_ids: list[str] = Field(default_factory=list)
+    follow_up_question: str | None = None
+    answer_plan: InventoryAnswerPlan = Field(default_factory=InventoryAnswerPlan)
+    verification: InventoryAnswerVerification = Field(default_factory=InventoryAnswerVerification)
+    memory_resolution: InventoryMemoryResolution = Field(default_factory=InventoryMemoryResolution)
+
+
+class InventoryQuestionFamilyContract(BaseModel):
+    family: str
+    supported: bool = True
+    description: str
+    classifier_intents: list[str] = Field(default_factory=list)
+    default_execution_path: Literal["normal_rag", "agentic", "clarify_or_abstain"]
+    supported_execution_paths: list[str] = Field(default_factory=list)
+    reasoning_mode: Literal[
+        "deterministic",
+        "deterministic_with_optional_agentic",
+        "bounded_agentic",
+        "abstain_or_clarify",
+    ]
+    external_data_required: bool = False
+    canonical_eval_case_ids: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class InventoryAbstainTriggerContract(BaseModel):
+    trigger_id: str
+    description: str
+    stage: Literal["routing", "retrieval", "planning", "verification"]
+    applies_to_families: list[str] = Field(default_factory=list)
+    examples: list[str] = Field(default_factory=list)
+
+
+class InventoryCanonicalEvalContractCase(BaseModel):
+    case_id: str
+    family: str
+    example_question: str
+    purpose: str
+    expected_execution_path: str
+
+
+class InventoryPolicyContractResponse(BaseModel):
+    status: str
+    version: str
+    summary: str
+    supported_question_families: list[InventoryQuestionFamilyContract] = Field(default_factory=list)
+    hard_abstain_triggers: list[InventoryAbstainTriggerContract] = Field(default_factory=list)
+    canonical_eval_cases: list[InventoryCanonicalEvalContractCase] = Field(default_factory=list)
+    canonical_eval_case_ids: list[str] = Field(default_factory=list)
+
+
+class InventoryRouteRequest(BaseModel):
+    question: str = Field(..., description="Inventory chat question to route between normal RAG and agentic handling.")
+    assistant_mode: str = Field(default="support", description="Intended assistant tone for the eventual answer.")
+    reply_style: str = Field(default="short", description="Desired reply detail level for the eventual answer.")
+    filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    audience: str = Field(
+        default="customer",
+        description="Primary user context. Use 'manager' or 'operator' for deeper internal workflows.",
+    )
+    prefer_fast_response: bool = Field(
+        default=True,
+        description="Bias routing toward faster normal RAG when the question is still answerable from the catalog mirror.",
+    )
+    allow_agentic: bool = Field(
+        default=True,
+        description="Whether the caller is willing to escalate this question into a slower agentic workflow.",
+    )
+    available_data_domains: list[str] = Field(
+        default_factory=lambda: ["catalog"],
+        description="Data domains currently available to an agentic backend, such as catalog, inventory_snapshots, sales, orders, suppliers, or customers.",
+    )
+
+    @field_validator("question")
+    @classmethod
+    def validate_route_question(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("question must not be empty")
+        return stripped
+
+    @field_validator("assistant_mode")
+    @classmethod
+    def validate_route_assistant_mode(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"support", "sales"}:
+            raise ValueError("assistant_mode must be either 'support' or 'sales'")
+        return normalized
+
+    @field_validator("reply_style")
+    @classmethod
+    def validate_route_reply_style(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"short", "detailed"}:
+            raise ValueError("reply_style must be either 'short' or 'detailed'")
+        return normalized
+
+    @field_validator("audience")
+    @classmethod
+    def validate_audience(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"customer", "staff", "manager", "operator"}:
+            raise ValueError("audience must be one of: customer, staff, manager, operator")
+        return normalized
+
+    @field_validator("available_data_domains")
+    @classmethod
+    def normalize_available_data_domains(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            stripped = item.strip().casefold()
+            if not stripped or stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return normalized or ["catalog"]
+
+
+class InventoryRouteSignals(BaseModel):
+    detected_intent: str = "unknown"
+    intent_confidence: float | None = Field(default=None, ge=0, le=1)
+    intent_reasons: list[str] = Field(default_factory=list)
+    question_family: str = "unknown"
+    family_confidence: float | None = Field(default=None, ge=0, le=1)
+    family_reasons: list[str] = Field(default_factory=list)
+    is_small_talk: bool = False
+    has_explicit_product_reference: bool = False
+    simple_catalog_lookup: bool = False
+    needs_historical_data: bool = False
+    needs_cross_system_data: bool = False
+    needs_root_cause_reasoning: bool = False
+    needs_workflow_action: bool = False
+    needs_multi_step_reasoning: bool = False
+
+
+class InventoryExecutionContract(BaseModel):
+    mode: str
+    implementation_status: str
+    target_system: str
+    method: str
+    endpoint: str
+    purpose: str
+    payload_template: dict[str, Any] = Field(default_factory=dict)
+    notes: list[str] = Field(default_factory=list)
+
+
+class InventoryRouteResponse(BaseModel):
+    status: str
+    question: str
+    policy_version: str | None = None
+    recommended_path: str
+    fallback_path: str
+    decision_confidence: float
+    reason_summary: str
+    decision_factors: list[str] = Field(default_factory=list)
+    required_data_domains: list[str] = Field(default_factory=list)
+    missing_data_domains: list[str] = Field(default_factory=list)
+    signals: InventoryRouteSignals = Field(default_factory=InventoryRouteSignals)
+    family_contract: InventoryQuestionFamilyContract | None = None
+    applicable_hard_abstain_triggers: list[InventoryAbstainTriggerContract] = Field(default_factory=list)
+    normal_rag_contract: InventoryExecutionContract
+    agentic_contract: InventoryExecutionContract
+
+
+class InventoryAgenticRequest(BaseModel):
+    question: str = Field(..., description="Inventory question that may require multi-step retrieval and reasoning.")
+    top_k: int = Field(default=5, ge=1, le=50)
+    filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    low_stock_threshold: int = Field(default=10, ge=0, le=10000)
+    assistant_mode: str = Field(default="support")
+    reply_style: str = Field(default="short")
+    answer_engine: str = Field(default="auto")
+    conversation_history: list[InventoryConversationTurn] = Field(default_factory=list)
+    conversation_summary: str | None = None
+    focused_product_ids: list[str] = Field(default_factory=list)
+    active_filters: InventorySearchFilters | None = None
+    last_answer_plan: InventoryAnswerPlan | None = None
+    max_reasoning_steps: int = Field(default=4, ge=1, le=8)
+    audience: str = Field(default="customer")
+    available_data_domains: list[str] = Field(default_factory=lambda: ["catalog"])
+
+    @field_validator("question")
+    @classmethod
+    def validate_agentic_question(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("question must not be empty")
+        return stripped
+
+    @field_validator("assistant_mode")
+    @classmethod
+    def validate_agentic_assistant_mode(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"support", "sales"}:
+            raise ValueError("assistant_mode must be either 'support' or 'sales'")
+        return normalized
+
+    @field_validator("reply_style")
+    @classmethod
+    def validate_agentic_reply_style(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"short", "detailed"}:
+            raise ValueError("reply_style must be either 'short' or 'detailed'")
+        return normalized
+
+    @field_validator("answer_engine")
+    @classmethod
+    def validate_agentic_answer_engine(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"auto", "deterministic", "natural"}:
+            raise ValueError("answer_engine must be one of: auto, deterministic, natural")
+        return normalized
+
+    @field_validator("audience")
+    @classmethod
+    def validate_agentic_audience(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"customer", "staff", "manager", "operator"}:
+            raise ValueError("audience must be one of: customer, staff, manager, operator")
+        return normalized
+
+    @field_validator("conversation_summary")
+    @classmethod
+    def normalize_agentic_conversation_summary(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("focused_product_ids")
+    @classmethod
+    def normalize_agentic_focused_product_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for product_id in value:
+            stripped = product_id.strip()
+            if not stripped or stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return normalized
+
+    @field_validator("available_data_domains")
+    @classmethod
+    def normalize_agentic_available_domains(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            stripped = item.strip().casefold()
+            if not stripped or stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return normalized or ["catalog"]
+
+
+class InventoryTraceCandidateDebug(BaseModel):
+    product_id: str
+    name: str
+    category: str | None = None
+    score: float | None = None
+    score_breakdown: dict[str, Any] = Field(default_factory=dict)
+    rejection_reasons: list[str] = Field(default_factory=list)
+
+
+class InventoryAgenticStep(BaseModel):
+    step_number: int
+    action: str
+    query_text: str | None = None
+    applied_filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    total_hits: int = 0
+    selected_product_ids: list[str] = Field(default_factory=list)
+    selected_candidates: list[InventoryTraceCandidateDebug] = Field(default_factory=list)
+    rejected_candidates: list[InventoryTraceCandidateDebug] = Field(default_factory=list)
+    observation: str
+    retrieval_stage_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class InventoryAgenticStatusResponse(BaseModel):
+    status: str
+    ready: bool
+    total_items: int
+    rag_enabled_items: int
+    vector_record_count: int
+    namespace: str
+    trace_dir: str
+    vector_backend: str
+    vector_store_path: str | None = None
+
+
+class InventoryAgenticResponse(BaseModel):
+    status: str
+    question: str
+    answer: str
+    assistant_mode: str
+    reply_style: str
+    answer_engine: str
+    execution_path: str
+    confidence_score: float
+    abstained: bool = False
+    abstention_reason: str | None = None
+    trace_id: str
+    reasoning_summary: list[str] = Field(default_factory=list)
+    missing_facts: list[str] = Field(default_factory=list)
+    retrieval_steps_used: int = 0
+    total_hits: int
+    applied_filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    hits: list[InventorySearchHit] = Field(default_factory=list)
+    recommended_product_ids: list[str] = Field(default_factory=list)
+    cross_sell_product_ids: list[str] = Field(default_factory=list)
+    follow_up_question: str | None = None
+    answer_plan: InventoryAnswerPlan = Field(default_factory=InventoryAnswerPlan)
+    verification: InventoryAnswerVerification = Field(default_factory=InventoryAnswerVerification)
+    memory_resolution: InventoryMemoryResolution = Field(default_factory=InventoryMemoryResolution)
+
+
+class InventoryAgenticTraceResponse(BaseModel):
+    trace_id: str
+    question: str
+    assistant_mode: str
+    reply_style: str
+    execution_path: str
+    route_decision: dict[str, Any] = Field(default_factory=dict)
+    retrieval_stage_counts: dict[str, int] = Field(default_factory=dict)
+    reasoning_summary: list[str] = Field(default_factory=list)
+    missing_facts: list[str] = Field(default_factory=list)
+    retrieval_steps: list[InventoryAgenticStep] = Field(default_factory=list)
+    final_answer: str
+    confidence_score: float
+
+
+class InventoryChatTraceResponse(BaseModel):
+    trace_id: str
+    request_id: str
+    created_at: str
+    question: str
+    assistant_mode: str
+    reply_style: str
+    answer_engine: str
+    execution_path: str
+    latency_ms: float
+    fallback_reason: str | None = None
+    intent: str | None = None
+    route_decision: dict[str, Any] = Field(default_factory=dict)
+    retrieval_stage_counts: dict[str, int] = Field(default_factory=dict)
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    retrieved_product_ids: list[str] = Field(default_factory=list)
+    reranked_product_ids: list[str] = Field(default_factory=list)
+    recommended_product_ids: list[str] = Field(default_factory=list)
+    cross_sell_product_ids: list[str] = Field(default_factory=list)
+    total_hits: int = 0
+    confidence_score: float
+    abstained: bool = False
+    abstention_reason: str | None = None
+    applied_filters: InventorySearchFilters = Field(default_factory=InventorySearchFilters)
+    answer_plan: InventoryAnswerPlan = Field(default_factory=InventoryAnswerPlan)
+    verification: InventoryAnswerVerification = Field(default_factory=InventoryAnswerVerification)
+    memory_resolution: InventoryMemoryResolution = Field(default_factory=InventoryMemoryResolution)
+    reasoning_summary: list[str] = Field(default_factory=list)
+    missing_facts: list[str] = Field(default_factory=list)
+    retrieval_steps: list[InventoryAgenticStep] = Field(default_factory=list)
+    final_answer: str

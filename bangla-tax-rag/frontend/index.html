@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inventory Backend Test Cockpit</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Inventory Backend Test Cockpit</p>
+          <h1>Patch this frontend directly into the current backend and exercise the real system.</h1>
+          <p class="hero-copy">
+            This cockpit now works best when served by the live FastAPI backend at `/frontend/`. It can sync sample
+            data, inspect production and sync health, route between normal and agentic chat, stream answers,
+            and load traces so you can validate behavior without waiting on the full production UI stack.
+          </p>
+        </div>
+        <div class="hero-card">
+          <span class="status-dot" id="connectionDot"></span>
+          <strong id="connectionLabel">Not checked</strong>
+          <small id="connectionDetail">Save API settings, then load runtime status from the backend.</small>
+        </div>
+      </section>
+
+      <section class="panel setup-panel">
+        <div class="field">
+          <label for="apiBaseUrl">Backend API base URL</label>
+          <input id="apiBaseUrl" value="http://localhost:4893" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="apiKey">API key, if enabled</label>
+          <input id="apiKey" type="password" placeholder="X-API-Key" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="availableDomains">Agentic data domains</label>
+          <input
+            id="availableDomains"
+            value="catalog, sales, orders, inventory_snapshots, suppliers, margins, returns, customers"
+            spellcheck="false"
+          />
+        </div>
+        <div class="button-row">
+          <button id="saveSettingsButton">Save</button>
+          <button id="checkStatusButton" class="secondary">Check Status</button>
+          <button id="loadCatalogButton" class="secondary">Load Catalog</button>
+          <button id="syncCatalogButton" class="accent">Reset + Sync Sample JSON</button>
+          <button id="rebuildSyncButton" class="secondary">Rebuild Sync</button>
+          <button id="loadConfigButton" class="secondary">Load Config</button>
+        </div>
+        <p class="warning">
+          Preferred wiring: open this page through `http://127.0.0.1:4893/frontend/` so the frontend and backend
+          share one origin.
+          Testing only: this page calls the FastAPI backend directly from the browser. `Reset + Sync Sample JSON`
+          clears the current backend catalog and business signals before loading the bundled sample once, so use it
+          only against a disposable test backend.
+        </p>
+      </section>
+
+      <section class="status-grid">
+        <article class="panel status-card">
+          <p class="eyebrow">Health</p>
+          <strong id="healthStatusLabel">Unknown</strong>
+          <small id="healthStatusDetail">No runtime snapshot loaded yet.</small>
+        </article>
+        <article class="panel status-card">
+          <p class="eyebrow">Inventory</p>
+          <strong id="inventoryStatusLabel">Unknown</strong>
+          <small id="inventoryStatusDetail">Catalog and vector status will appear here.</small>
+        </article>
+        <article class="panel status-card">
+          <p class="eyebrow">Sync</p>
+          <strong id="syncStatusLabel">Unknown</strong>
+          <small id="syncStatusDetail">Vector sync readiness and issues will appear here.</small>
+        </article>
+        <article class="panel status-card">
+          <p class="eyebrow">Business</p>
+          <strong id="businessStatusLabel">Unknown</strong>
+          <small id="businessStatusDetail">Business signals and domains will appear here.</small>
+        </article>
+        <article class="panel status-card">
+          <p class="eyebrow">Production</p>
+          <strong id="productionStatusLabel">Unknown</strong>
+          <small id="productionStatusDetail">Storage, vectors, and production readiness appear here.</small>
+        </article>
+      </section>
+
+      <section class="grid">
+        <aside class="panel catalog-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Catalog Scope</p>
+              <h2>Products</h2>
+            </div>
+            <div class="title-pills">
+              <span class="pill" id="catalogSource">Sample JSON</span>
+              <span class="pill" id="productCount">0 products</span>
+            </div>
+          </div>
+
+          <div class="focus-toolbar">
+            <div class="focus-strip" id="focusedProducts"></div>
+            <button id="clearFocusButton" class="secondary" type="button">Clear Focus</button>
+          </div>
+
+          <div id="productList" class="product-list"></div>
+        </aside>
+
+        <section class="panel chat-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Conversation</p>
+              <h2>Ask the Backend</h2>
+            </div>
+            <div class="title-pills">
+              <span class="pill" id="lastRoutePath">No route</span>
+              <span class="pill" id="lastTraceId">No trace yet</span>
+            </div>
+          </div>
+
+          <div class="chat-controls">
+            <label>
+              Mode
+              <select id="assistantMode">
+                <option value="support">Support</option>
+                <option value="sales" selected>Sales</option>
+              </select>
+            </label>
+            <label>
+              Reply
+              <select id="replyStyle">
+                <option value="short">Short</option>
+                <option value="detailed" selected>Detailed</option>
+              </select>
+            </label>
+            <label>
+              Path
+              <select id="endpointMode">
+                <option value="route" selected>Auto Route</option>
+                <option value="ask">Normal RAG</option>
+                <option value="agentic">Agentic</option>
+              </select>
+            </label>
+            <label>
+              Engine
+              <select id="answerEngine">
+                <option value="auto" selected>Auto</option>
+                <option value="natural">Natural</option>
+                <option value="deterministic">Deterministic</option>
+              </select>
+            </label>
+            <label>
+              Audience
+              <select id="audienceMode">
+                <option value="customer">Customer</option>
+                <option value="staff">Staff</option>
+                <option value="manager" selected>Manager</option>
+                <option value="operator">Operator</option>
+              </select>
+            </label>
+            <label>
+              Delivery
+              <select id="streamMode">
+                <option value="stream" selected>Streaming</option>
+                <option value="json">JSON</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <label class="toggle-pill">
+              <input id="preferFastResponse" type="checkbox" checked />
+              <span>Prefer fast routing</span>
+            </label>
+            <label class="toggle-pill">
+              <input id="allowAgentic" type="checkbox" checked />
+              <span>Allow agentic escalation</span>
+            </label>
+          </div>
+
+          <div id="routeSummary" class="route-summary hidden"></div>
+
+          <div id="messages" class="messages"></div>
+
+          <form id="chatForm" class="chat-form">
+            <input
+              id="questionInput"
+              placeholder="Ask about bundles, restock, cross-sell, margin risk, supplier delay, or exact products..."
+              autocomplete="off"
+            />
+            <button type="submit">Ask</button>
+          </form>
+
+          <section class="turn-debug-panel">
+            <div class="section-title compact">
+              <div>
+                <p class="eyebrow">Live Debug</p>
+                <h2>Full System Steps</h2>
+              </div>
+              <div class="button-row compact">
+                <button id="clearDebugSessionsButton" class="secondary" type="button">Clear Steps</button>
+              </div>
+            </div>
+            <div id="turnDebugSessions" class="turn-debug-sessions">
+              <article class="debug-empty-state">
+                Every chat turn will append the route decision, backend payload, response summary, and trace steps here.
+              </article>
+            </div>
+          </section>
+        </section>
+      </section>
+
+      <section class="grid bottom-grid">
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Quality</p>
+              <h2>Run Backend Test Questions</h2>
+            </div>
+            <button id="runTestsButton" class="secondary">Run Tests</button>
+          </div>
+          <div id="testResults" class="test-results"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Debug</p>
+              <h2>Trace + Config Inspector</h2>
+            </div>
+            <div class="button-row compact">
+              <button id="loadTraceButton" class="secondary" type="button">Load Last Trace</button>
+              <button id="loadConfigButtonSecondary" class="secondary" type="button">Load Config</button>
+            </div>
+          </div>
+          <pre id="traceOutput" class="trace-output">Trace details, route decisions, status snapshots, and runtime config will appear here.</pre>
+        </section>
+      </section>
+    </main>
+
+    <template id="productTemplate">
+      <article class="product-card" data-product-card>
+        <div>
+          <strong data-name></strong>
+          <small data-meta></small>
+        </div>
+        <span data-price></span>
+      </article>
+    </template>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

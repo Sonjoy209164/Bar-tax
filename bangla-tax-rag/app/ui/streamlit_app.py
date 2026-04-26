@@ -903,7 +903,7 @@ def render_api_connection_panel(base_url: str) -> tuple[dict[str, Any] | None, b
     backend_base_url = st.sidebar.text_input(
         "Backend Base URL",
         key="backend_base_url",
-        help="Expected local default: http://127.0.0.1:8000",
+        help="Expected local default: http://127.0.0.1:4893",
     )
     check_connection = st.sidebar.button("Check API Health", use_container_width=True)
     config_payload: dict[str, Any] | None = None

@@ -69,6 +69,8 @@ class ChatCompletionClient:
         model_name: str,
         temperature: float,
         max_tokens: int,
+        timeout_seconds: float = 30.0,
+        response_format: dict[str, object] | None = None,
     ) -> str:
         raise NotImplementedError
 
@@ -85,6 +87,8 @@ class OpenAICompatibleChatClient(ChatCompletionClient):
         model_name: str,
         temperature: float,
         max_tokens: int,
+        timeout_seconds: float = 30.0,
+        response_format: dict[str, object] | None = None,
     ) -> str:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
@@ -95,7 +99,9 @@ class OpenAICompatibleChatClient(ChatCompletionClient):
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        response = httpx.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=30.0)
+        if response_format is not None:
+            payload["response_format"] = response_format
+        response = httpx.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=timeout_seconds)
         response.raise_for_status()
         response_json = response.json()
         return response_json["choices"][0]["message"]["content"]
@@ -112,6 +118,8 @@ class MockChatCompletionClient(ChatCompletionClient):
         model_name: str,
         temperature: float,
         max_tokens: int,
+        timeout_seconds: float = 30.0,
+        response_format: dict[str, object] | None = None,
     ) -> str:
         if self.mocked_response is not None:
             return self.mocked_response

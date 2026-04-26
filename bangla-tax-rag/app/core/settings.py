@@ -10,12 +10,33 @@ class Settings(BaseSettings):
     app_name: str = Field(default="bangla-tax-rag", alias="APP_NAME")
     app_env: str = Field(default="development", alias="APP_ENV")
     app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
-    app_port: int = Field(default=8000, alias="APP_PORT")
+    app_port: int = Field(default=4893, alias="APP_PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    api_access_key: str | None = Field(default=None, alias="API_ACCESS_KEY")
+    api_access_keys_raw: str | None = Field(default=None, alias="API_ACCESS_KEYS")
+    api_rate_limit_requests: int = Field(default=0, alias="API_RATE_LIMIT_REQUESTS")
+    api_rate_limit_window_seconds: int = Field(default=60, alias="API_RATE_LIMIT_WINDOW_SECONDS")
     config_path: str = Field(default="config/config.dev.yaml", alias="CONFIG_PATH")
     raw_data_dir: str = Field(default="data/raw", alias="RAW_DATA_DIR")
     processed_data_dir: str = Field(default="data/processed", alias="PROCESSED_DATA_DIR")
     agentic_store_dir: str = Field(default="data/agentic_store", alias="AGENTIC_STORE_DIR")
+    inventory_catalog_path: str = Field(default="data/inventory/catalog.jsonl", alias="INVENTORY_CATALOG_PATH")
+    inventory_business_signal_path: str = Field(
+        default="data/inventory/business_signals.jsonl",
+        alias="INVENTORY_BUSINESS_SIGNAL_PATH",
+    )
+    inventory_storage_backend: str = Field(default="jsonl", alias="INVENTORY_STORAGE_BACKEND")
+    inventory_sqlite_path: str = Field(default="data/inventory/inventory_mirror.sqlite3", alias="INVENTORY_SQLITE_PATH")
+    inventory_vector_namespace: str = Field(default="inventory", alias="INVENTORY_VECTOR_NAMESPACE")
+    inventory_natural_answers_enabled: bool = Field(default=False, alias="INVENTORY_NATURAL_ANSWERS_ENABLED")
+    inventory_natural_answer_model_name: str | None = Field(default=None, alias="INVENTORY_NATURAL_ANSWER_MODEL_NAME")
+    inventory_natural_answer_temperature: float = Field(default=0.2, alias="INVENTORY_NATURAL_ANSWER_TEMPERATURE")
+    inventory_natural_answer_max_tokens: int = Field(default=320, alias="INVENTORY_NATURAL_ANSWER_MAX_TOKENS")
+    inventory_natural_answer_min_confidence: float = Field(default=0.45, alias="INVENTORY_NATURAL_ANSWER_MIN_CONFIDENCE")
+    inventory_natural_answer_timeout_seconds: float = Field(default=60.0, alias="INVENTORY_NATURAL_ANSWER_TIMEOUT_SECONDS")
+    inventory_natural_answer_few_shot_enabled: bool = Field(default=False, alias="INVENTORY_NATURAL_ANSWER_FEW_SHOT_ENABLED")
+    inventory_natural_answer_few_shot_max_examples: int = Field(default=2, alias="INVENTORY_NATURAL_ANSWER_FEW_SHOT_MAX_EXAMPLES")
+    inventory_conversation_history_limit: int = Field(default=6, alias="INVENTORY_CONVERSATION_HISTORY_LIMIT")
     sparse_index_dir: str = Field(default="indexes/sparse", alias="SPARSE_INDEX_DIR")
     dense_index_dir: str = Field(default="indexes/dense", alias="DENSE_INDEX_DIR")
     results_dir: str = Field(default="results", alias="RESULTS_DIR")
@@ -23,7 +44,7 @@ class Settings(BaseSettings):
     parser_provider: str = Field(default="fallback", alias="PARSER_PROVIDER")
     llama_parse_result_type: str = Field(default="markdown", alias="LLAMAPARSE_RESULT_TYPE")
     llama_cloud_api_key: str | None = Field(default=None, alias="LLAMA_CLOUD_API_KEY")
-    ui_backend_base_url: str = Field(default="http://127.0.0.1:8000", alias="UI_BACKEND_BASE_URL")
+    ui_backend_base_url: str = Field(default="http://127.0.0.1:4893", alias="UI_BACKEND_BASE_URL")
     retrieval_mode: str = Field(default="hybrid", alias="RETRIEVAL_MODE")
     top_k: int = Field(default=5, alias="TOP_K")
     final_evidence_k: int = Field(default=5, alias="FINAL_EVIDENCE_K")
@@ -64,13 +85,48 @@ class Settings(BaseSettings):
         with config_file.open("r", encoding="utf-8") as handle:
             return yaml.safe_load(handle) or {}
 
+    def accepted_api_keys(self) -> tuple[str, ...]:
+        keys: list[str] = []
+
+        for raw_value in (self.api_access_key, self.api_access_keys_raw):
+            if not raw_value:
+                continue
+
+            normalized_candidates = raw_value.replace("\n", ",").split(",")
+
+            for candidate in normalized_candidates:
+                normalized = candidate.strip()
+                if normalized and normalized not in keys:
+                    keys.append(normalized)
+
+        return tuple(keys)
+
     def non_secret_config(self) -> dict:
+        accepted_api_keys = self.accepted_api_keys()
         return {
             "app_name": self.app_name,
             "app_env": self.app_env,
+            "api_auth_enabled": bool(accepted_api_keys),
+            "api_key_rotation_enabled": len(accepted_api_keys) > 1,
+            "api_rate_limit_requests": self.api_rate_limit_requests,
+            "api_rate_limit_window_seconds": self.api_rate_limit_window_seconds,
             "raw_data_dir": self.raw_data_dir,
             "processed_data_dir": self.processed_data_dir,
             "agentic_store_dir": self.agentic_store_dir,
+            "inventory_catalog_path": self.inventory_catalog_path,
+            "inventory_business_signal_path": self.inventory_business_signal_path,
+            "inventory_storage_backend": self.inventory_storage_backend,
+            "inventory_sqlite_path": self.inventory_sqlite_path,
+            "inventory_vector_namespace": self.inventory_vector_namespace,
+            "inventory_natural_answers_enabled": self.inventory_natural_answers_enabled,
+            "inventory_natural_answer_model_name": self.inventory_natural_answer_model_name,
+            "inventory_natural_answer_temperature": self.inventory_natural_answer_temperature,
+            "inventory_natural_answer_max_tokens": self.inventory_natural_answer_max_tokens,
+            "inventory_natural_answer_min_confidence": self.inventory_natural_answer_min_confidence,
+            "inventory_natural_answer_timeout_seconds": self.inventory_natural_answer_timeout_seconds,
+            "inventory_natural_answer_few_shot_enabled": self.inventory_natural_answer_few_shot_enabled,
+            "inventory_natural_answer_few_shot_max_examples": self.inventory_natural_answer_few_shot_max_examples,
+            "inventory_conversation_history_limit": self.inventory_conversation_history_limit,
             "sparse_index_dir": self.sparse_index_dir,
             "dense_index_dir": self.dense_index_dir,
             "results_dir": self.results_dir,
@@ -115,6 +171,7 @@ def get_settings() -> Settings:
     app_config = yaml_config.get("app", {})
     retrieval_config = yaml_config.get("retrieval", {})
     generation_config = yaml_config.get("generation", {})
+    inventory_chat_config = yaml_config.get("inventory_chat", {})
     paths_config = yaml_config.get("paths", {})
     parser_config = yaml_config.get("parser", {})
     embeddings_config = yaml_config.get("embeddings", {})
@@ -154,9 +211,45 @@ def get_settings() -> Settings:
         apply_yaml_override("abstention_score_threshold", generation_config["abstention_score_threshold"])
     if "verification_enabled" in generation_config:
         apply_yaml_override("verification_enabled", generation_config["verification_enabled"])
-    for key in ("raw_data_dir", "processed_data_dir", "agentic_store_dir", "sparse_index_dir", "dense_index_dir", "results_dir", "trace_dir"):
+    if "natural_answers_enabled" in inventory_chat_config:
+        apply_yaml_override("inventory_natural_answers_enabled", inventory_chat_config["natural_answers_enabled"])
+    if "natural_answer_model_name" in inventory_chat_config:
+        apply_yaml_override("inventory_natural_answer_model_name", inventory_chat_config["natural_answer_model_name"])
+    if "natural_answer_temperature" in inventory_chat_config:
+        apply_yaml_override("inventory_natural_answer_temperature", inventory_chat_config["natural_answer_temperature"])
+    if "natural_answer_max_tokens" in inventory_chat_config:
+        apply_yaml_override("inventory_natural_answer_max_tokens", inventory_chat_config["natural_answer_max_tokens"])
+    if "natural_answer_min_confidence" in inventory_chat_config:
+        apply_yaml_override("inventory_natural_answer_min_confidence", inventory_chat_config["natural_answer_min_confidence"])
+    if "natural_answer_timeout_seconds" in inventory_chat_config:
+        apply_yaml_override("inventory_natural_answer_timeout_seconds", inventory_chat_config["natural_answer_timeout_seconds"])
+    if "natural_answer_few_shot_enabled" in inventory_chat_config:
+        apply_yaml_override("inventory_natural_answer_few_shot_enabled", inventory_chat_config["natural_answer_few_shot_enabled"])
+    if "natural_answer_few_shot_max_examples" in inventory_chat_config:
+        apply_yaml_override(
+            "inventory_natural_answer_few_shot_max_examples",
+            inventory_chat_config["natural_answer_few_shot_max_examples"],
+        )
+    if "conversation_history_limit" in inventory_chat_config:
+        apply_yaml_override("inventory_conversation_history_limit", inventory_chat_config["conversation_history_limit"])
+    for key in (
+        "raw_data_dir",
+        "processed_data_dir",
+        "agentic_store_dir",
+        "inventory_catalog_path",
+        "inventory_business_signal_path",
+        "inventory_sqlite_path",
+        "sparse_index_dir",
+        "dense_index_dir",
+        "results_dir",
+        "trace_dir",
+    ):
         if key in paths_config:
             apply_yaml_override(key, paths_config[key])
+    if "storage_backend" in inventory_chat_config:
+        apply_yaml_override("inventory_storage_backend", inventory_chat_config["storage_backend"])
+    if "sqlite_path" in inventory_chat_config:
+        apply_yaml_override("inventory_sqlite_path", inventory_chat_config["sqlite_path"])
     if "provider" in parser_config:
         apply_yaml_override("parser_provider", parser_config["provider"])
     if "result_type" in parser_config:
@@ -177,6 +270,8 @@ def get_settings() -> Settings:
         apply_yaml_override("vector_metric", vector_store_config["metric"])
     if "namespace" in vector_store_config:
         apply_yaml_override("vector_namespace", vector_store_config["namespace"])
+    if "inventory_namespace" in vector_store_config:
+        apply_yaml_override("inventory_vector_namespace", vector_store_config["inventory_namespace"])
     if "local_store_path" in vector_store_config:
         apply_yaml_override("local_vector_store_path", vector_store_config["local_store_path"])
     if "pinecone_index_name" in vector_store_config:

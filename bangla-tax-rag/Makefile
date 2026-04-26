@@ -10,7 +10,7 @@ install:
 	$(PIP) install -r requirements.txt
 
 run-api:
-	$(VENV)/bin/uvicorn app.main:app --reload
+	$(VENV)/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 4893
 
 run-api-dense:
 	bash ./scripts/run_api_real_dense.sh

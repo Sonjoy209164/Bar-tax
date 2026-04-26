@@ -1123,12 +1123,99 @@ def test_inventory_natural_prompt_uses_writer_contract_and_plan_fields(tmp_path)
     assert "Decision hierarchy: answer_plan is authoritative" in system_prompt
     assert "Do not choose products" in system_prompt
     assert "Never treat writer_contract.cross_sell_product_ids as substitutes" in system_prompt
+    assert "writer_guidance is the compressed hidden reasoning contract" in system_prompt
     assert "Return only strict JSON" in system_prompt
     assert '"writer_contract"' in user_prompt
+    assert '"writer_guidance"' in user_prompt
+    assert '"response_mode": "recommendation"' in user_prompt
+    assert '"must_name_primary_product": true' in user_prompt
     assert '"required_tradeoffs"' in user_prompt
     assert '"risk_notes"' in user_prompt
     assert '"next_best_question": "Do they care more about call quality or battery life?"' in user_prompt
     assert '"excluded_product_ids": [' in user_prompt
+
+
+def test_inventory_writer_guidance_adds_caveat_tags_and_fact_focus(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+    primary = InventorySearchHit(
+        product_id="prod-headphones",
+        sku="AUD-HP-001",
+        name="Auralite Flex ANC Headphones",
+        category="Audio",
+        brand="Auralite",
+        price=249.0,
+        currency="USD",
+        stock=18,
+        status="Active",
+        tags=["audio", "wireless", "headphones", "premium"],
+        snippet="Wireless noise-cancelling headphones under 300 for focused office work",
+        attributes={"battery_hours": "35"},
+        evidence_scores={"final_score": 0.82},
+        score=0.82,
+    )
+    alternative = InventorySearchHit(
+        product_id="prod-earbuds",
+        sku="AUD-EB-002",
+        name="EchoWave Studio Earbuds",
+        category="Audio",
+        brand="EchoWave",
+        price=129.0,
+        currency="USD",
+        stock=12,
+        status="Active",
+        tags=["audio", "wireless", "earbuds"],
+        snippet="Compact wireless earbuds for calls",
+        attributes={"battery_hours": "24"},
+        evidence_scores={"final_score": 0.58},
+        score=0.58,
+    )
+    cross_sell = InventorySearchHit(
+        product_id="prod-mic",
+        sku="AUD-MIC-004",
+        name="VoxCast USB Podcast Microphone",
+        category="Audio",
+        brand="VoxCast",
+        price=159.0,
+        currency="USD",
+        stock=7,
+        status="Active",
+        tags=["audio", "microphone"],
+        snippet="Cardioid USB microphone for podcasts and webinars",
+        attributes={"connectivity": "USB-C"},
+        evidence_scores={"final_score": 0.55},
+        score=0.55,
+    )
+    reply = InventoryReply(
+        answer="Start with Auralite Flex ANC Headphones.",
+        recommended_product_ids=[primary.product_id, alternative.product_id],
+        cross_sell_product_ids=[cross_sell.product_id],
+        answer_plan=InventoryAnswerPlan(
+            intent="sales_premium",
+            primary_product_id=primary.product_id,
+            alternative_product_ids=[alternative.product_id],
+            cross_sell_product_ids=[cross_sell.product_id],
+            primary_reason="Primary recommendation is Auralite Flex ANC Headphones because it is the best match.",
+            tradeoffs=["Earbuds are nearby alternatives, not exact substitutes for over-ear headphones."],
+            risk_notes=["Do not invent shipping or discount claims."],
+            next_best_question="Do they care more about call quality or portability?",
+        ),
+        verification=InventoryAnswerVerification(passed=True, checked_final_answer=True),
+    )
+
+    guidance = service._build_inventory_writer_guidance(
+        hits=[primary, alternative, cross_sell],
+        base_reply=reply,
+        assistant_mode="sales",
+        reply_style="detailed",
+    )
+
+    assert guidance["response_mode"] == "bundle"
+    assert guidance["must_name_primary_product"] is True
+    assert "nearby_alternative_not_exact" in guidance["required_caveat_tags"]
+    assert "cross_sell_add_on_only" in guidance["required_caveat_tags"]
+    assert guidance["supported_fact_focus"]["prod-headphones"][0] == "price"
+    assert "battery_hours" in guidance["supported_fact_focus"]["prod-headphones"]
+    assert guidance["preferred_follow_up_question"] == "Do they care more about call quality or portability?"
 
 
 @pytest.mark.anyio

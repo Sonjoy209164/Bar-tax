@@ -4142,6 +4142,12 @@ class InventoryService:
             hits=hits,
             answer_plan=base_reply.answer_plan,
         )
+        writer_guidance = self._build_inventory_writer_guidance(
+            hits=hits,
+            base_reply=base_reply,
+            assistant_mode=assistant_mode,
+            reply_style=reply_style,
+        )
         evidence_payload = {
             "question": question,
             "assistant_mode": assistant_mode,
@@ -4173,6 +4179,7 @@ class InventoryService:
                 "abstain": base_reply.answer_plan.abstain,
                 "abstention_reason": base_reply.answer_plan.abstention_reason,
             },
+            "writer_guidance": writer_guidance,
             "answer_plan": answer_plan_payload,
             "verification": verification_payload,
             "reasoning_summary": reasoning_summary,
@@ -4183,6 +4190,7 @@ class InventoryService:
             "You are the natural-language writer for a grounded ecommerce inventory assistant. "
             "The system has already decided what to recommend. Your job is to express that decision clearly, naturally, and safely. "
             "Decision hierarchy: answer_plan is authoritative, writer_contract is binding, catalog hits are factual evidence, draft_reply is wording guidance, and conversation history is context only. "
+            "writer_guidance is the compressed hidden reasoning contract: follow its response_mode, mention_sequence, required_caveat_tags, and supported_fact_focus before you improvise wording. "
             "Do not choose products, reorder product roles, add products, remove required caveats, or override answer_plan. "
             "Use answer_plan.primary_reason, alternative_reason, cross_sell_reason, tradeoffs, risk_notes, next_best_question, and confidence_breakdown when they are present. "
             "If answer_plan.tradeoffs contains caveats, include the important caveat in plain language, especially for nearby alternatives and cross-sells. "
@@ -4233,6 +4241,200 @@ class InventoryService:
                 continue
             allowed.append(product_id)
         return allowed
+
+    def _build_inventory_writer_guidance(
+        self,
+        *,
+        hits: list[InventorySearchHit],
+        base_reply: InventoryReply,
+        assistant_mode: str,
+        reply_style: str,
+    ) -> dict[str, object]:
+        answer_plan = base_reply.answer_plan
+        hit_by_id = {hit.product_id: hit for hit in hits}
+        primary = hit_by_id.get(answer_plan.primary_product_id or "")
+        alternatives = [
+            hit_by_id[product_id]
+            for product_id in answer_plan.alternative_product_ids
+            if product_id in hit_by_id
+        ]
+        cross_sells = [
+            hit_by_id[product_id]
+            for product_id in answer_plan.cross_sell_product_ids
+            if product_id in hit_by_id
+        ]
+
+        mention_sequence: list[str] = []
+        if answer_plan.abstain or base_reply.verification.requires_abstention:
+            mention_sequence.append("state_abstention_reason_first")
+        elif primary is not None:
+            mention_sequence.append("name_primary_product")
+            if answer_plan.primary_reason:
+                mention_sequence.append("ground_primary_reason")
+        if alternatives:
+            mention_sequence.append("frame_alternative_as_tradeoff")
+        if cross_sells:
+            mention_sequence.append("frame_cross_sell_as_add_on")
+        if answer_plan.tradeoffs:
+            mention_sequence.append("mention_top_tradeoff")
+        if answer_plan.risk_notes:
+            mention_sequence.append("mention_top_risk_note")
+        if answer_plan.next_best_question:
+            mention_sequence.append("ask_one_follow_up_question_at_end")
+
+        required_caveat_tags: list[str] = []
+        if answer_plan.abstain or base_reply.verification.requires_abstention:
+            required_caveat_tags.append("respect_abstention")
+        if cross_sells:
+            required_caveat_tags.append("cross_sell_add_on_only")
+        if primary is not None and any(self._is_nearby_alternative(primary=primary, candidate=alt) for alt in alternatives):
+            required_caveat_tags.append("nearby_alternative_not_exact")
+        evidence_contract = answer_plan.evidence_contract
+        if evidence_contract is not None:
+            if any("conflicting stock" in item.lower() for item in evidence_contract.contradictions):
+                required_caveat_tags.append("stock_conflict_if_discussing_availability")
+            if any("no listed price" in item.lower() for item in [*evidence_contract.missing_facts, *answer_plan.risk_notes]):
+                required_caveat_tags.append("do_not_invent_missing_price")
+            if any(
+                "no listed stock" in item.lower() or "no stock quantity" in item.lower()
+                for item in [*evidence_contract.missing_facts, *answer_plan.risk_notes]
+            ):
+                required_caveat_tags.append("do_not_invent_missing_stock")
+
+        answer_goal = "Explain the grounded inventory decision clearly without changing the selected product roles."
+        response_mode = self._inventory_writer_response_mode(
+            answer_plan=answer_plan,
+            assistant_mode=assistant_mode,
+        )
+        if response_mode == "abstain":
+            answer_goal = "State the abstention clearly and avoid expanding into a recommendation."
+        elif response_mode == "comparison":
+            answer_goal = "Present the primary and alternative as a bounded comparison with the main tradeoff."
+        elif response_mode == "bundle":
+            answer_goal = "Anchor on the main product first, then frame add-ons strictly as complementary bundle items."
+        elif response_mode == "restock":
+            answer_goal = "Lead with the top operational restock priority and keep the rationale grounded in business signals."
+        elif response_mode == "product_detail":
+            answer_goal = "Answer the product detail question directly from grounded catalog facts."
+
+        required_product_ids = [primary.product_id] if primary is not None and response_mode != "abstain" else []
+        optional_product_ids = [
+            product_id
+            for product_id in [*answer_plan.alternative_product_ids, *answer_plan.cross_sell_product_ids]
+            if product_id not in required_product_ids
+        ]
+        forbidden_moves = [
+            "do_not_override_answer_plan_roles",
+            "do_not_invent_products_or_unsupported_facts",
+            "do_not_mention_excluded_products_as_recommendations",
+            "ask_at_most_one_follow_up_question",
+        ]
+        if cross_sells:
+            forbidden_moves.append("do_not_present_cross_sell_as_substitute")
+        if answer_plan.abstain or base_reply.verification.requires_abstention:
+            forbidden_moves.append("do_not_expand_abstention_into_recommendation")
+
+        return {
+            "response_mode": response_mode,
+            "answer_goal": answer_goal,
+            "assistant_mode": assistant_mode,
+            "reply_style": reply_style,
+            "must_name_primary_product": bool(required_product_ids),
+            "required_product_ids": required_product_ids,
+            "optional_product_ids": optional_product_ids,
+            "mention_sequence": self._dedupe_verification_issues(mention_sequence),
+            "required_caveat_tags": self._dedupe_verification_issues(required_caveat_tags),
+            "supported_fact_focus": self._build_writer_supported_fact_focus(
+                hits=hits,
+                answer_plan=answer_plan,
+            ),
+            "forbidden_moves": self._dedupe_verification_issues(forbidden_moves),
+            "preferred_follow_up_question": answer_plan.next_best_question,
+            "max_follow_up_questions": 1,
+        }
+
+    def _inventory_writer_response_mode(
+        self,
+        *,
+        answer_plan: InventoryAnswerPlan,
+        assistant_mode: str,
+    ) -> str:
+        if answer_plan.abstain:
+            return "abstain"
+        combined = f"{answer_plan.intent} {answer_plan.strategy or ''} {answer_plan.detected_intent or ''}".casefold()
+        if "comparison" in combined:
+            return "comparison"
+        if "bundle" in combined or "cross_sell" in combined or answer_plan.cross_sell_product_ids:
+            return "bundle"
+        if "restock" in combined:
+            return "restock"
+        if "diagnosis" in combined or "root_cause" in combined:
+            return "diagnosis"
+        if "operational" in combined or "planning" in combined:
+            return "operational_plan"
+        if "product_detail" in combined:
+            return "product_detail"
+        if assistant_mode == "sales":
+            return "recommendation"
+        return "support"
+
+    def _build_writer_supported_fact_focus(
+        self,
+        *,
+        hits: list[InventorySearchHit],
+        answer_plan: InventoryAnswerPlan,
+    ) -> dict[str, list[str]]:
+        supported: dict[str, list[str]] = {}
+        selected_ids = {
+            product_id
+            for product_id in [
+                answer_plan.primary_product_id,
+                *answer_plan.alternative_product_ids,
+                *answer_plan.cross_sell_product_ids,
+            ]
+            if product_id
+        }
+        contract = answer_plan.evidence_contract
+        if contract is not None:
+            for candidate in contract.candidate_evidence:
+                if selected_ids and candidate.product_id not in selected_ids:
+                    continue
+                fact_keys: list[str] = []
+                for fact in candidate.facts:
+                    if fact.status == "present":
+                        fact_keys.append(fact.key)
+                    elif fact.status == "conflicting":
+                        fact_keys.append(f"{fact.key}:conflicting")
+                    elif fact.status == "missing" and fact.key in {"price", "stock"}:
+                        fact_keys.append(f"{fact.key}:missing")
+                if fact_keys:
+                    supported[candidate.product_id] = fact_keys[:6]
+        if supported:
+            return supported
+        hit_by_id = {hit.product_id: hit for hit in hits}
+        for product_id in list(selected_ids)[:3]:
+            hit = hit_by_id.get(product_id)
+            if hit is None:
+                continue
+            fact_keys: list[str] = []
+            if hit.price is not None:
+                fact_keys.append("price")
+            if hit.stock is not None:
+                fact_keys.append("stock")
+            fact_keys.extend(sorted(hit.attributes)[:4])
+            if fact_keys:
+                supported[product_id] = fact_keys[:6]
+        return supported
+
+    def _is_nearby_alternative(
+        self,
+        *,
+        primary: InventorySearchHit,
+        candidate: InventorySearchHit,
+    ) -> bool:
+        primary_type = self.product_ontology.detect_product_type(product=primary)
+        candidate_type = self.product_ontology.detect_product_type(product=candidate)
+        return bool(primary_type and candidate_type and primary_type != candidate_type)
 
     def _serialize_inventory_hits(self, hits: list[InventorySearchHit], limit: int = 5) -> list[dict[str, object]]:
         serialized_hits: list[dict[str, object]] = []

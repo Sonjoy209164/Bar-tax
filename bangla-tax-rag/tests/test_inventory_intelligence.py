@@ -1087,6 +1087,80 @@ def test_inventory_final_answer_verifier_catches_cross_sell_as_substitute() -> N
     assert any("cross-sell" in issue.lower() and "substitute" in issue.lower() for issue in verification.final_answer_issues)
 
 
+def test_inventory_final_answer_verifier_requires_primary_product_grounding() -> None:
+    verifier = InventoryFinalAnswerVerifier()
+    headphones = InventorySearchHit(
+        product_id="prod-headphones",
+        sku="AUD-HP-001",
+        name="Auralite Flex ANC Headphones",
+        category="Audio",
+        brand="Auralite",
+        price=249.0,
+        currency="USD",
+        stock=18,
+        tags=["audio", "wireless", "headphones"],
+        snippet="Wireless noise-cancelling headphones",
+        score=0.82,
+    )
+    earbuds = InventorySearchHit(
+        product_id="prod-earbuds",
+        sku="AUD-EB-002",
+        name="EchoWave Studio Earbuds",
+        category="Audio",
+        brand="EchoWave",
+        price=129.0,
+        currency="USD",
+        stock=12,
+        tags=["audio", "wireless", "earbuds"],
+        snippet="Compact wireless earbuds",
+        score=0.58,
+    )
+    plan = InventoryAnswerPlan(
+        intent="sales_premium",
+        primary_product_id=headphones.product_id,
+        alternative_product_ids=[earbuds.product_id],
+    )
+
+    verification = verifier.verify(
+        answer="The fallback is EchoWave Studio Earbuds if they want something smaller.",
+        answer_plan=plan,
+        hits=[headphones, earbuds],
+    )
+
+    assert verification.passed is False
+    assert any("primary product" in issue.lower() for issue in verification.final_answer_issues)
+
+
+def test_inventory_final_answer_verifier_limits_follow_up_questions() -> None:
+    verifier = InventoryFinalAnswerVerifier()
+    laptop = InventorySearchHit(
+        product_id="prod-laptop",
+        sku="CMP-LAP-001",
+        name="Nimbus 14 Business Ultrabook",
+        category="Computing",
+        brand="Nimbus",
+        price=1199.0,
+        currency="USD",
+        stock=8,
+        tags=["computing", "laptop"],
+        snippet="Lightweight 14 inch laptop",
+        score=0.8,
+    )
+    plan = InventoryAnswerPlan(
+        intent="product_detail",
+        primary_product_id=laptop.product_id,
+    )
+
+    verification = verifier.verify(
+        answer="Nimbus 14 Business Ultrabook is in stock today. Do they care more about battery life? Do they also need 32GB RAM?",
+        answer_plan=plan,
+        hits=[laptop],
+    )
+
+    assert verification.passed is False
+    assert any("one-question limit" in issue.lower() for issue in verification.final_answer_issues)
+
+
 def test_inventory_final_answer_verifier_uses_contract_supported_stock_values() -> None:
     ontology = ProductOntology()
     builder = InventoryEvidenceContractBuilder(ontology)

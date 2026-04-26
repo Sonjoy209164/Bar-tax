@@ -78,12 +78,14 @@ class InventoryFinalAnswerVerifier:
 
         issues.extend(self._check_excluded_products(normalized_answer, answer_plan, hit_by_id))
         issues.extend(self._check_invented_product_names(answer, hits))
+        issues.extend(self._check_primary_product_grounding(normalized_answer, answer_plan, hit_by_id))
         issues.extend(self._check_prices(answer, hits, contract))
         issues.extend(self._check_stock(answer, hits, contract))
         issues.extend(self._check_unsupported_claims(normalized_answer, contract, hits))
         issues.extend(self._check_abstention(normalized_answer, answer_plan))
         issues.extend(self._check_cross_sell_boundary(normalized_answer, answer_plan, hit_by_id))
         issues.extend(self._check_near_alternative_caveats(normalized_answer, answer_plan, hit_by_id))
+        issues.extend(self._check_follow_up_question_count(answer))
 
         deduped = self._dedupe(issues)
         return InventoryAnswerVerification(
@@ -207,6 +209,50 @@ class InventoryFinalAnswerVerifier:
             if any(noun in normalized_phrase.split() for noun in product_nouns):
                 issues.append(f"Final answer may contain unsupported product name: {phrase.strip()}.")
         return issues
+
+    def _check_primary_product_grounding(
+        self,
+        normalized_answer: str,
+        answer_plan: InventoryAnswerPlan,
+        hit_by_id: dict[str, InventorySearchHit],
+    ) -> list[str]:
+        if answer_plan.abstain or not answer_plan.primary_product_id:
+            return []
+        if any(token in (answer_plan.intent or "") for token in ("small_talk", "no_match")):
+            return []
+        primary = hit_by_id.get(answer_plan.primary_product_id)
+        if primary is None:
+            return []
+        if self._mentions_hit(normalized_answer, primary):
+            return []
+
+        mentions_secondary = any(
+            self._mentions_hit(normalized_answer, hit_by_id[product_id])
+            for product_id in [*answer_plan.alternative_product_ids, *answer_plan.cross_sell_product_ids]
+            if product_id in hit_by_id
+        )
+        if mentions_secondary:
+            return [f"Final answer mentions secondary options without naming the primary product {primary.name}."]
+
+        should_name_primary = bool(
+            answer_plan.alternative_product_ids
+            or answer_plan.cross_sell_product_ids
+            or any(
+                token in (answer_plan.intent or "")
+                for token in (
+                    "sales",
+                    "comparison",
+                    "restock",
+                    "product_detail",
+                    "bundle",
+                    "recommendation",
+                )
+            )
+            or any(word in normalized_answer for word in self.RECOMMENDATION_WORDS)
+        )
+        if should_name_primary:
+            return [f"Final answer does not name the grounded primary product {primary.name}."]
+        return []
 
     def _check_prices(
         self,
@@ -513,6 +559,13 @@ class InventoryFinalAnswerVerifier:
                 )
 
         return issues
+
+    @staticmethod
+    def _check_follow_up_question_count(answer: str) -> list[str]:
+        question_count = answer.count("?")
+        if question_count <= 1:
+            return []
+        return [f"Final answer asks {question_count} follow-up questions, which exceeds the one-question limit."]
 
     @staticmethod
     def _candidate_evidence_by_id(

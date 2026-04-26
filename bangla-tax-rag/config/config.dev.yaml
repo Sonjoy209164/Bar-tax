@@ -39,6 +39,8 @@ inventory_chat:
   natural_answer_max_tokens: 320
   natural_answer_min_confidence: 0.45
   natural_answer_timeout_seconds: 60.0
+  natural_answer_few_shot_enabled: true
+  natural_answer_few_shot_max_examples: 2
   conversation_history_limit: 6
 embeddings:
   provider: transformers

@@ -90,7 +90,13 @@ class SpecKeywordEmbedder(TextEmbedder):
         )
 
 
-def _build_inventory_service(tmp_path, *, storage_backend: str = "jsonl") -> InventoryService:  # type: ignore[no-untyped-def]
+def _build_inventory_service(
+    tmp_path,
+    *,
+    storage_backend: str = "jsonl",
+    natural_answer_few_shot_enabled: bool = False,
+    natural_answer_few_shot_max_examples: int = 2,
+) -> InventoryService:  # type: ignore[no-untyped-def]
     vector_store = LocalVectorStore(
         VectorStoreConfig(
             provider=VectorStoreProvider.LOCAL,
@@ -118,6 +124,8 @@ def _build_inventory_service(tmp_path, *, storage_backend: str = "jsonl") -> Inv
             business_signal_path=str(tmp_path / "inventory_business_signals.jsonl"),
             inventory_storage_backend=storage_backend,
             inventory_sqlite_path=str(tmp_path / "inventory_mirror.sqlite3"),
+            natural_answer_few_shot_enabled=natural_answer_few_shot_enabled,
+            natural_answer_few_shot_max_examples=natural_answer_few_shot_max_examples,
         ),
     )
 
@@ -1118,8 +1126,9 @@ def test_inventory_natural_prompt_uses_writer_contract_and_plan_fields(tmp_path)
         memory_resolution=None,
     )
 
+    assert len(messages) == 2
     system_prompt = messages[0].content
-    user_prompt = messages[1].content
+    user_prompt = messages[-1].content
     assert "Decision hierarchy: answer_plan is authoritative" in system_prompt
     assert "Do not choose products" in system_prompt
     assert "Never treat writer_contract.cross_sell_product_ids as substitutes" in system_prompt
@@ -1133,6 +1142,131 @@ def test_inventory_natural_prompt_uses_writer_contract_and_plan_fields(tmp_path)
     assert '"risk_notes"' in user_prompt
     assert '"next_best_question": "Do they care more about call quality or battery life?"' in user_prompt
     assert '"excluded_product_ids": [' in user_prompt
+
+
+def test_inventory_natural_prompt_adds_few_shot_examples_for_premium_and_nearby_alternative(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(
+        tmp_path,
+        natural_answer_few_shot_enabled=True,
+        natural_answer_few_shot_max_examples=2,
+    )
+    primary = InventorySearchHit(
+        product_id="prod-headphones",
+        sku="AUD-HP-001",
+        name="Auralite Flex ANC Headphones",
+        category="Audio",
+        brand="Auralite",
+        price=249.0,
+        currency="USD",
+        stock=18,
+        status="Active",
+        tags=["audio", "wireless", "headphones", "premium"],
+        snippet="Wireless noise-cancelling headphones under 300 for focused office work",
+        attributes={"battery_hours": "35"},
+        evidence_scores={"final_score": 0.82},
+        score=0.82,
+    )
+    alternative = InventorySearchHit(
+        product_id="prod-earbuds",
+        sku="AUD-EB-002",
+        name="EchoWave Studio Earbuds",
+        category="Audio",
+        brand="EchoWave",
+        price=129.0,
+        currency="USD",
+        stock=12,
+        status="Active",
+        tags=["audio", "wireless", "earbuds"],
+        snippet="Compact wireless earbuds for calls",
+        attributes={"battery_hours": "24"},
+        evidence_scores={"final_score": 0.58},
+        score=0.58,
+    )
+    reply = InventoryReply(
+        answer="Start with Auralite Flex ANC Headphones.",
+        recommended_product_ids=[primary.product_id, alternative.product_id],
+        answer_plan=InventoryAnswerPlan(
+            intent="sales_premium",
+            primary_product_id=primary.product_id,
+            alternative_product_ids=[alternative.product_id],
+            primary_reason="Primary recommendation is Auralite Flex ANC Headphones because it leads the recommendation scorecard.",
+            alternative_reason="Fallback option is EchoWave Studio Earbuds, but it is not an exact substitute.",
+            tradeoffs=["Earbuds are a nearby alternative, not an exact over-ear substitute."],
+            next_best_question="Do they want over-ear comfort or smaller travel-friendly size?",
+        ),
+        verification=InventoryAnswerVerification(passed=True, checked_final_answer=True),
+    )
+
+    messages = service._build_inventory_answer_messages(
+        question="Recommend premium wireless headphones under 300, and mention the nearby alternative too",
+        assistant_mode="sales",
+        reply_style="detailed",
+        confidence_score=0.82,
+        hits=[primary, alternative],
+        base_reply=reply,
+        conversation_history=[],
+        conversation_summary=None,
+        execution_path="inventory_ask",
+        reasoning_summary=[],
+        missing_facts=[],
+        memory_resolution=None,
+    )
+
+    assert len(messages) == 6
+    assert messages[0].role == "system"
+    assert messages[1].role == "user"
+    assert messages[2].role == "assistant"
+    assert messages[3].role == "user"
+    assert messages[4].role == "assistant"
+    assert messages[-1].role == "user"
+    assert "Example evidence package" in messages[1].content
+    assert "premium wireless headphones under 300" in messages[1].content
+    assert "not an exact substitute for over-ear headphones" in messages[4].content
+    assert '"writer_guidance"' in messages[-1].content
+
+
+def test_inventory_natural_prompt_adds_abstain_few_shot_example_when_enabled(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(
+        tmp_path,
+        natural_answer_few_shot_enabled=True,
+        natural_answer_few_shot_max_examples=2,
+    )
+    reply = InventoryReply(
+        answer="I do not have a reliable fit yet.",
+        answer_plan=InventoryAnswerPlan(
+            intent="sales_no_match",
+            abstain=True,
+            abstention_reason="No grounded in-stock laptop satisfies the budget and RAM constraints.",
+            next_best_question="Should I relax the budget ceiling or the RAM requirement first?",
+        ),
+        verification=InventoryAnswerVerification(
+            passed=False,
+            requires_abstention=True,
+            checked_final_answer=True,
+        ),
+    )
+
+    messages = service._build_inventory_answer_messages(
+        question="Recommend a laptop under 1000 with 32GB RAM in stock",
+        assistant_mode="support",
+        reply_style="detailed",
+        confidence_score=0.31,
+        hits=[],
+        base_reply=reply,
+        conversation_history=[],
+        conversation_summary=None,
+        execution_path="inventory_ask",
+        reasoning_summary=[],
+        missing_facts=["No grounded in-stock laptop satisfies both constraints."],
+        memory_resolution=None,
+    )
+
+    assert len(messages) == 4
+    assert messages[1].role == "user"
+    assert messages[2].role == "assistant"
+    assert '"abstained": true' in messages[2].content
+    assert "relax the budget ceiling" in messages[2].content
+    assert messages[-1].role == "user"
 
 
 def test_inventory_writer_guidance_adds_caveat_tags_and_fact_focus(tmp_path) -> None:  # type: ignore[no-untyped-def]

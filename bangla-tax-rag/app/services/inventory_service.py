@@ -327,6 +327,8 @@ class InventoryServiceConfig(BaseModel):
     natural_answer_max_tokens: int = Field(default=320, ge=64, le=4096)
     natural_answer_min_confidence: float = Field(default=0.45, ge=0.0, le=1.0)
     natural_answer_timeout_seconds: float = Field(default=60.0, ge=5.0, le=300.0)
+    natural_answer_few_shot_enabled: bool = False
+    natural_answer_few_shot_max_examples: int = Field(default=2, ge=0, le=4)
     conversation_history_limit: int = Field(default=6, ge=0, le=20)
 
 
@@ -4148,6 +4150,12 @@ class InventoryService:
             assistant_mode=assistant_mode,
             reply_style=reply_style,
         )
+        few_shot_messages = self._build_inventory_few_shot_messages(
+            question=question,
+            assistant_mode=assistant_mode,
+            base_reply=base_reply,
+            writer_guidance=writer_guidance,
+        )
         evidence_payload = {
             "question": question,
             "assistant_mode": assistant_mode,
@@ -4191,6 +4199,7 @@ class InventoryService:
             "The system has already decided what to recommend. Your job is to express that decision clearly, naturally, and safely. "
             "Decision hierarchy: answer_plan is authoritative, writer_contract is binding, catalog hits are factual evidence, draft_reply is wording guidance, and conversation history is context only. "
             "writer_guidance is the compressed hidden reasoning contract: follow its response_mode, mention_sequence, required_caveat_tags, and supported_fact_focus before you improvise wording. "
+            "If few-shot examples are present, treat them as formatting and caveat-handling demonstrations only; never copy their product names, facts, or follow-up question verbatim unless the live evidence package supports them. "
             "Do not choose products, reorder product roles, add products, remove required caveats, or override answer_plan. "
             "Use answer_plan.primary_reason, alternative_reason, cross_sell_reason, tradeoffs, risk_notes, next_best_question, and confidence_breakdown when they are present. "
             "If answer_plan.tradeoffs contains caveats, include the important caveat in plain language, especially for nearby alternatives and cross-sells. "
@@ -4221,6 +4230,7 @@ class InventoryService:
         )
         return [
             ChatMessage(role="system", content=system_prompt),
+            *few_shot_messages,
             ChatMessage(role="user", content=user_prompt),
         ]
 
@@ -4351,6 +4361,164 @@ class InventoryService:
             "forbidden_moves": self._dedupe_verification_issues(forbidden_moves),
             "preferred_follow_up_question": answer_plan.next_best_question,
             "max_follow_up_questions": 1,
+        }
+
+    def _build_inventory_few_shot_messages(
+        self,
+        *,
+        question: str,
+        assistant_mode: str,
+        base_reply: InventoryReply,
+        writer_guidance: dict[str, object],
+    ) -> list[ChatMessage]:
+        if not self.config.natural_answer_few_shot_enabled or self.config.natural_answer_few_shot_max_examples <= 0:
+            return []
+
+        example_keys = self._select_inventory_few_shot_example_keys(
+            question=question,
+            assistant_mode=assistant_mode,
+            base_reply=base_reply,
+            writer_guidance=writer_guidance,
+        )
+        messages: list[ChatMessage] = []
+        for example_key in example_keys[: self.config.natural_answer_few_shot_max_examples]:
+            example = self._inventory_few_shot_example(example_key)
+            if example is None:
+                continue
+            messages.append(ChatMessage(role="user", content=example["user"]))
+            messages.append(ChatMessage(role="assistant", content=example["assistant"]))
+        return messages
+
+    def _select_inventory_few_shot_example_keys(
+        self,
+        *,
+        question: str,
+        assistant_mode: str,
+        base_reply: InventoryReply,
+        writer_guidance: dict[str, object],
+    ) -> list[str]:
+        answer_plan = base_reply.answer_plan
+        combined = " ".join(
+            value
+            for value in [
+                question.casefold(),
+                (answer_plan.intent or "").casefold(),
+                (answer_plan.strategy or "").casefold(),
+                (answer_plan.detected_intent or "").casefold(),
+            ]
+            if value
+        )
+        caveat_tags = {
+            str(tag)
+            for tag in writer_guidance.get("required_caveat_tags", [])
+            if isinstance(tag, str)
+        }
+        example_keys: list[str] = []
+        if answer_plan.abstain or base_reply.verification.requires_abstention:
+            example_keys.append("abstain_with_follow_up")
+        else:
+            if assistant_mode == "sales" and any(token in combined for token in ("premium", "flagship", "high-end", "high end")):
+                example_keys.append("premium_recommendation")
+            if "nearby_alternative_not_exact" in caveat_tags:
+                example_keys.append("nearby_alternative_with_caveat")
+        return self._dedupe_verification_issues(example_keys)
+
+    @staticmethod
+    def _inventory_few_shot_example(example_key: str) -> dict[str, str] | None:
+        if example_key == "premium_recommendation":
+            user_payload = {
+                "question": "Recommend premium wireless headphones under 300",
+                "assistant_mode": "sales",
+                "writer_guidance": {
+                    "response_mode": "recommendation",
+                    "must_name_primary_product": True,
+                    "mention_sequence": ["name_primary_product", "ground_primary_reason", "ask_one_follow_up_question_at_end"],
+                    "required_caveat_tags": [],
+                },
+                "writer_contract": {
+                    "primary_product_id": "prod-primary",
+                    "alternative_product_ids": [],
+                    "cross_sell_product_ids": [],
+                    "abstain": False,
+                },
+                "answer_plan": {
+                    "primary_reason": "Primary recommendation is Auralite Flex ANC Headphones because it leads the recommendation scorecard on product fit, price fit, and stock fit.",
+                    "tradeoffs": ["Keep the answer focused on the premium lead rather than generic alternatives."],
+                    "risk_notes": ["Do not invent discounts or shipping claims."],
+                    "next_best_question": "Do they care more about call quality or battery life?",
+                },
+            }
+            assistant_payload = {
+                "answer": "Start with Auralite Flex ANC Headphones. It is the strongest premium fit here because it matches the requested product type, stays inside budget, and is in stock. Do they care more about call quality or battery life?",
+                "follow_up_question": "Do they care more about call quality or battery life?",
+                "abstained": False,
+                "abstention_reason": None,
+            }
+        elif example_key == "nearby_alternative_with_caveat":
+            user_payload = {
+                "question": "Recommend wireless headphones, but mention the nearby alternative too",
+                "assistant_mode": "sales",
+                "writer_guidance": {
+                    "response_mode": "recommendation",
+                    "must_name_primary_product": True,
+                    "mention_sequence": ["name_primary_product", "ground_primary_reason", "frame_alternative_as_tradeoff"],
+                    "required_caveat_tags": ["nearby_alternative_not_exact"],
+                },
+                "writer_contract": {
+                    "primary_product_id": "prod-headphones",
+                    "alternative_product_ids": ["prod-earbuds"],
+                    "cross_sell_product_ids": [],
+                    "abstain": False,
+                },
+                "answer_plan": {
+                    "primary_reason": "Primary recommendation is Auralite Flex ANC Headphones because it is the exact over-ear match.",
+                    "alternative_reason": "Fallback option is EchoWave Studio Earbuds because it is nearby on portability and price, but it is not an exact over-ear substitute.",
+                    "tradeoffs": ["Earbuds are a nearby alternative, not an equivalent over-ear replacement."],
+                    "risk_notes": [],
+                    "next_best_question": "Do they want over-ear comfort or smaller travel-friendly size?",
+                },
+            }
+            assistant_payload = {
+                "answer": "Start with Auralite Flex ANC Headphones as the exact over-ear match. EchoWave Studio Earbuds are the nearby fallback if they want something smaller and cheaper, but they are not an exact substitute for over-ear headphones. Do they want over-ear comfort or smaller travel-friendly size?",
+                "follow_up_question": "Do they want over-ear comfort or smaller travel-friendly size?",
+                "abstained": False,
+                "abstention_reason": None,
+            }
+        elif example_key == "abstain_with_follow_up":
+            user_payload = {
+                "question": "Recommend a laptop under 1000 with 32GB RAM in stock",
+                "assistant_mode": "support",
+                "writer_guidance": {
+                    "response_mode": "abstain",
+                    "must_name_primary_product": False,
+                    "mention_sequence": ["state_abstention_reason_first", "ask_one_follow_up_question_at_end"],
+                    "required_caveat_tags": ["respect_abstention"],
+                },
+                "writer_contract": {
+                    "primary_product_id": None,
+                    "alternative_product_ids": [],
+                    "cross_sell_product_ids": [],
+                    "abstain": True,
+                    "abstention_reason": "No grounded in-stock laptop satisfies both the budget ceiling and the 32GB RAM requirement.",
+                },
+                "answer_plan": {
+                    "tradeoffs": [],
+                    "risk_notes": ["Do not turn the abstention into a soft recommendation."],
+                    "next_best_question": "Should I relax the budget ceiling or the 32GB RAM requirement first?",
+                },
+            }
+            assistant_payload = {
+                "answer": "I do not have a grounded in-stock laptop that satisfies both the budget ceiling and the 32GB RAM requirement. Should I relax the budget ceiling or the 32GB RAM requirement first?",
+                "follow_up_question": "Should I relax the budget ceiling or the 32GB RAM requirement first?",
+                "abstained": True,
+                "abstention_reason": "No grounded in-stock laptop satisfies both the budget ceiling and the 32GB RAM requirement.",
+            }
+        else:
+            return None
+
+        return {
+            "user": "Example evidence package:\n" + json.dumps(user_payload, ensure_ascii=False, indent=2),
+            "assistant": json.dumps(assistant_payload, ensure_ascii=False),
         }
 
     def _inventory_writer_response_mode(
@@ -7574,6 +7742,8 @@ def get_inventory_service() -> InventoryService:
             natural_answer_max_tokens=settings.inventory_natural_answer_max_tokens,
             natural_answer_min_confidence=settings.inventory_natural_answer_min_confidence,
             natural_answer_timeout_seconds=settings.inventory_natural_answer_timeout_seconds,
+            natural_answer_few_shot_enabled=settings.inventory_natural_answer_few_shot_enabled,
+            natural_answer_few_shot_max_examples=settings.inventory_natural_answer_few_shot_max_examples,
             conversation_history_limit=settings.inventory_conversation_history_limit,
         ),
     )

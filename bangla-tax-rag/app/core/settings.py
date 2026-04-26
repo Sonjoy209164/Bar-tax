@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     inventory_natural_answer_max_tokens: int = Field(default=320, alias="INVENTORY_NATURAL_ANSWER_MAX_TOKENS")
     inventory_natural_answer_min_confidence: float = Field(default=0.45, alias="INVENTORY_NATURAL_ANSWER_MIN_CONFIDENCE")
     inventory_natural_answer_timeout_seconds: float = Field(default=60.0, alias="INVENTORY_NATURAL_ANSWER_TIMEOUT_SECONDS")
+    inventory_natural_answer_few_shot_enabled: bool = Field(default=False, alias="INVENTORY_NATURAL_ANSWER_FEW_SHOT_ENABLED")
+    inventory_natural_answer_few_shot_max_examples: int = Field(default=2, alias="INVENTORY_NATURAL_ANSWER_FEW_SHOT_MAX_EXAMPLES")
     inventory_conversation_history_limit: int = Field(default=6, alias="INVENTORY_CONVERSATION_HISTORY_LIMIT")
     sparse_index_dir: str = Field(default="indexes/sparse", alias="SPARSE_INDEX_DIR")
     dense_index_dir: str = Field(default="indexes/dense", alias="DENSE_INDEX_DIR")
@@ -122,6 +124,8 @@ class Settings(BaseSettings):
             "inventory_natural_answer_max_tokens": self.inventory_natural_answer_max_tokens,
             "inventory_natural_answer_min_confidence": self.inventory_natural_answer_min_confidence,
             "inventory_natural_answer_timeout_seconds": self.inventory_natural_answer_timeout_seconds,
+            "inventory_natural_answer_few_shot_enabled": self.inventory_natural_answer_few_shot_enabled,
+            "inventory_natural_answer_few_shot_max_examples": self.inventory_natural_answer_few_shot_max_examples,
             "inventory_conversation_history_limit": self.inventory_conversation_history_limit,
             "sparse_index_dir": self.sparse_index_dir,
             "dense_index_dir": self.dense_index_dir,
@@ -219,6 +223,13 @@ def get_settings() -> Settings:
         apply_yaml_override("inventory_natural_answer_min_confidence", inventory_chat_config["natural_answer_min_confidence"])
     if "natural_answer_timeout_seconds" in inventory_chat_config:
         apply_yaml_override("inventory_natural_answer_timeout_seconds", inventory_chat_config["natural_answer_timeout_seconds"])
+    if "natural_answer_few_shot_enabled" in inventory_chat_config:
+        apply_yaml_override("inventory_natural_answer_few_shot_enabled", inventory_chat_config["natural_answer_few_shot_enabled"])
+    if "natural_answer_few_shot_max_examples" in inventory_chat_config:
+        apply_yaml_override(
+            "inventory_natural_answer_few_shot_max_examples",
+            inventory_chat_config["natural_answer_few_shot_max_examples"],
+        )
     if "conversation_history_limit" in inventory_chat_config:
         apply_yaml_override("inventory_conversation_history_limit", inventory_chat_config["conversation_history_limit"])
     for key in (

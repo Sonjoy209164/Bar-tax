@@ -17,6 +17,7 @@ from app.core.schemas import (
     InventorySearchFilters,
     InventorySearchHit,
 )
+from app.core.settings import get_settings
 from app.retrieval import (
     EmbedderConfig,
     EmbeddingBatch,
@@ -115,7 +116,13 @@ class InventoryEvalCase:
     required_missing_fact_substrings: tuple[str, ...] = ()
 
 
-def run_inventory_eval_matrix(*, case_ids: list[str] | None = None) -> dict[str, object]:
+def run_inventory_eval_matrix(
+    *,
+    case_ids: list[str] | None = None,
+    natural_answers_enabled: bool | None = None,
+    natural_answer_few_shot_enabled: bool | None = None,
+    natural_answer_few_shot_max_examples: int | None = None,
+) -> dict[str, object]:
     policy_contract = inventory_policy_contract()
     selected_cases = _select_cases(case_ids)
     available_case_ids = [case.case_id for case in inventory_eval_cases()]
@@ -131,7 +138,12 @@ def run_inventory_eval_matrix(*, case_ids: list[str] | None = None) -> dict[str,
         root = Path(temp_root)
         for case in selected_cases:
             covered_failure_modes.update(case.tags)
-            service = _build_inventory_eval_service(root / case.case_id)
+            service = _build_inventory_eval_service(
+                root / case.case_id,
+                natural_answers_enabled=natural_answers_enabled,
+                natural_answer_few_shot_enabled=natural_answer_few_shot_enabled,
+                natural_answer_few_shot_max_examples=natural_answer_few_shot_max_examples,
+            )
             service.upsert_items([item.model_copy(deep=True) for item in case.items])
             if case.business_signals:
                 service.upsert_business_signals([signal.model_copy(deep=True) for signal in case.business_signals])
@@ -831,7 +843,14 @@ def _select_cases(case_ids: list[str] | None) -> list[InventoryEvalCase]:
     return selected
 
 
-def _build_inventory_eval_service(root: Path) -> InventoryService:
+def _build_inventory_eval_service(
+    root: Path,
+    *,
+    natural_answers_enabled: bool | None = None,
+    natural_answer_few_shot_enabled: bool | None = None,
+    natural_answer_few_shot_max_examples: int | None = None,
+) -> InventoryService:
+    settings = get_settings()
     root.mkdir(parents=True, exist_ok=True)
     embedder = InventoryEvalKeywordEmbedder(
         EmbedderConfig(
@@ -855,11 +874,26 @@ def _build_inventory_eval_service(root: Path) -> InventoryService:
         config=InventoryServiceConfig(
             catalog_path=str(root / "inventory_catalog.jsonl"),
             namespace="inventory-eval",
+            default_top_k=settings.top_k,
             low_stock_threshold=10,
             agentic_trace_dir=str(root / "inventory_agentic_traces"),
+            chat_trace_dir=str(root / "inventory_chat_traces"),
             business_signal_path=str(root / "inventory_business_signals.jsonl"),
             inventory_storage_backend="jsonl",
             inventory_sqlite_path=str(root / "inventory_mirror.sqlite3"),
+            natural_answers_enabled=bool(natural_answers_enabled),
+            natural_answer_model_name=settings.inventory_natural_answer_model_name,
+            natural_answer_temperature=settings.inventory_natural_answer_temperature,
+            natural_answer_max_tokens=settings.inventory_natural_answer_max_tokens,
+            natural_answer_min_confidence=settings.inventory_natural_answer_min_confidence,
+            natural_answer_timeout_seconds=settings.inventory_natural_answer_timeout_seconds,
+            natural_answer_few_shot_enabled=bool(natural_answer_few_shot_enabled),
+            natural_answer_few_shot_max_examples=(
+                settings.inventory_natural_answer_few_shot_max_examples
+                if natural_answer_few_shot_max_examples is None
+                else natural_answer_few_shot_max_examples
+            ),
+            conversation_history_limit=settings.inventory_conversation_history_limit,
         ),
     )
 

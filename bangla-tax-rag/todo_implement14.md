@@ -636,7 +636,7 @@ Pass condition:
 
 ### 4. Create Draft Corpus Manifest
 
-- [ ] Generate a draft manifest from the 14 filenames.
+- [x] Generate a draft manifest from the 14 filenames.
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -700,7 +700,7 @@ print(f"Wrote {len(rows)} rows to {out}")
 PY
 ```
 
-- [ ] Confirm the manifest has 14 data rows.
+- [x] Confirm the manifest has 14 data rows.
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -714,15 +714,15 @@ for row in rows:
 PY
 ```
 
-- [ ] Manually fill missing manifest fields.
+- [x] Manually fill missing manifest fields.
 
 Required fields before ingestion:
 
 - [ ] `title`
-- [ ] `source_url`
-- [ ] `authority_type`
-- [ ] `tax_year` or `assessment_year`
-- [ ] `pdf_quality`
+- [x] `source_url`
+- [x] `authority_type`
+- [x] `tax_year` or `assessment_year`
+- [x] `pdf_quality`
 
 Recommended values:
 
@@ -733,11 +733,11 @@ pdf_quality: embedded_text | scanned | mixed | unknown
 
 Pass condition:
 
-- [ ] no row has missing `source_url`, `authority_type`, and both `tax_year`/`assessment_year`.
+- [x] no row has missing `source_url`, `authority_type`, and both `tax_year`/`assessment_year`.
 
 ### 5. Count PDF Pages And Update Manifest Notes
 
-- [ ] Generate page counts into a side report.
+- [x] Generate page counts into a side report.
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -762,7 +762,7 @@ for row in rows:
 PY
 ```
 
-- [ ] Copy page counts into `data/metadata/corpus_manifest_btax14.csv`.
+- [x] Copy page counts into `data/metadata/corpus_manifest_btax14.csv`.
 
 ### 6. Ingest All 14 PDFs
 

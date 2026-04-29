@@ -768,7 +768,7 @@ PY
 
 Default path: parse existing PDF text first. Use OCR only for documents that clearly fail extraction.
 
-- [ ] Run batch ingestion from the manifest.
+- [x] Run batch ingestion from the manifest.
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -812,7 +812,7 @@ for row in rows:
 PY
 ```
 
-- [ ] Confirm every document produced chunks.
+- [x] Confirm every document produced chunks.
 
 ```bash
 for f in data/processed/btax14/per_doc/*.jsonl; do
@@ -823,20 +823,49 @@ done | tee results/pilot14/per_doc_chunk_counts.txt
 
 Pass condition:
 
-- [ ] all 14 files exist.
-- [ ] no official document has `0` chunks.
+- [x] all 14 files exist.
+- [x] no official document has `0` chunks.
 
 ### 7. OCR Failed Or Weak Documents
 
 Only run this for PDFs where chunks are empty, badly garbled, or missing Bangla text.
 
-- [ ] Create OCR output folder.
+- [x] Create OCR output folder.
 
 ```bash
 mkdir -p data/processed/btax14/ocr_pdfs
 ```
 
-- [ ] OCR one weak document. Replace ids and filenames.
+- [x] Generate saved OCR ingestion commands for all 14 PDFs.
+
+```bash
+.venv/bin/python scripts/run_pilot14_ocr_ingest.py
+```
+
+This writes:
+
+```text
+results/pilot14/pilot14_ocr_ingest_commands.sh
+results/pilot14/pilot14_ocr_ingest_commands.jsonl
+results/pilot14/pilot14_ocr_ingest_summary.json
+```
+
+- [x] Run OCR ingestion for all 14 PDFs.
+
+```bash
+.venv/bin/python scripts/run_pilot14_ocr_ingest.py --execute --overwrite
+```
+
+This writes OCR parsing results to:
+
+```text
+data/processed/btax14/ocr_pdfs/
+data/processed/btax14/ocr_per_doc/
+results/pilot14/ocr_ingest_stdout/
+results/pilot14/ocr_ingest_stderr/
+```
+
+- [ ] Optional: OCR one weak document manually if the batch runner fails. Replace ids and filenames.
 
 ```bash
 .venv/bin/python scripts/ingest_pdf.py \
@@ -852,11 +881,11 @@ mkdir -p data/processed/btax14/ocr_pdfs
   --output data/processed/btax14/per_doc/btax14_002.jsonl
 ```
 
-- [ ] Record every OCR rerun in `results/pilot14/ocr_rerun_notes.md`.
+- [x] Record every OCR rerun in `results/pilot14/ocr_rerun_notes.md`.
 
 ### 8. Merge Per-Document Chunks
 
-- [ ] Merge all per-document chunk files.
+- [x] Merge all per-document chunk files.
 
 ```bash
 rm -f data/processed/btax14/chunks.jsonl
@@ -865,13 +894,13 @@ for f in data/processed/btax14/per_doc/*.jsonl; do
 done
 ```
 
-- [ ] Count merged chunks.
+- [x] Count merged chunks.
 
 ```bash
 wc -l data/processed/btax14/chunks.jsonl
 ```
 
-- [ ] Generate a chunk count summary by document.
+- [x] Generate a chunk count summary by document.
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -895,8 +924,8 @@ PY
 
 Pass condition:
 
-- [ ] merged chunk file exists.
-- [ ] every `btax14_###` document has non-zero chunks.
+- [x] merged chunk file exists.
+- [x] every `btax14_###` document has non-zero chunks.
 
 ### 9. Inspect Chunk Quality
 

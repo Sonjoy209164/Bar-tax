@@ -503,9 +503,48 @@ Stop or reframe if:
 - [ ] Update roadmap with evidence, not intuition.
 - [ ] Freeze `BTaxBench-Pilot14 v0.1`.
 
-## Immediate Next Commands
+## Command Workflow Checklist
 
-Create folders:
+Run these commands from the repo root:
+
+```bash
+cd "/home/sonjoy/Bar tax/bangla-tax-rag"
+```
+
+This section is intentionally operational. Tick each checkbox only after the command runs and the output looks sane.
+
+### 0. Environment Check
+
+- [ ] Confirm you are in the project root.
+
+```bash
+pwd
+```
+
+Expected:
+
+```text
+/home/sonjoy/Bar tax/bangla-tax-rag
+```
+
+- [ ] Create or activate the Python environment.
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+- [ ] Run a smoke test before touching the 14-document workflow.
+
+```bash
+.venv/bin/python -m pytest tests/test_repo_smoke.py tests/test_parser.py tests/test_chunker.py -q
+```
+
+Pass condition:
+
+- [ ] smoke tests pass, or failures are recorded in `results/pilot14/setup_notes.md`.
+
+### 1. Create Pilot14 Folders
 
 ```bash
 mkdir -p data/raw/btax14/pdfs \
@@ -514,16 +553,644 @@ mkdir -p data/raw/btax14/pdfs \
   data/processed/btax14 \
   data/btaxbench/pilot14 \
   data/annotations/pilot14 \
+  indexes/pilot14/sparse \
+  indexes/pilot14/dense \
   results/pilot14
 ```
 
-Check current visible PDFs:
+- [x] Confirm folders exist.
 
 ```bash
-find data -iname '*.pdf' -print
+find data/raw/btax14 data/metadata data/processed/btax14 data/btaxbench/pilot14 data/annotations/pilot14 results/pilot14 -maxdepth 2 -type d | sort
 ```
 
-Count current JSONL records:
+### 2. Put The 14 PDFs In One Place
+
+- [x] Check where your PDFs currently are.
+
+```bash
+find .. dataset data -iname '*.pdf' -print 2>/dev/null | sort
+```
+
+- [x] Copy or move the 14 official PDFs into `data/raw/btax14/pdfs/`.
+
+Use this if the PDFs are currently under `../dataset/`:
+
+```bash
+find ../dataset -maxdepth 2 -type f -iname '*.pdf' -exec cp -n {} data/raw/btax14/pdfs/ \;
+```
+
+Use this if the PDFs are currently under repo-local `dataset/`:
+
+```bash
+find dataset -maxdepth 2 -type f -iname '*.pdf' -exec cp -n {} data/raw/btax14/pdfs/ \;
+```
+
+- [x] Confirm exactly 14 PDFs are visible.
+
+```bash
+find data/raw/btax14/pdfs -maxdepth 1 -type f -iname '*.pdf' | sort | tee results/pilot14/pdf_list.txt
+wc -l results/pilot14/pdf_list.txt
+```
+
+Pass condition:
+
+- [x] output count is `14`.
+
+### 3. Rename PDFs To Stable IDs
+
+Do not skip this. Stable ids prevent broken citations later.
+
+- [x] Preview current filenames.
+
+```bash
+nl -w2 -s'. ' results/pilot14/pdf_list.txt
+```
+
+- [x] Rename manually into this pattern.
+
+```text
+data/raw/btax14/pdfs/btax14_001_<short_name>.pdf
+data/raw/btax14/pdfs/btax14_002_<short_name>.pdf
+...
+data/raw/btax14/pdfs/btax14_014_<short_name>.pdf
+```
+
+Example:
+
+```bash
+mv "data/raw/btax14/pdfs/Income_tax_act_2023.pdf" \
+  "data/raw/btax14/pdfs/btax14_001_income_tax_act_2023.pdf"
+```
+
+- [x] Confirm final stable filenames.
+
+```bash
+find data/raw/btax14/pdfs -maxdepth 1 -type f -iname 'btax14_*.pdf' | sort | tee results/pilot14/pdf_list_stable.txt
+wc -l results/pilot14/pdf_list_stable.txt
+```
+
+Pass condition:
+
+- [x] output count is `14`.
+
+### 4. Create Draft Corpus Manifest
+
+- [ ] Generate a draft manifest from the 14 filenames.
+
+```bash
+.venv/bin/python - <<'PY'
+import csv
+from pathlib import Path
+
+pdf_dir = Path("data/raw/btax14/pdfs")
+out = Path("data/metadata/corpus_manifest_btax14.csv")
+out.parent.mkdir(parents=True, exist_ok=True)
+
+fields = [
+    "doc_id",
+    "file_name",
+    "title",
+    "title_bn",
+    "source_url",
+    "issuing_authority",
+    "authority_type",
+    "publication_date",
+    "tax_year",
+    "income_year",
+    "assessment_year",
+    "language",
+    "pdf_quality",
+    "page_count",
+    "has_tables",
+    "has_scanned_pages",
+    "notes",
+]
+
+rows = []
+for pdf in sorted(pdf_dir.glob("btax14_*.pdf")):
+    doc_id = "_".join(pdf.stem.split("_")[:2])
+    guessed_title = pdf.stem.replace(doc_id + "_", "").replace("_", " ").strip().title()
+    rows.append({
+        "doc_id": doc_id,
+        "file_name": pdf.name,
+        "title": guessed_title,
+        "title_bn": "",
+        "source_url": "",
+        "issuing_authority": "National Board of Revenue",
+        "authority_type": "",
+        "publication_date": "",
+        "tax_year": "",
+        "income_year": "",
+        "assessment_year": "",
+        "language": "bn/en",
+        "pdf_quality": "unknown",
+        "page_count": "",
+        "has_tables": "",
+        "has_scanned_pages": "",
+        "notes": "",
+    })
+
+with out.open("w", newline="", encoding="utf-8") as handle:
+    writer = csv.DictWriter(handle, fieldnames=fields)
+    writer.writeheader()
+    writer.writerows(rows)
+
+print(f"Wrote {len(rows)} rows to {out}")
+PY
+```
+
+- [ ] Confirm the manifest has 14 data rows.
+
+```bash
+.venv/bin/python - <<'PY'
+import csv
+from pathlib import Path
+path = Path("data/metadata/corpus_manifest_btax14.csv")
+rows = list(csv.DictReader(path.open(encoding="utf-8")))
+print("rows:", len(rows))
+for row in rows:
+    print(row["doc_id"], row["file_name"], row["authority_type"] or "MISSING_AUTHORITY", row["tax_year"] or row["assessment_year"] or "MISSING_YEAR")
+PY
+```
+
+- [ ] Manually fill missing manifest fields.
+
+Required fields before ingestion:
+
+- [ ] `title`
+- [ ] `source_url`
+- [ ] `authority_type`
+- [ ] `tax_year` or `assessment_year`
+- [ ] `pdf_quality`
+
+Recommended values:
+
+```text
+authority_type: act | paripatra | sro | rule | form | guideline | other
+pdf_quality: embedded_text | scanned | mixed | unknown
+```
+
+Pass condition:
+
+- [ ] no row has missing `source_url`, `authority_type`, and both `tax_year`/`assessment_year`.
+
+### 5. Count PDF Pages And Update Manifest Notes
+
+- [ ] Generate page counts into a side report.
+
+```bash
+.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+
+import fitz
+
+rows = []
+for pdf in sorted(Path("data/raw/btax14/pdfs").glob("btax14_*.pdf")):
+    try:
+        doc = fitz.open(pdf)
+        rows.append({"file_name": pdf.name, "page_count": doc.page_count})
+        doc.close()
+    except Exception as exc:
+        rows.append({"file_name": pdf.name, "page_count": None, "error": str(exc)})
+
+out = Path("results/pilot14/pdf_page_counts.json")
+out.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+for row in rows:
+    print(row)
+PY
+```
+
+- [ ] Copy page counts into `data/metadata/corpus_manifest_btax14.csv`.
+
+### 6. Ingest All 14 PDFs
+
+Default path: parse existing PDF text first. Use OCR only for documents that clearly fail extraction.
+
+- [ ] Run batch ingestion from the manifest.
+
+```bash
+.venv/bin/python - <<'PY'
+import csv
+import subprocess
+from pathlib import Path
+
+manifest = Path("data/metadata/corpus_manifest_btax14.csv")
+pdf_dir = Path("data/raw/btax14/pdfs")
+out_dir = Path("data/processed/btax14/per_doc")
+out_dir.mkdir(parents=True, exist_ok=True)
+
+rows = list(csv.DictReader(manifest.open(encoding="utf-8")))
+for row in rows:
+    doc_id = row["doc_id"].strip()
+    file_name = row["file_name"].strip()
+    title = row["title"].strip() or doc_id
+    authority_type = row["authority_type"].strip() or "other"
+    pdf = pdf_dir / file_name
+    output = out_dir / f"{doc_id}.jsonl"
+    cmd = [
+        ".venv/bin/python",
+        "scripts/ingest_pdf.py",
+        "--input",
+        str(pdf),
+        "--doc-id",
+        doc_id,
+        "--doc-title",
+        title,
+        "--doc-type",
+        authority_type,
+        "--authority-level",
+        "national",
+        "--chunking-mode",
+        "section_aware",
+        "--output",
+        str(output),
+    ]
+    print("RUN", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+PY
+```
+
+- [ ] Confirm every document produced chunks.
+
+```bash
+for f in data/processed/btax14/per_doc/*.jsonl; do
+  printf "%s " "$f"
+  wc -l < "$f"
+done | tee results/pilot14/per_doc_chunk_counts.txt
+```
+
+Pass condition:
+
+- [ ] all 14 files exist.
+- [ ] no official document has `0` chunks.
+
+### 7. OCR Failed Or Weak Documents
+
+Only run this for PDFs where chunks are empty, badly garbled, or missing Bangla text.
+
+- [ ] Create OCR output folder.
+
+```bash
+mkdir -p data/processed/btax14/ocr_pdfs
+```
+
+- [ ] OCR one weak document. Replace ids and filenames.
+
+```bash
+.venv/bin/python scripts/ingest_pdf.py \
+  --input data/raw/btax14/pdfs/btax14_002_example.pdf \
+  --doc-id btax14_002 \
+  --doc-title "Replace With Real Title" \
+  --doc-type paripatra \
+  --authority-level national \
+  --chunking-mode section_aware \
+  --ocr-enabled \
+  --ocr-language ben+eng \
+  --ocr-output-pdf data/processed/btax14/ocr_pdfs/btax14_002_example.ocr.pdf \
+  --output data/processed/btax14/per_doc/btax14_002.jsonl
+```
+
+- [ ] Record every OCR rerun in `results/pilot14/ocr_rerun_notes.md`.
+
+### 8. Merge Per-Document Chunks
+
+- [ ] Merge all per-document chunk files.
+
+```bash
+rm -f data/processed/btax14/chunks.jsonl
+for f in data/processed/btax14/per_doc/*.jsonl; do
+  cat "$f" >> data/processed/btax14/chunks.jsonl
+done
+```
+
+- [ ] Count merged chunks.
+
+```bash
+wc -l data/processed/btax14/chunks.jsonl
+```
+
+- [ ] Generate a chunk count summary by document.
+
+```bash
+.venv/bin/python - <<'PY'
+import json
+from collections import Counter
+from pathlib import Path
+
+counts = Counter()
+path = Path("data/processed/btax14/chunks.jsonl")
+for line in path.open(encoding="utf-8"):
+    if line.strip():
+        row = json.loads(line)
+        counts[row.get("doc_id", "MISSING_DOC_ID")] += 1
+
+out = Path("results/pilot14/chunk_counts_by_doc.json")
+out.write_text(json.dumps(counts, ensure_ascii=False, indent=2), encoding="utf-8")
+for doc_id, count in sorted(counts.items()):
+    print(doc_id, count)
+PY
+```
+
+Pass condition:
+
+- [ ] merged chunk file exists.
+- [ ] every `btax14_###` document has non-zero chunks.
+
+### 9. Inspect Chunk Quality
+
+- [ ] Sample 20 chunks for manual inspection.
+
+```bash
+.venv/bin/python - <<'PY'
+import json
+import random
+from pathlib import Path
+
+path = Path("data/processed/btax14/chunks.jsonl")
+rows = [json.loads(line) for line in path.open(encoding="utf-8") if line.strip()]
+sample = random.Random(7).sample(rows, min(20, len(rows)))
+out = Path("results/pilot14/random_20_chunks.md")
+with out.open("w", encoding="utf-8") as handle:
+    for i, row in enumerate(sample, 1):
+        text = row.get("original_text") or row.get("text") or row.get("normalized_text") or ""
+        handle.write(f"## {i}. {row.get('chunk_id')} | {row.get('doc_id')} | page {row.get('page_no')}\n\n")
+        handle.write(f"section: {row.get('section_id')} | tax_year: {row.get('tax_year')} | type: {row.get('chunk_type')}\n\n")
+        handle.write(text[:1200].replace('\\n', ' ') + "\n\n")
+print(f"Wrote {out}")
+PY
+```
+
+- [ ] Read `results/pilot14/random_20_chunks.md`.
+- [ ] Record parser issues in `results/pilot14/parser_issues.md`.
+
+Pass condition:
+
+- [ ] chunks are readable enough to annotate evidence.
+- [ ] page/section/tax-year issues are documented.
+
+### 10. Build Retrieval Indexes
+
+- [ ] Build sparse BM25 index.
+
+```bash
+.venv/bin/python scripts/build_sparse_index.py \
+  --input data/processed/btax14/chunks.jsonl \
+  --output indexes/pilot14/sparse
+```
+
+- [ ] Build dense placeholder index.
+
+```bash
+.venv/bin/python scripts/build_dense_index.py \
+  --input data/processed/btax14/chunks.jsonl \
+  --output indexes/pilot14/dense \
+  --provider mock \
+  --no-faiss
+```
+
+- [ ] Run one smoke query.
+
+```bash
+.venv/bin/python scripts/demo_query.py \
+  --mode hybrid \
+  --index-dir indexes/pilot14/sparse \
+  --dense-index-dir indexes/pilot14/dense \
+  --query "ব্যক্তি করদাতার করহার কত?" \
+  --top-k 5 | tee results/pilot14/demo_query_hybrid.txt
+```
+
+Pass condition:
+
+- [ ] sparse index builds.
+- [ ] dense placeholder index builds.
+- [ ] hybrid query returns hits.
+
+### 11. Generate Annotation Candidates
+
+- [ ] Generate candidate questions from chunks.
+
+```bash
+.venv/bin/python scripts/build_annotation_candidates.py \
+  --chunks data/processed/btax14/chunks.jsonl \
+  --output data/annotations/pilot14/candidates.jsonl
+```
+
+- [ ] Count candidates.
+
+```bash
+wc -l data/annotations/pilot14/candidates.jsonl
+```
+
+- [ ] Create the first annotation working file.
+
+```bash
+cp data/annotations/pilot14/candidates.jsonl data/annotations/pilot14/annotator_a_working.jsonl
+```
+
+Manual step:
+
+- [ ] Edit `data/annotations/pilot14/annotator_a_working.jsonl` down to the first 50 high-quality questions.
+- [ ] Fill gold answers.
+- [ ] Fill expected chunk ids.
+- [ ] Include at least 10 unanswerable/ambiguous/conflict questions.
+
+### 12. Create Pilot14 Dataset Files
+
+Current validation code expects the existing `AnnotatedQuestion` schema. For now, use that schema for executable validation, then later add the richer `questions.jsonl` plus `gold_evidence.jsonl` format.
+
+- [ ] Save the first executable dataset as:
+
+```text
+data/btaxbench/pilot14/pilot14_50.jsonl
+```
+
+Required row shape:
+
+```json
+{"question_id":"btax14_q0001","question_text":"","question_type":"rate_lookup","answer_text":"","expected_chunk_ids":[],"expected_doc_ids":[],"expected_sections":[],"expected_tax_year":"2025-2026","preferred_authority_level":"national","should_abstain":false,"answer_language":"bangla","notes":""}
+```
+
+- [ ] Validate the first 50-question dataset.
+
+```bash
+.venv/bin/python scripts/validate_dataset.py \
+  --dataset data/btaxbench/pilot14/pilot14_50.jsonl \
+  --chunks data/processed/btax14/chunks.jsonl | tee results/pilot14/validate_pilot14_50.json
+```
+
+Pass condition:
+
+- [ ] validator exits successfully.
+- [ ] `invalid_rows` is `0`.
+
+### 13. Run Placeholder Evaluation
+
+This is not the real paper metric yet. It only proves the evaluation script can run.
+
+- [ ] Create a simple prediction/reference file from the annotated dataset.
+
+```bash
+.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+
+src = Path("data/btaxbench/pilot14/pilot14_50.jsonl")
+out = Path("results/pilot14/pilot14_50_placeholder_eval.jsonl")
+with src.open(encoding="utf-8") as in_handle, out.open("w", encoding="utf-8") as out_handle:
+    for line in in_handle:
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        out_handle.write(json.dumps({
+            "question": row.get("question_text", ""),
+            "prediction": "",
+            "reference": row.get("answer_text", ""),
+            "retrieval_mode": "not_run_yet",
+        }, ensure_ascii=False) + "\n")
+print(out)
+PY
+```
+
+- [ ] Run placeholder eval.
+
+```bash
+.venv/bin/python scripts/run_eval.py \
+  --dataset results/pilot14/pilot14_50_placeholder_eval.jsonl \
+  --output-dir results/pilot14/eval_placeholder
+```
+
+Pass condition:
+
+- [ ] `results/pilot14/eval_placeholder/evaluation_summary.json` exists.
+
+### 14. Run Manual Baseline Retrieval Checks
+
+Until a full Pilot14 retrieval evaluator is implemented, run query-level checks and record the hit quality.
+
+- [ ] Choose 10 representative questions from `pilot14_50.jsonl`.
+- [ ] Run sparse retrieval for each.
+
+```bash
+.venv/bin/python scripts/demo_query.py \
+  --mode sparse \
+  --index-dir indexes/pilot14/sparse \
+  --query "REPLACE_WITH_REAL_QUESTION" \
+  --top-k 5
+```
+
+- [ ] Run dense retrieval for each.
+
+```bash
+.venv/bin/python scripts/demo_query.py \
+  --mode dense \
+  --dense-index-dir indexes/pilot14/dense \
+  --query "REPLACE_WITH_REAL_QUESTION" \
+  --top-k 5
+```
+
+- [ ] Run hybrid retrieval for each.
+
+```bash
+.venv/bin/python scripts/demo_query.py \
+  --mode hybrid \
+  --index-dir indexes/pilot14/sparse \
+  --dense-index-dir indexes/pilot14/dense \
+  --query "REPLACE_WITH_REAL_QUESTION" \
+  --top-k 5
+```
+
+- [ ] Record manual results in:
+
+```text
+results/pilot14/manual_retrieval_audit.md
+```
+
+Audit columns:
+
+```text
+question_id | mode | gold_chunk_in_top_1 | gold_chunk_in_top_3 | gold_chunk_in_top_5 | wrong_year | notes
+```
+
+### 15. Implement Missing Automation
+
+These checkboxes are code tasks required to make the workflow truly paper-ready.
+
+- [ ] Add `scripts/run_retrieval_eval.py`.
+- [ ] It should read `pilot14_50.jsonl`.
+- [ ] It should run `sparse`, `dense`, and `hybrid`.
+- [ ] It should compute:
+  - [ ] Evidence Hit@1
+  - [ ] Evidence Hit@3
+  - [ ] Evidence Hit@5
+  - [ ] MRR
+  - [ ] Tax-Year Accuracy
+  - [ ] Wrong-Year Retrieval Rate
+- [ ] It should write:
+  - [ ] `results/pilot14/retrieval_eval_50.json`
+  - [ ] `results/pilot14/retrieval_eval_50.md`
+
+Do not pretend the current placeholder eval is enough. It is not.
+
+### 16. Expand From 50 To 150
+
+- [ ] Add questions 51-100.
+- [ ] Validate `pilot14_100.jsonl`.
+
+```bash
+.venv/bin/python scripts/validate_dataset.py \
+  --dataset data/btaxbench/pilot14/pilot14_100.jsonl \
+  --chunks data/processed/btax14/chunks.jsonl | tee results/pilot14/validate_pilot14_100.json
+```
+
+- [ ] Add questions 101-150.
+- [ ] Validate `pilot14_150.jsonl`.
+
+```bash
+.venv/bin/python scripts/validate_dataset.py \
+  --dataset data/btaxbench/pilot14/pilot14_150.jsonl \
+  --chunks data/processed/btax14/chunks.jsonl | tee results/pilot14/validate_pilot14_150.json
+```
+
+Pass condition:
+
+- [ ] `pilot14_150.jsonl` has at least 150 valid rows.
+- [ ] at least 30 rows have `should_abstain: true` or conflict/ambiguous notes.
+
+### 17. Freeze Pilot14 v0.1
+
+- [ ] Copy the final validated pilot.
+
+```bash
+cp data/btaxbench/pilot14/pilot14_150.jsonl data/btaxbench/pilot14/btaxbench_pilot14_v0_1.jsonl
+```
+
+- [ ] Create checksum.
+
+```bash
+sha256sum data/btaxbench/pilot14/btaxbench_pilot14_v0_1.jsonl \
+  data/processed/btax14/chunks.jsonl \
+  data/metadata/corpus_manifest_btax14.csv | tee results/pilot14/pilot14_v0_1_checksums.txt
+```
+
+- [ ] Write a short freeze note.
+
+```text
+results/pilot14/freeze_note_v0_1.md
+```
+
+Freeze note must include:
+
+- [ ] number of documents
+- [ ] number of chunks
+- [ ] number of QA pairs
+- [ ] number of answerable rows
+- [ ] number of abstention/conflict/ambiguous rows
+- [ ] known parser limitations
+- [ ] known evaluation limitations
+
+### 18. Current JSONL Inventory Check
 
 ```bash
 wc -l data/processed/*.jsonl data/agentic_store/*/chunks/*.jsonl 2>/dev/null
@@ -532,4 +1199,3 @@ wc -l data/processed/*.jsonl data/agentic_store/*/chunks/*.jsonl 2>/dev/null
 ## Strategic Warning
 
 Do not optimize TaxTrail before the 50-question pilot exists. Without gold evidence, you will tune retrieval by vibes. That is not research; that is self-deception with extra code.
-

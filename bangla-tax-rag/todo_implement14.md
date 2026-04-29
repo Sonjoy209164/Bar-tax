@@ -883,53 +883,65 @@ results/pilot14/ocr_ingest_stderr/
 
 - [x] Record every OCR rerun in `results/pilot14/ocr_rerun_notes.md`.
 
-### 8. Merge Per-Document Chunks
+### 8. Structure And Publish Clean OCR Corpus
 
-- [x] Merge all per-document chunk files.
+Do not use a raw `cat` merge as the final corpus. The final Pilot14 artifacts must come from the structure script because it preserves provenance, separates tables/forms, extracts row ids, merges weak short fragments, and tags OCR/section confidence.
 
-```bash
-rm -f data/processed/btax14/chunks.jsonl
-for f in data/processed/btax14/per_doc/*.jsonl; do
-  cat "$f" >> data/processed/btax14/chunks.jsonl
-done
-```
-
-- [x] Count merged chunks.
+- [x] Run the structuring script over OCR per-document chunks.
 
 ```bash
-wc -l data/processed/btax14/chunks.jsonl
+.venv/bin/python scripts/structure_pilot14_corpus.py
 ```
 
-- [x] Generate a chunk count summary by document.
+This writes and publishes:
+
+```text
+data/processed/btax14/chunks.jsonl
+data/processed/btax14/chunks_enriched.jsonl
+data/processed/btax14/chunks_rejected.jsonl
+data/processed/btax14/pages.jsonl
+data/processed/btax14/tables.jsonl
+data/processed/btax14/table_rows.jsonl
+data/processed/btax14/forms.jsonl
+data/processed/btax14/legal_graph.jsonl
+data/processed/btax14/extraction_report.json
+```
+
+- [x] Count structured artifacts.
+
+```bash
+wc -l data/processed/btax14/chunks.jsonl \
+  data/processed/btax14/chunks_enriched.jsonl \
+  data/processed/btax14/chunks_rejected.jsonl \
+  data/processed/btax14/pages.jsonl \
+  data/processed/btax14/tables.jsonl \
+  data/processed/btax14/table_rows.jsonl \
+  data/processed/btax14/forms.jsonl \
+  data/processed/btax14/legal_graph.jsonl
+```
+
+- [x] Confirm structured chunks load through the retrieval schema.
 
 ```bash
 .venv/bin/python - <<'PY'
-import json
-from collections import Counter
-from pathlib import Path
+from app.retrieval.sparse import load_chunk_records_from_jsonl
 
-counts = Counter()
-path = Path("data/processed/btax14/chunks.jsonl")
-for line in path.open(encoding="utf-8"):
-    if line.strip():
-        row = json.loads(line)
-        counts[row.get("doc_id", "MISSING_DOC_ID")] += 1
-
-out = Path("results/pilot14/chunk_counts_by_doc.json")
-out.write_text(json.dumps(counts, ensure_ascii=False, indent=2), encoding="utf-8")
-for doc_id, count in sorted(counts.items()):
-    print(doc_id, count)
+chunks = load_chunk_records_from_jsonl("data/processed/btax14/chunks.jsonl")
+print("loaded", len(chunks))
+print("types", sorted({chunk.chunk_type for chunk in chunks}))
 PY
 ```
 
 Pass condition:
 
-- [x] merged chunk file exists.
+- [x] canonical chunk file exists.
+- [x] enriched metadata file exists.
+- [x] table rows and forms files exist.
 - [x] every `btax14_###` document has non-zero chunks.
 
 ### 9. Inspect Chunk Quality
 
-- [ ] Sample 20 chunks for manual inspection.
+- [x] Sample 20 chunks for manual inspection.
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -951,13 +963,13 @@ print(f"Wrote {out}")
 PY
 ```
 
-- [ ] Read `results/pilot14/random_20_chunks.md`.
-- [ ] Record parser issues in `results/pilot14/parser_issues.md`.
+- [x] Read `results/pilot14/random_20_chunks.md`.
+- [x] Record parser issues in `results/pilot14/parser_issues.md`.
 
 Pass condition:
 
-- [ ] chunks are readable enough to annotate evidence.
-- [ ] page/section/tax-year issues are documented.
+- [x] chunks are readable enough to annotate evidence.
+- [x] page/section/tax-year issues are documented.
 
 ### 10. Build Retrieval Indexes
 

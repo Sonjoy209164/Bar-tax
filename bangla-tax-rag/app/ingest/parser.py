@@ -225,14 +225,29 @@ def _score_extracted_text(text: str) -> float:
     )
 
 
-def _extract_page_text(pdf_path: Path, plumber_page: pdfplumber.page.Page, fitz_page: fitz.Page) -> str:
+def _pymupdf4llm_enabled() -> bool:
+    try:
+        from app.core.settings import get_settings
+    except Exception:  # pragma: no cover - defensive fallback for isolated parser use
+        return False
+    return get_settings().parser_use_pymupdf4llm
+
+
+def _extract_page_text(
+    pdf_path: Path,
+    plumber_page: pdfplumber.page.Page,
+    fitz_page: fitz.Page,
+    *,
+    use_pymupdf4llm: bool | None = None,
+) -> str:
     candidate_texts: dict[str, str] = {
         "pdfplumber": normalize_whitespace(plumber_page.extract_text(x_tolerance=2, y_tolerance=3) or ""),
         "pymupdf": normalize_whitespace(fitz_page.get_text("text") or ""),
         "pdftotext": _extract_with_pdftotext(pdf_path, fitz_page.number),
     }
     is_ocr_pdf = pdf_path.name.lower().endswith(".ocr.pdf")
-    if pymupdf4llm is not None and not is_ocr_pdf:
+    should_use_pymupdf4llm = _pymupdf4llm_enabled() if use_pymupdf4llm is None else use_pymupdf4llm
+    if should_use_pymupdf4llm and pymupdf4llm is not None and not is_ocr_pdf:
         candidate_texts["pymupdf4llm"] = _extract_with_pymupdf4llm(pdf_path, fitz_page.number)
 
     scored_candidates = {
@@ -350,13 +365,18 @@ def prepare_pdf_for_ingestion(
     return output_path, output_path
 
 
-def parse_document(source_path: str) -> list[ParsedPage]:
+def parse_document(source_path: str, *, use_pymupdf4llm: bool | None = None) -> list[ParsedPage]:
     pdf_path = Path(source_path)
     parsed_pages: list[ParsedPage] = []
     with pdfplumber.open(pdf_path) as plumber_pdf, fitz.open(pdf_path) as fitz_pdf:
         total_pages = min(len(plumber_pdf.pages), fitz_pdf.page_count)
         for page_index in range(total_pages):
-            raw_text = _extract_page_text(pdf_path, plumber_pdf.pages[page_index], fitz_pdf.load_page(page_index))
+            raw_text = _extract_page_text(
+                pdf_path,
+                plumber_pdf.pages[page_index],
+                fitz_pdf.load_page(page_index),
+                use_pymupdf4llm=use_pymupdf4llm,
+            )
             normalized_page_text = normalize_text(raw_text)
             headings = _detect_headings(raw_text)
             parsed_pages.append(

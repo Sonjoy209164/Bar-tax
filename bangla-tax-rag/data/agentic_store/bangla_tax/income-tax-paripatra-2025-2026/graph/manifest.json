@@ -1,0 +1,21 @@
+{
+  "document_id": "income-tax-paripatra-2025-2026",
+  "act_title": "আয়কর পরিপত্র ২০২৫-২০২৬",
+  "parser_provider": "fallback",
+  "source_path": "data/processed/income-tax-paripatra-2025-2026.ocr.pdf",
+  "root_node_id": "income-tax-paripatra-2025-2026:act",
+  "node_count": 880,
+  "link_count": 1343,
+  "store_version": "1",
+  "graph_filename": "legal_graph.json",
+  "manifest_filename": "manifest.json",
+  "nodes_filename": "nodes.jsonl",
+  "parent_nodes_filename": "parent_nodes.jsonl",
+  "retrieval_nodes_filename": "retrieval_nodes.jsonl",
+  "links_filename": "links.jsonl",
+  "metadata": {
+    "parent_node_count": 665,
+    "retrieval_node_count": 879,
+    "has_link_graph": true
+  }
+}

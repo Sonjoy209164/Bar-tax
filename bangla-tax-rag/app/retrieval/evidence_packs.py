@@ -7,7 +7,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
 
-from app.core.utils import extract_definition_target
+from app.core.utils import (
+    extract_definition_target,
+    extract_tax_years,
+    extract_tax_years_near_marker,
+    normalize_text,
+    tokenize_for_bm25,
+)
 from app.domain import CitationRelation, EvidenceItem, LegalCitation, QueryType
 from app.retrieval.hybrid_retriever import HybridCandidate, HybridRetrievalResult
 
@@ -256,12 +262,16 @@ class EvidencePackBuilder:
 
     def _build_rate_table_pack(self, result: HybridRetrievalResult) -> RateTableEvidencePack:
         ranked = _collect_ranked_evidence(result)
+        rate_ranked = _rank_for_rate_question(result, ranked)
         target_section = result.query_plan.section_references[0] if result.query_plan.section_references else None
         table_evidence = _take(
             [
                 entry.item
-                for entry in ranked
-                if _is_table_like(entry)
+                for entry in rate_ranked
+                if entry.item.citation.relation in {CitationRelation.DIRECT, CitationRelation.ATTACHED_TABLE}
+                and _is_table_like(entry)
+                and _has_rate_or_amount_signal(entry.item.source_text)
+                and not _is_low_value_rate_table(entry.item.source_text)
                 and (not target_section or entry.item.citation.section_number == target_section)
             ],
             self.config.max_primary_items,
@@ -269,20 +279,27 @@ class EvidencePackBuilder:
         governing = _take(
             [
                 entry.item
-                for entry in ranked
+                for entry in rate_ranked
                 if entry.item.citation.relation in {CitationRelation.PARENT_CONTEXT, CitationRelation.GOVERNING_RULE}
             ],
             self.config.max_contextual_items,
         )
         primary = table_evidence or _take(
-            [entry.item for entry in ranked if entry.item.citation.relation is CitationRelation.DIRECT],
+            [entry.item for entry in rate_ranked if entry.item.citation.relation is CitationRelation.DIRECT],
             self.config.max_primary_items,
         )
+        focus_section = _focused_rate_section(result, primary)
+        if focus_section:
+            focused_primary = [item for item in primary if item.citation.section_number == focus_section]
+            primary = focused_primary or primary[:1]
+            table_evidence = [item for item in table_evidence if item.citation.section_number == focus_section]
+            governing = [item for item in governing if item.citation.section_number == focus_section]
         supporting = _take(
             [
                 entry.item
-                for entry in ranked
+                for entry in rate_ranked
                 if entry.item not in primary and entry.item not in governing
+                and (not focus_section or entry.item.citation.section_number == focus_section)
             ],
             self.config.max_supporting_items,
         )
@@ -508,6 +525,105 @@ def _collect_ranked_evidence(result: HybridRetrievalResult) -> list[_RankedEvide
         ranked.append(_RankedEvidence(item=item, candidate_index=len(result.candidates), candidate=None))
         seen.add(key)
     return ranked
+
+
+def _rank_for_rate_question(
+    result: HybridRetrievalResult,
+    ranked: list[_RankedEvidence],
+) -> list[_RankedEvidence]:
+    question = normalize_text(result.query_plan.normalized_question or result.question)
+    question_terms = set(tokenize_for_bm25(question))
+    target_years = set(extract_tax_years(question))
+    wants_normal_person_rate = any(term in question for term in ("স্বাভাবিক ব্যক্তি", "স্বাভাবিক ব্যক্তির"))
+    wants_surcharge = "সারচাজ" in question or "সারচার্জ" in question
+    wants_withholding = "উৎসে" in question or "withholding" in question.lower()
+
+    def score(entry: _RankedEvidence) -> tuple[float, int]:
+        text = normalize_text(entry.item.source_text)
+        text_terms = set(tokenize_for_bm25(text))
+        value = float(len(question_terms & text_terms))
+        text_years = set(extract_tax_years(text))
+        marked_years = set(extract_tax_years_near_marker(text))
+        if target_years:
+            if marked_years and target_years & marked_years:
+                value += 9.0
+            elif marked_years:
+                value -= 8.0
+            elif target_years & text_years:
+                value += 6.0
+            elif text_years:
+                value -= 5.0
+        if "%" in text or "শতাংশ" in text:
+            value += 3.0
+        if "করহার" in text or "কর হার" in text:
+            value += 2.0
+        if "মোট আয়" in text or "মোট আয়" in text or "বোট আয়" in text or "total income" in text.lower():
+            value += 2.0
+        if "হার" in text:
+            value += 0.75
+        if wants_normal_person_rate and "স্বাভাবিক ব্যক্তি" in text:
+            value += 4.0
+        if wants_normal_person_rate and "স্বাভাবিক ব্যক্তি ব্যতীত" in text:
+            value -= 1.5
+        if not wants_surcharge and ("সারচাজ" in text or "সারচার্জ" in text):
+            value -= 3.0
+        if not wants_withholding and ("উৎসের নাম" in text or "পরিশোধের বর্ণনা" in text):
+            value -= 4.0
+        if _is_low_value_rate_table(text):
+            value -= 20.0
+        if entry.item.citation.relation is CitationRelation.DIRECT:
+            value += 0.5
+        if _is_table_like(entry):
+            value += 0.5
+        return value, -entry.candidate_index
+
+    return sorted(ranked, key=score, reverse=True)
+
+
+def _focused_rate_section(result: HybridRetrievalResult, primary: list[EvidenceItem]) -> str | None:
+    if not primary:
+        return None
+    question = normalize_text(result.query_plan.normalized_question or result.question)
+    target_years = set(extract_tax_years(question))
+    if not target_years:
+        return None
+    for item in primary:
+        text = normalize_text(item.source_text)
+        marked_years = set(extract_tax_years_near_marker(text))
+        if target_years & marked_years and item.citation.section_number:
+            return item.citation.section_number
+    return None
+
+
+def _has_rate_or_amount_signal(text: str) -> bool:
+    normalized = normalize_text(text)
+    return any(
+        marker in normalized
+        for marker in (
+            "%",
+            "শতাংশ",
+            "করহার",
+            "কর হার",
+            "মোট আয়",
+            "মোট আয়",
+            "বোট আয়",
+            "হার",
+            "টাকা",
+            "percent",
+            "rate",
+            "income",
+        )
+    )
+
+
+def _is_low_value_rate_table(text: str) -> bool:
+    normalized = normalize_text(text)
+    terms = set(tokenize_for_bm25(normalized))
+    if normalized.count("করহার") >= 4 and len(terms - {"করহার", "হার"}) <= 4:
+        return True
+    if normalized.count("করহার") >= 4 and not any(marker in normalized for marker in ("মোট আয়", "মোট আয়", "টাকা", "%")):
+        return True
+    return False
 
 
 def _build_section_groups(

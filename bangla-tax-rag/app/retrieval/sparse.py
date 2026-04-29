@@ -16,6 +16,8 @@ from app.core.utils import (
     extract_definition_target,
     extract_informative_query_terms,
     extract_salient_query_terms,
+    extract_tax_years,
+    extract_tax_years_near_marker,
     preprocess_query,
     tokenize_for_bm25,
 )
@@ -269,6 +271,30 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
         phrase not in searchable_text for phrase in ("করহার", "কর হার", "tax rate", "rate of tax", "tax payable")
     ):
         boosted_score -= 1.0
+    if query_signals.query_intent == "rate_lookup":
+        searchable_years = set(extract_tax_years(searchable_text))
+        marked_years = set(extract_tax_years_near_marker(searchable_text))
+        if query_signals.tax_year:
+            if marked_years and query_signals.tax_year in marked_years:
+                boosted_score += 4.5
+            elif marked_years:
+                boosted_score -= 5.0
+            elif query_signals.tax_year in searchable_years:
+                boosted_score += 3.0
+            elif searchable_years:
+                boosted_score -= 3.5
+        normalized_query = query_signals.normalized_query.lower()
+        wants_normal_person_rate = any(term in normalized_query for term in ("স্বাভাবিক ব্যক্তি", "স্বাভাবিক ব্যক্তির"))
+        if wants_normal_person_rate and "স্বাভাবিক ব্যক্তি" in searchable_text:
+            boosted_score += 3.0
+        if wants_normal_person_rate and "স্বাভাবিক ব্যক্তি ব্যতীত" in searchable_text:
+            boosted_score -= 1.5
+        if "সারচাজ" not in normalized_query and "সারচার্জ" not in normalized_query:
+            if "সারচাজ" in searchable_text or "সারচার্জ" in searchable_text:
+                boosted_score -= 2.5
+        if "উৎসে" not in normalized_query and "withholding" not in normalized_query:
+            if "উৎসের নাম" in searchable_text or "পরিশোধের বর্ণনা" in searchable_text:
+                boosted_score -= 3.0
     informative_overlap = len(informative_terms & searchable_terms)
     if query_signals.query_intent == "eligibility":
         pseudo_hit = _to_retrieval_hit(chunk, boosted_score)

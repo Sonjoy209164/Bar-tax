@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     parser_provider: str = Field(default="fallback", alias="PARSER_PROVIDER")
     llama_parse_result_type: str = Field(default="markdown", alias="LLAMAPARSE_RESULT_TYPE")
     llama_cloud_api_key: str | None = Field(default=None, alias="LLAMA_CLOUD_API_KEY")
+    parser_use_pymupdf4llm: bool = Field(default=False, alias="PARSER_USE_PYMUPDF4LLM")
+    bangla_tax_upload_dir: str = Field(default="data/raw/bangla_tax_uploads", alias="BANGLA_TAX_UPLOAD_DIR")
+    bangla_tax_default_document_id: str = Field(
+        default="income-tax-paripatra-2025-2026",
+        alias="BANGLA_TAX_DEFAULT_DOCUMENT_ID",
+    )
+    bangla_tax_default_title: str = Field(
+        default="আয়কর পরিপত্র ২০২৫-২০২৬",
+        alias="BANGLA_TAX_DEFAULT_TITLE",
+    )
+    bangla_tax_ocr_enabled: bool = Field(default=False, alias="BANGLA_TAX_OCR_ENABLED")
+    inventory_enabled: bool = Field(default=False, alias="INVENTORY_ENABLED")
+    frontend_enabled: bool = Field(default=False, alias="FRONTEND_ENABLED")
     ui_backend_base_url: str = Field(default="http://127.0.0.1:4893", alias="UI_BACKEND_BASE_URL")
     retrieval_mode: str = Field(default="hybrid", alias="RETRIEVAL_MODE")
     top_k: int = Field(default=5, alias="TOP_K")
@@ -133,6 +146,13 @@ class Settings(BaseSettings):
             "trace_dir": self.trace_dir,
             "parser_provider": self.parser_provider,
             "llama_parse_result_type": self.llama_parse_result_type,
+            "parser_use_pymupdf4llm": self.parser_use_pymupdf4llm,
+            "bangla_tax_upload_dir": self.bangla_tax_upload_dir,
+            "bangla_tax_default_document_id": self.bangla_tax_default_document_id,
+            "bangla_tax_default_title": self.bangla_tax_default_title,
+            "bangla_tax_ocr_enabled": self.bangla_tax_ocr_enabled,
+            "inventory_enabled": self.inventory_enabled,
+            "frontend_enabled": self.frontend_enabled,
             "ui_backend_base_url": self.ui_backend_base_url,
             "retrieval_mode": self.retrieval_mode,
             "top_k": self.top_k,
@@ -254,8 +274,23 @@ def get_settings() -> Settings:
         apply_yaml_override("parser_provider", parser_config["provider"])
     if "result_type" in parser_config:
         apply_yaml_override("llama_parse_result_type", parser_config["result_type"])
+    if "use_pymupdf4llm" in parser_config:
+        apply_yaml_override("parser_use_pymupdf4llm", parser_config["use_pymupdf4llm"])
     if "ui_backend_base_url" in paths_config:
         apply_yaml_override("ui_backend_base_url", paths_config["ui_backend_base_url"])
+    if "bangla_tax_upload_dir" in paths_config:
+        apply_yaml_override("bangla_tax_upload_dir", paths_config["bangla_tax_upload_dir"])
+    bangla_tax_config = yaml_config.get("bangla_tax", {})
+    if "default_document_id" in bangla_tax_config:
+        apply_yaml_override("bangla_tax_default_document_id", bangla_tax_config["default_document_id"])
+    if "default_title" in bangla_tax_config:
+        apply_yaml_override("bangla_tax_default_title", bangla_tax_config["default_title"])
+    if "ocr_enabled" in bangla_tax_config:
+        apply_yaml_override("bangla_tax_ocr_enabled", bangla_tax_config["ocr_enabled"])
+    if "inventory_enabled" in app_config:
+        apply_yaml_override("inventory_enabled", app_config["inventory_enabled"])
+    if "frontend_enabled" in app_config:
+        apply_yaml_override("frontend_enabled", app_config["frontend_enabled"])
     if "provider" in embeddings_config:
         apply_yaml_override("embedding_provider", embeddings_config["provider"])
     if "model_name" in embeddings_config:

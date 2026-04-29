@@ -1,5 +1,12 @@
 from app.domain import LegalNodeType
-from app.ingestion import ParsedDocument, build_legal_structure, build_parsed_page_from_text
+from app.ingestion import (
+    ParsedDocument,
+    build_legal_chunks,
+    build_legal_structure,
+    build_parsed_page_from_text,
+    link_parent_child_relationships,
+    tag_legal_metadata,
+)
 
 
 def test_structure_builder_preserves_hierarchy_for_statute_page() -> None:
@@ -119,3 +126,71 @@ def test_structure_builder_extracts_table_node_under_governing_section() -> None
     assert table_node.parent_id == section_node.node_id
     assert table_node.section_number == "163"
     assert "10%" in table_node.text
+
+
+def test_structure_builder_detects_bangla_paripatra_headings_without_splitting_numbered_lists() -> None:
+    parsed_document = ParsedDocument(
+        source_path="Income-tax_Paripatra_2025-2026-1.pdf",
+        parser_provider="fallback",
+        pages=[
+            build_parsed_page_from_text(
+                1,
+                "\n".join(
+                    [
+                        "১। ২০২৬-২০২৭ এবং ২০২৭-২০২৮ করবর্ষের জন্য প্রযোজ্য আয়করের হার",
+                        "১.১ স্বাভাবিক ব্যক্তি ও হিন্দু অবিভক্ত পরিবারের করহার",
+                        "মোট আয় হার",
+                        "১. মহিলা করদাতা এবং ৬৫ বছর বা তদূর্ধ্ব বয়সের করদাতার ক্ষেত্রে ৪,২৫,০০০ টাকা;",
+                        "২. তৃতীয় লিঙ্গের করদাতা এবং প্রতিবন্ধী ব্যক্তির ক্ষেত্রে ৫,০০,০০০ টাকা;",
+                        "১.২ ট্রাস্ট, ফার্ম, ব্যক্তিসংঘের করহার",
+                        "(১) ট্রাস্টের আয়ের উপর প্রযোজ্য কর- উক্ত আয়ের ২৭.৫%",
+                    ]
+                ),
+            )
+        ],
+    )
+
+    structured = build_legal_structure(
+        parsed_document,
+        document_id="income-tax-paripatra-2025-2026",
+        act_title="আয়কর পরিপত্র ২০২৫-২০২৬",
+    )
+    sections = [node for node in structured.nodes if node.node_type is LegalNodeType.SECTION]
+    section_numbers = [node.section_number for node in sections]
+
+    assert section_numbers == ["1", "1.1", "1.2"]
+    assert all(node.title for node in sections)
+    assert "মহিলা করদাতা" in next(node for node in sections if node.section_number == "1.1").text
+
+
+def test_bangla_paripatra_sections_feed_existing_legal_chunk_flow() -> None:
+    parsed_document = ParsedDocument(
+        source_path="Income-tax_Paripatra_2025-2026-1.pdf",
+        parser_provider="fallback",
+        pages=[
+            build_parsed_page_from_text(
+                1,
+                "\n".join(
+                    [
+                        "২। ২০২৫-২০২৬ করবর্ষের জন্য প্রযোজ্য আয়করের হার",
+                        "২.১ স্বাভাবিক ব্যক্তি, হিন্দু অবিভক্ত পরিবার ও ফার্মের জন্য ২০২৫-২০২৬ করবর্ষের করহার",
+                        "মোট আয় হার",
+                        "(ক) প্রথম ৩,৫০,০০০ টাকা পর্যন্ত মোট আয়ের উপর -- শূন্য",
+                        "(খ) পরবর্তী ১,০০,০০০ টাকা পর্যন্ত মোট আয়ের উপর -- ৫%",
+                    ]
+                ),
+            )
+        ],
+    )
+
+    structured = build_legal_structure(
+        parsed_document,
+        document_id="income-tax-paripatra-2025-2026",
+        act_title="আয়কর পরিপত্র ২০২৫-২০২৬",
+    )
+    linked = link_parent_child_relationships(tag_legal_metadata(structured))
+    chunks = build_legal_chunks(linked)
+
+    assert chunks.retrieval_chunks
+    assert any(chunk.section_number == "2.1" for chunk in chunks.retrieval_chunks)
+    assert any("৩,৫০,০০০" in chunk.text for chunk in chunks.retrieval_chunks)

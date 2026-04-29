@@ -48,43 +48,31 @@ async def test_config_endpoint() -> None:
 
 
 @pytest.mark.anyio
-async def test_frontend_runtime_config_endpoint() -> None:
+async def test_inventory_frontend_is_disabled_by_default() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/frontend/runtime-config.json")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["apiBaseUrl"] == "http://test"
-    assert payload["sameOriginApi"] is True
-    assert payload["apiKeyHeader"] == "X-API-Key"
+    assert response.status_code == 404
 
 
 @pytest.mark.anyio
-async def test_frontend_mount_serves_index_and_blocks_local_config() -> None:
+async def test_frontend_mount_is_disabled_by_default() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         redirect_response = await client.get("/frontend", follow_redirects=False)
         index_response = await client.get("/frontend/")
         blocked_response = await client.get("/frontend/config.local.json")
 
-    assert redirect_response.status_code == 307
-    assert redirect_response.headers["location"] == "/frontend/"
-    assert index_response.status_code == 200
-    assert "Inventory Backend Test Cockpit" in index_response.text
+    assert redirect_response.status_code == 404
+    assert index_response.status_code == 404
     assert blocked_response.status_code == 404
 
 
 @pytest.mark.anyio
-async def test_inventory_policy_endpoint() -> None:
+async def test_inventory_policy_endpoint_is_disabled_by_default() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/inventory/policy")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["version"] == "inventory-contract-v1"
-    assert any(family["family"] == "exact_lookup" for family in payload["supported_question_families"])
-    assert any(family["family"] == "planning_agentic_workflow" for family in payload["supported_question_families"])
-    assert any(trigger["trigger_id"] == "hard_constraint_violation" for trigger in payload["hard_abstain_triggers"])
-    assert "agentic-restock" in payload["canonical_eval_case_ids"]
+    assert response.status_code == 404
 
 
 @pytest.mark.anyio
@@ -149,6 +137,44 @@ async def test_query_with_mocked_pipeline(monkeypatch: pytest.MonkeyPatch) -> No
     payload = response.json()
     assert payload["answer"] == "করহার ১০ শতাংশ। [C1]"
     assert payload["retrieval_mode"] == "hybrid"
+
+
+@pytest.mark.anyio
+async def test_bangla_tax_query_with_mocked_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.api import routes_bangla_tax
+    from app.domain import QueryType
+    from app.services.citation_service import CitationPayload
+    from app.services.query_service import QueryResponse
+
+    class FakeBanglaTaxService:
+        def query(self, request):  # type: ignore[no-untyped-def]
+            return QueryResponse(
+                answer="২০২৫-২০২৬ করবর্ষের করহার প্রমাণসহ পাওয়া গেছে।",
+                citations=[
+                    CitationPayload(
+                        node_id="income-tax-paripatra-2025-2026:section:2-1",
+                        relation="direct",
+                        section="2.1",
+                        label="Section 2.1",
+                    )
+                ],
+                reasoning_summary=["Bangla tax route used the legal RAG runtime."],
+                missing_facts=[],
+                confidence=0.88,
+                trace_id="trace-bangla-tax",
+                verification_failures=[],
+                query_type=QueryType.RATE_LOOKUP,
+                execution_path="fast_path",
+            )
+
+    monkeypatch.setattr(routes_bangla_tax, "get_bangla_tax_bot_service", lambda: FakeBanglaTaxService())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/bangla-tax/query", json={"question": "২০২৫-২০২৬ করহার কী?"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trace_id"] == "trace-bangla-tax"
+    assert payload["query_type"] == "rate_lookup"
 
 
 @pytest.mark.anyio
@@ -284,8 +310,10 @@ async def test_docs_and_openapi_stay_visible_when_api_key_is_configured(monkeypa
     assert "Swagger UI" in docs_response.text
     assert openapi_response.status_code == 200
     spec = openapi_response.json()
-    assert "/inventory/status" in spec["paths"]
+    assert "/inventory/status" not in spec["paths"]
+    assert "/bangla-tax/status" in spec["paths"]
+    assert "/bangla-tax/upload" in spec["paths"]
     assert spec["components"]["securitySchemes"]["ApiKeyAuth"]["name"] == "X-API-Key"
-    assert spec["paths"]["/inventory/status"]["get"]["security"] == [{"ApiKeyAuth": []}]
+    assert spec["paths"]["/bangla-tax/status"]["get"]["security"] == [{"ApiKeyAuth": []}]
 
     get_settings.cache_clear()

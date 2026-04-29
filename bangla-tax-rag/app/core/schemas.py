@@ -369,6 +369,13 @@ class ConfigResponse(BaseModel):
     embedding_model_name: str
     reranker_provider: str
     reranker_model_name: str
+    parser_use_pymupdf4llm: bool = False
+    bangla_tax_upload_dir: str | None = None
+    bangla_tax_default_document_id: str | None = None
+    bangla_tax_default_title: str | None = None
+    bangla_tax_ocr_enabled: bool = False
+    inventory_enabled: bool = False
+    frontend_enabled: bool = False
 
 
 class InventoryItemRecord(BaseModel):

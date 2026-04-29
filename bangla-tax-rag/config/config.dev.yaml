@@ -3,8 +3,11 @@ app:
   environment: development
   host: 0.0.0.0
   port: 4893
+  inventory_enabled: false
+  frontend_enabled: false
 paths:
   raw_data_dir: data/raw
+  bangla_tax_upload_dir: data/raw/bangla_tax_uploads
   processed_data_dir: data/processed
   agentic_store_dir: data/agentic_store
   inventory_catalog_path: data/inventory/catalog.jsonl
@@ -18,6 +21,11 @@ paths:
 parser:
   provider: fallback
   result_type: markdown
+  use_pymupdf4llm: false
+bangla_tax:
+  default_document_id: income-tax-paripatra-2025-2026
+  default_title: আয়কর পরিপত্র ২০২৫-২০২৬
+  ocr_enabled: false
 retrieval:
   mode: hybrid
   top_k: 5

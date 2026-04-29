@@ -1,0 +1,13 @@
+{
+  "index_name": "legal_bm25",
+  "index_type": "field_aware_bm25",
+  "k1": 1.5,
+  "b": 0.75,
+  "fields": [
+    "body",
+    "heading",
+    "structure"
+  ],
+  "chunk_count": 1114,
+  "chunk_scope": "retrieval_child"
+}

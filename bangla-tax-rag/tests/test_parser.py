@@ -5,6 +5,7 @@ import fitz
 import pytest
 
 from app.core.utils import (
+    detect_heading_marker,
     extract_section_ids,
     extract_sro_ids,
     extract_tax_years,
@@ -25,6 +26,9 @@ def test_normalization_helpers() -> None:
     assert "ধারা 3.1" in extract_section_ids(sample_text)
     assert extract_sro_ids(sample_text) == ["এস.আর.ও. নং 123"]
     assert extract_sro_ids("Seeds and roots for sowing") == []
+    assert detect_heading_marker("১. মহিলা করদাতা") is None
+    assert detect_heading_marker("১। ২০২৬-২০২৭ করবর্ষের করহার") == "1"
+    assert detect_heading_marker("১.২ ট্রাস্টের করহার") == "1.2"
 
 
 def test_parse_document_smoke(tmp_path: Path) -> None:

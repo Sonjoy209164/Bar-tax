@@ -44,6 +44,23 @@ def test_guardrail_accepts_supported_numeric_claim() -> None:
     assert len(verification.supported_claims) >= 1
 
 
+def test_guardrail_accepts_supported_bangla_rate_claim() -> None:
+    verification = verify_draft_answer(
+        "প্রথম ৩,৫০,০০০ টাকা পর্যন্ত মোট আয়ের উপর -- শূন্য.",
+        evidence_items=[
+            _evidence(
+                "e1",
+                "মোট আয় হার\n(ক) প্রথম ৩,৫০,০০০ টাকা পর্যন্ত মোট আয়ের উপর -- শূন্য\n(খ) পরবর্তী ১,০০,০০০ টাকা পর্যন্ত মোট আয়ের উপর -- ৫%",
+                section_number="2.1",
+            )
+        ],
+        query_type=QueryType.RATE_LOOKUP,
+    )
+
+    assert verification.has_errors is False
+    assert verification.supported_claims[0].support_score > 0.5
+
+
 def test_guardrail_rejects_unsupported_numeric_claim() -> None:
     verification = verify_draft_answer(
         "The retrieved rule and table evidence indicate: Stock dividend | 15 percent.",

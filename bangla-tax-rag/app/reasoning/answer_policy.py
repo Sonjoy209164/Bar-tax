@@ -5,6 +5,7 @@ import re
 from pydantic import BaseModel, Field
 
 from app.reasoning.nli_guardrail import GuardrailVerificationResult, REFUSAL_TEXT
+from app.reasoning.prompt_strategies import NON_CLAIM_PREFIXES
 
 
 class AnswerPolicyDecision(BaseModel):
@@ -23,7 +24,7 @@ class GuardrailedAnswerPolicy:
         filtered_lines: list[str] = []
         removed_claims: list[str] = []
         for line in [line for line in draft_answer.splitlines() if line.strip()]:
-            if line.startswith(("Legal basis:", "Reasoning:", "Missing facts:", "Citations:", "Verification:")):
+            if line.startswith(NON_CLAIM_PREFIXES):
                 filtered_lines.append(line)
                 continue
             kept_sentences: list[str] = []
@@ -36,7 +37,7 @@ class GuardrailedAnswerPolicy:
                 filtered_lines.append(" ".join(kept_sentences))
 
         if not any(
-            line for line in filtered_lines if not line.startswith(("Legal basis:", "Reasoning:", "Missing facts:", "Citations:", "Verification:"))
+            line for line in filtered_lines if not line.startswith(NON_CLAIM_PREFIXES)
         ):
             return AnswerPolicyDecision(
                 final_draft=REFUSAL_TEXT,
@@ -65,6 +66,6 @@ def apply_answer_policy(draft_answer: str, verification: GuardrailVerificationRe
 def _split_claim_sentences(line: str) -> list[str]:
     return [
         sentence.strip()
-        for sentence in re.split(r"(?<=[.!?])\s+|\s*;\s*", line)
+        for sentence in re.split(r"(?<=[.!?।])\s+|\s*;\s*", line)
         if sentence.strip()
     ]

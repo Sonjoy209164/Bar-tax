@@ -5,15 +5,10 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.services import (
-    AgenticRuntimeStatus,
-    EvaluationCase,
-    EvaluationSummary,
-    QueryRequest as AgenticQueryRequest,
-    QueryResponse as AgenticQueryResponse,
-    TraceRecord,
-    get_agentic_runtime,
-)
+from app.services.evaluation_service import EvaluationCase, EvaluationSummary
+from app.services.query_service import QueryRequest as AgenticQueryRequest
+from app.services.query_service import QueryResponse as AgenticQueryResponse
+from app.services.runtime_service import AgenticRuntimeStatus, TraceRecord, get_agentic_runtime
 
 router = APIRouter(tags=["agentic"])
 

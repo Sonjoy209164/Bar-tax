@@ -128,6 +128,21 @@ def test_rate_table_pack_keeps_table_and_governing_rule_evidence() -> None:
     assert any(item.metadata.get("node_type") == "table" for item in pack.table_evidence)
 
 
+def test_bangla_rate_pack_prefers_requested_tax_year_section() -> None:
+    result = _run_hybrid_result(
+        _bangla_year_rate_document(),
+        "২০২৫-২০২৬ করবর্ষে স্বাভাবিক ব্যক্তির করহার কী?",
+        query_type=QueryType.RATE_LOOKUP,
+    )
+
+    pack = build_evidence_pack(result)
+
+    assert isinstance(pack, RateTableEvidencePack)
+    assert pack.primary_evidence
+    assert pack.primary_evidence[0].citation.section_number == "2.1"
+    assert {item.citation.section_number for item in pack.all_evidence} == {"2.1"}
+
+
 def test_scenario_pack_captures_exceptions_and_explanations() -> None:
     result = _run_hybrid_result(
         _scenario_document(),
@@ -228,6 +243,27 @@ def _table_document() -> ParsedDocument:
                         "Serial | Income | Rate",
                         "1 | Stock dividend | 10 percent",
                         "2 | Cash dividend | 20 percent",
+                    ]
+                ),
+            )
+        ],
+    )
+
+
+def _bangla_year_rate_document() -> ParsedDocument:
+    return ParsedDocument(
+        source_path="Income-tax_Paripatra_2025-2026-1.pdf",
+        parser_provider="fallback",
+        pages=[
+            build_parsed_page_from_text(
+                1,
+                "\n".join(
+                    [
+                        "১.১ স্বাভাবিক ব্যক্তি ও হিন্দু অবিভক্ত পরিবারের ২০২৬-২০২৭ ও ২০২৭-২০২৮ করবর্ষের জন্য করহার",
+                        "আয়কর পরিপত্র ২০২৫-২০২৬ | ১",
+                        "মোট আয় হার প্রথম ৩,৭৫,০০০ টাকা পর্যন্ত শূন্য।",
+                        "২.১ স্বাভাবিক ব্যক্তি, হিন্দু অবিভক্ত পরিবার ও ফার্মের জন্য ২০২৫-২০২৬ করবর্ষের করহার",
+                        "মোট আয় হার প্রথম ৩,৫০,০০০ টাকা পর্যন্ত শূন্য। পরবর্তী ১,০০,০০০ টাকা পর্যন্ত ৫%।",
                     ]
                 ),
             )

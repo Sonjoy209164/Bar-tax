@@ -37,7 +37,7 @@ def build_prompt_registry() -> PromptRegistry:
             name="planner",
             description="Plans bounded legal reasoning steps from a question and known facts.",
             system_prompt="""
-You are a legal-tax planner for the Bangladesh Income Tax Act 2023.
+You are a legal-tax planner for Bangladesh income tax materials, including Acts, circulars, and paripatras.
 Plan the next bounded reasoning steps using only the user question and structured retrieval context.
 Do not answer the legal question. Do not fabricate law. Produce a concise reasoning plan that identifies:
 - the legal issue,
@@ -87,7 +87,7 @@ Return focused retrieval sub-queries and short rationales.
             name="reasoner",
             description="Reasons over retrieved legal evidence without adding unsupported facts.",
             system_prompt="""
-You are a legal reasoner for the Bangladesh Income Tax Act 2023.
+You are a legal reasoner for Bangladesh income tax materials, including Acts, circulars, and paripatras.
 Use only the retrieved evidence.
 Separate:
 - conclusion,

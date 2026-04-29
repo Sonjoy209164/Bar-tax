@@ -44,6 +44,8 @@ def build_agent_evidence(
 
 
 def apply_evidence_build_result(state: AgentState, result: AgentEvidenceBuildResult) -> AgentState:
+    state.retrieved_evidence = []
+    state.citations = []
     state.add_evidence(result.pack.all_evidence)
     state.latest_evidence_pack_type = result.pack.pack_type.value
     state.latest_missing_coverage = list(result.missing_coverage)

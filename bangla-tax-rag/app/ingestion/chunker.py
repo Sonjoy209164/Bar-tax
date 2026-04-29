@@ -13,7 +13,7 @@ from app.domain import LegalNode, LegalNodeType
 from app.ingestion.parent_child_linker import LinkedLegalDocument
 
 TOKEN_PATTERN = re.compile(r"\w+|[^\w\s]", re.UNICODE)
-SECTION_HEADING_PATTERN = re.compile(r"^\d+[A-Za-z]?(?:\.\d+)?\.\s+")
+SECTION_HEADING_PATTERN = re.compile(r"^\d+[A-Za-z]?(?:\.\d+)*(?:[.)।]|(?:\s*[—:-]))?\s+")
 SUBSECTION_START_PATTERN = re.compile(r"^\((\d+[A-Za-z]?)\)\s+")
 CLAUSE_START_PATTERN = re.compile(r"^\(([a-z])\)\s+", re.IGNORECASE)
 PROVISO_START_PATTERN = re.compile(r"^Provided(?:\s+further|\s+also)?\s+that\b", re.IGNORECASE)

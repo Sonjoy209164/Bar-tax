@@ -23,6 +23,7 @@ from app.retrieval import (
     build_embedder,
     build_reranker,
     build_vector_store,
+    vector_store_config_from_settings,
 )
 
 
@@ -69,15 +70,32 @@ class TraceStore:
 
 
 class AgenticRuntime:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        store_dir: str | Path | None = None,
+        vector_namespace: str | None = None,
+        local_vector_store_path: str | Path | None = None,
+        trace_dir: str | Path | None = None,
+        query_top_k: int | None = None,
+    ) -> None:
         self.settings = get_settings()
+        self.store_dir = Path(store_dir or self.settings.agentic_store_dir)
+        self.vector_namespace = vector_namespace if vector_namespace is not None else self.settings.vector_namespace
+        self.query_top_k = query_top_k or self.settings.top_k
         self.embedder = build_embedder()
-        self.vector_store = build_vector_store()
-        self.trace_store = TraceStore(self.settings.trace_dir)
+        vector_config = vector_store_config_from_settings().model_copy(
+            update={
+                "namespace": self.vector_namespace,
+                "local_store_path": str(local_vector_store_path) if local_vector_store_path else self.settings.local_vector_store_path,
+            }
+        )
+        self.vector_store = build_vector_store(vector_config)
+        self.trace_store = TraceStore(trace_dir or self.settings.trace_dir)
         self.ingest_service = IngestService(
             embedder=self.embedder,
             vector_store=self.vector_store,
-            config=IngestServiceConfig(output_root=self.settings.agentic_store_dir),
+            config=IngestServiceConfig(output_root=str(self.store_dir), vector_namespace=self.vector_namespace),
         )
         self.loaded_documents: list[str] = []
         self.node_count = 0
@@ -89,7 +107,7 @@ class AgenticRuntime:
         self.refresh()
 
     def refresh(self) -> None:
-        corpus = _load_agentic_corpus(self.settings.agentic_store_dir)
+        corpus = _load_agentic_corpus(self.store_dir)
         self.loaded_documents = corpus["document_ids"]
         self.node_count = len(corpus["nodes"])
         self.link_count = len(corpus["links"])
@@ -107,7 +125,7 @@ class AgenticRuntime:
         linked_document = LinkedLegalDocument(
             document_id="agentic-corpus",
             act_title="Bangla Tax Corpus",
-            source_path=self.settings.agentic_store_dir,
+            source_path=str(self.store_dir),
             parser_provider="runtime",
             root_node_id=corpus["root_node_id"],
             nodes=corpus["nodes"],
@@ -128,7 +146,7 @@ class AgenticRuntime:
                 hybrid_retriever=retriever,
                 query_transformer=query_transformer,
             ),
-            config=ReasoningGraphConfig(top_k=self.settings.top_k, max_retrieval_loops=2, prefer_langgraph_backend=True),
+            config=ReasoningGraphConfig(top_k=self.query_top_k, max_retrieval_loops=2, prefer_langgraph_backend=True),
         )
         self.query_service = QueryService(reasoning_graph=graph)
         self.evaluation_service = EvaluationService(query_service=self.query_service)

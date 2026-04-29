@@ -6,12 +6,13 @@ from typing import Callable
 
 from pydantic import BaseModel, Field
 
+from app.core.utils import normalize_text
 from app.domain import LegalNode, LegalNodeType
 from app.ingestion.parser_base import ParsedDocument
 
 PART_HEADING_PATTERN = re.compile(r"^PART\s+([IVXLC0-9]+)\s*$", re.IGNORECASE)
 CHAPTER_HEADING_PATTERN = re.compile(r"^CHAPTER\s+([IVXLC0-9]+)\s*$", re.IGNORECASE)
-SECTION_HEADING_PATTERN = re.compile(r"^(\d+[A-Za-z]?(?:\.\d+)?)\.\s+(.+)$")
+SECTION_HEADING_PATTERN = re.compile(r"^(\d+[A-Za-z]?(?:\.\d+)*)([.)।]|(?:\s*[—:-]))?\s+(.+)$")
 SUBSECTION_PATTERN = re.compile(r"^\((\d+[A-Za-z]?)\)\s*(.*)$")
 CLAUSE_PATTERN = re.compile(r"^\(([a-z])\)\s*(.*)$", re.IGNORECASE)
 PROVISO_PATTERN = re.compile(r"^(Provided(?:\s+further|\s+also)?\s+that\b.*)$", re.IGNORECASE)
@@ -82,7 +83,9 @@ class _StructureBuilder:
                 index += 1
                 continue
 
-            part_match = PART_HEADING_PATTERN.match(line)
+            normalized_line = normalize_text(line)
+
+            part_match = PART_HEADING_PATTERN.match(normalized_line)
             if part_match:
                 self._finalize_current_section()
                 node = self._create_heading_node(
@@ -101,7 +104,7 @@ class _StructureBuilder:
                 index += 1
                 continue
 
-            chapter_match = CHAPTER_HEADING_PATTERN.match(line)
+            chapter_match = CHAPTER_HEADING_PATTERN.match(normalized_line)
             if chapter_match:
                 self._finalize_current_section()
                 parent_id = self.current_part_id or self.root_node.node_id
@@ -141,12 +144,12 @@ class _StructureBuilder:
                 index += 1
                 continue
 
-            section_match = SECTION_HEADING_PATTERN.match(line)
-            if section_match:
+            section_match = SECTION_HEADING_PATTERN.match(normalized_line)
+            if section_match and _is_structural_section_heading(section_match):
                 self._finalize_current_section()
                 self.current_section_state = {
                     "section_number": section_match.group(1),
-                    "title": section_match.group(2).strip(),
+                    "title": section_match.group(3).strip(),
                     "page_start": page_no,
                     "page_end": page_no,
                     "lines": [(page_no, line)],
@@ -457,7 +460,7 @@ class _StructureBuilder:
         current_match: re.Match[str] | None = None
         current_records: list[tuple[int, str]] = []
         for record in line_records:
-            match = matcher(record[1])
+            match = matcher(normalize_text(record[1]))
             if match:
                 if current_match is not None and current_records:
                     segments.append((current_match, current_records))
@@ -485,9 +488,14 @@ class _StructureBuilder:
                 self.node_map[node_id].page_end = max(self.node_map[node_id].page_end, page_end)
 
     def _is_context_title_line(self, line: str) -> bool:
-        if PART_HEADING_PATTERN.match(line) or CHAPTER_HEADING_PATTERN.match(line) or SECTION_HEADING_PATTERN.match(line):
+        normalized_line = normalize_text(line)
+        if (
+            PART_HEADING_PATTERN.match(normalized_line)
+            or CHAPTER_HEADING_PATTERN.match(normalized_line)
+            or _match_structural_section_heading(normalized_line)
+        ):
             return False
-        return bool(ALL_CAPS_TITLE_PATTERN.match(line))
+        return bool(ALL_CAPS_TITLE_PATTERN.match(normalized_line))
 
     def _build_node_id(self, node_type: LegalNodeType, token: str) -> str:
         slug = re.sub(r"[^a-z0-9]+", "-", token.lower()).strip("-") or "node"
@@ -512,3 +520,21 @@ class _StructureBuilder:
         if not self.current_chapter_id:
             return None
         return self.node_map[self.current_chapter_id].chapter_title or self.node_map[self.current_chapter_id].title
+
+
+def _match_structural_section_heading(line: str) -> re.Match[str] | None:
+    match = SECTION_HEADING_PATTERN.match(normalize_text(line))
+    if match and _is_structural_section_heading(match):
+        return match
+    return None
+
+
+def _is_structural_section_heading(match: re.Match[str]) -> bool:
+    marker = match.group(1)
+    separator = match.group(2) or ""
+    title = match.group(3).strip()
+    if "." not in marker and separator == "." and re.search(r"[\u0980-\u09FF]", title):
+        return False
+    if "." not in marker and not separator:
+        return False
+    return bool(title)

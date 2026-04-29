@@ -9,7 +9,14 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 from rank_bm25 import BM25Okapi
 
-from app.core.utils import detect_query_type, extract_query_section_references, normalize_text, tokenize_for_bm25
+from app.core.utils import (
+    detect_query_type,
+    extract_query_section_references,
+    extract_tax_years,
+    extract_tax_years_near_marker,
+    normalize_text,
+    tokenize_for_bm25,
+)
 from app.domain.query_taxonomy import QueryType, canonicalize_query_type
 from app.ingestion.chunker import ChunkingArtifacts, LegalChunk
 
@@ -112,6 +119,7 @@ class BM25Index:
                 section_reference=request.section_reference,
                 base_score=float(base_score),
                 query_terms=query_terms,
+                normalized_query=normalized_query,
             )
             if final_score <= 0:
                 continue
@@ -332,6 +340,7 @@ def _apply_section_and_type_boosts(
     section_reference: str | None,
     base_score: float,
     query_terms: set[str],
+    normalized_query: str,
 ) -> float:
     score = base_score
     searchable_text = _build_searchable_text(chunk).lower()
@@ -361,6 +370,31 @@ def _apply_section_and_type_boosts(
     if query_type in {QueryType.TABLE_LOOKUP, QueryType.RATE_LOOKUP}:
         if chunk.chunk_type == "table" or chunk.chunk_variant == "table_row":
             score += 2.0
+        target_years = set(extract_tax_years(normalized_query))
+        searchable_years = set(extract_tax_years(searchable_text))
+        marked_years = set(extract_tax_years_near_marker(searchable_text))
+        if target_years:
+            if marked_years and target_years & marked_years:
+                score += 4.5
+            elif marked_years:
+                score -= 5.0
+            elif target_years & searchable_years:
+                score += 3.0
+            elif searchable_years:
+                score -= 3.5
+        wants_normal_person_rate = any(term in normalized_query for term in ("স্বাভাবিক ব্যক্তি", "স্বাভাবিক ব্যক্তির"))
+        if wants_normal_person_rate and "স্বাভাবিক ব্যক্তি" in searchable_text:
+            score += 3.0
+        if wants_normal_person_rate and "স্বাভাবিক ব্যক্তি ব্যতীত" in searchable_text:
+            score -= 1.5
+        if "সারচাজ" not in normalized_query and "সারচার্জ" not in normalized_query:
+            if "সারচাজ" in searchable_text or "সারচার্জ" in searchable_text:
+                score -= 2.5
+        if "উৎসে" not in normalized_query and "withholding" not in normalized_query.lower():
+            if "উৎসের নাম" in searchable_text or "পরিশোধের বর্ণনা" in searchable_text:
+                score -= 3.0
+        if searchable_text.count("করহার") >= 4 and len(set(tokenize_for_bm25(searchable_text))) <= 8:
+            score -= 4.0
     if query_type in {QueryType.COUNT_LOOKUP, QueryType.LIST_LOOKUP} and _looks_list_like(chunk.text):
         score += 1.6
     if query_type is QueryType.DATE_LOOKUP and any(term in searchable_text for term in ("date", "day", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december")):

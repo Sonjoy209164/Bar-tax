@@ -4,6 +4,12 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from app.domain import EvidenceItem, LegalCitation, QueryExecutionPath, QueryType
+from app.reasoning.prompt_strategies import (
+    PromptStrategyName,
+    ReasoningTraceMode,
+    normalize_prompt_strategy,
+    normalize_reasoning_trace_mode,
+)
 
 
 class QueryPlanStep(BaseModel):
@@ -81,6 +87,8 @@ class AgentState(BaseModel):
     latest_pack_notes: list[str] = Field(default_factory=list)
     trace_metadata: dict[str, Any] = Field(default_factory=dict)
     completed_nodes: list[str] = Field(default_factory=list)
+    prompt_strategy: PromptStrategyName = "zero_shot"
+    reasoning_trace_mode: ReasoningTraceMode = "summary"
     needs_more_retrieval: bool = False
     draft_answer: str | None = None
     final_answer: str | None = None
@@ -95,6 +103,16 @@ class AgentState(BaseModel):
         if not stripped:
             raise ValueError("question must not be empty")
         return stripped
+
+    @field_validator("prompt_strategy", mode="before")
+    @classmethod
+    def validate_prompt_strategy(cls, value: Any) -> PromptStrategyName:
+        return normalize_prompt_strategy(value)
+
+    @field_validator("reasoning_trace_mode", mode="before")
+    @classmethod
+    def validate_reasoning_trace_mode(cls, value: Any) -> ReasoningTraceMode:
+        return normalize_reasoning_trace_mode(value)
 
     @model_validator(mode="after")
     def validate_step_budget(self) -> "AgentState":

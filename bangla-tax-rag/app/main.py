@@ -9,9 +9,9 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes_eval import router as eval_router
 from app.api.routes_agentic import router as agentic_router
+from app.api.routes_bangla_tax import router as bangla_tax_router
 from app.api.routes_health import router as health_router
 from app.api.routes_ingest import router as ingest_router
-from app.api.routes_inventory import router as inventory_router
 from app.api.routes_query import router as query_router
 from app.core.logging import configure_logging, get_logger
 from app.core.security import (
@@ -75,35 +75,41 @@ async def custom_swagger_ui():
     return build_swagger_html(openapi_url="/openapi.json", title=f"{app.title} - Swagger UI")
 
 
-@app.get("/frontend", include_in_schema=False)
-async def frontend_redirect() -> RedirectResponse:
-    return RedirectResponse(url="/frontend/", status_code=307)
-
-
-@app.get("/frontend/runtime-config.json", include_in_schema=False)
-async def frontend_runtime_config(request: Request) -> JSONResponse:
-    settings = get_settings()
-    return JSONResponse(
-        {
-            "apiBaseUrl": str(request.base_url).rstrip("/"),
-            "sameOriginApi": True,
-            "apiAuthEnabled": bool(settings.accepted_api_keys()),
-            "apiKeyHeader": "X-API-Key",
-            "frontendPath": "/frontend/",
-        }
-    )
-
-
 app.include_router(health_router)
 app.include_router(ingest_router, dependencies=[Depends(require_api_key)])
-app.include_router(inventory_router, dependencies=[Depends(require_api_key)])
+app.include_router(bangla_tax_router, dependencies=[Depends(require_api_key)])
 app.include_router(query_router, dependencies=[Depends(require_api_key)])
 app.include_router(eval_router, dependencies=[Depends(require_api_key)])
 app.include_router(agentic_router, dependencies=[Depends(require_api_key)])
 
-if FRONTEND_DIR.exists():
+if initial_settings.inventory_enabled:
+    from app.api.routes_inventory import router as inventory_router
+
+    app.include_router(inventory_router, dependencies=[Depends(require_api_key)])
+
+if initial_settings.frontend_enabled:
+
+    @app.get("/frontend", include_in_schema=False)
+    async def frontend_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/frontend/", status_code=307)
+
+
+    @app.get("/frontend/runtime-config.json", include_in_schema=False)
+    async def frontend_runtime_config(request: Request) -> JSONResponse:
+        settings = get_settings()
+        return JSONResponse(
+            {
+                "apiBaseUrl": str(request.base_url).rstrip("/"),
+                "sameOriginApi": True,
+                "apiAuthEnabled": bool(settings.accepted_api_keys()),
+                "apiKeyHeader": "X-API-Key",
+                "frontendPath": "/frontend/",
+            }
+        )
+
+if initial_settings.frontend_enabled and FRONTEND_DIR.exists():
     app.mount(
         "/frontend",
         SafeFrontendFiles(directory=str(FRONTEND_DIR), html=True),
-        name="inventory_frontend",
+        name="frontend",
     )

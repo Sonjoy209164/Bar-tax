@@ -188,6 +188,19 @@ def extract_tax_years(text: str) -> list[str]:
     return list(dict.fromkeys(match.replace(" ", "") for match in matches))
 
 
+def extract_tax_years_near_marker(text: str) -> list[str]:
+    normalized_text = normalize_text(text)
+    year_pattern = r"20\d{2}\s*[-–]\s*20\d{2}"
+    matches: list[str] = []
+    for match in re.finditer(year_pattern, normalized_text):
+        start = max(match.start() - 28, 0)
+        end = min(match.end() + 28, len(normalized_text))
+        window = normalized_text[start:end]
+        if "করবর্ষ" in window or "tax year" in window.lower() or "assessment year" in window.lower():
+            matches.append(match.group(0).replace(" ", ""))
+    return list(dict.fromkeys(matches))
+
+
 def extract_section_ids(text: str) -> list[str]:
     normalized_text = normalize_text(text)
     patterns = [
@@ -297,8 +310,15 @@ def detect_heading_marker(text: str) -> str | None:
     normalized_text = normalize_text(text)
     if not normalized_text:
         return None
-    numeric_match = re.match(r"^(\d+(?:\.\d+)*)(?:[.)]|(?:\s*[—:-]))", normalized_text)
+    numeric_match = re.match(r"^(\d+(?:\.\d+)*)([.)।]|(?:\s*[—:-])|\s+)(.*)$", normalized_text)
     if numeric_match:
+        marker = numeric_match.group(1)
+        separator = numeric_match.group(2)
+        remainder = numeric_match.group(3).strip()
+        if "." not in marker and separator == "." and re.search(r"[\u0980-\u09FF]", remainder):
+            return None
+        if "." not in marker and separator.isspace():
+            return None
         return numeric_match.group(1)
     for keyword in SECTION_KEYWORDS:
         keyword_match = re.match(

@@ -7,7 +7,14 @@ from app.services.evaluation_service import (
 )
 from app.services.ingest_service import IngestService, IngestServiceConfig, IngestServiceResult
 from app.services.inventory_service import InventoryService, InventoryServiceConfig, get_inventory_service
-from app.services.query_service import QueryRequest, QueryResponse, QueryService, QueryServiceConfig
+from app.services.query_service import (
+    PromptStrategyName,
+    QueryRequest,
+    QueryResponse,
+    QueryService,
+    QueryServiceConfig,
+    ReasoningTraceMode,
+)
 from app.services.runtime_service import AgenticRuntime, AgenticRuntimeStatus, TraceRecord, get_agentic_runtime
 
 __all__ = [
@@ -26,6 +33,8 @@ __all__ = [
     "QueryResponse",
     "QueryService",
     "QueryServiceConfig",
+    "PromptStrategyName",
+    "ReasoningTraceMode",
     "AgenticRuntime",
     "AgenticRuntimeStatus",
     "TraceRecord",

@@ -42,6 +42,11 @@ OLLAMA_GENERATOR_MODEL_PRESETS = [
     "Custom...",
 ]
 GENERATION_TEST_QUESTIONS = [
+    "২০২৫-২০২৬ করবর্ষে স্বাভাবিক ব্যক্তির করহার কী?",
+    "২০২৫-২০২৬ করবর্ষে কোম্পানির করহার কী?",
+    "২০২৬-২০২৭ করবর্ষে সারচার্জের হার কী?",
+    "পরিবেশ সারচার্জ কখন দিতে হবে?",
+    "তৃতীয় লিঙ্গের করদাতার করমুক্ত আয়সীমা কত?",
     "What are the income tax authorities under section 4?",
     "What is the definition of Commissioner?",
     "What does section 32 say about income from employment?",
@@ -170,7 +175,25 @@ COMPARISON_BEST_FIRST_QUESTIONS = [
     "Why would an organization fail to qualify as charitable purpose under clause 43 in the services-for-consideration case?",
     "I am a labour, what will be my tax?",
 ]
-UI_PIPELINE_MODES = ["agentic", "legacy"]
+UI_PIPELINE_MODES = ["bangla_tax", "agentic", "legacy"]
+UI_PIPELINE_LABELS = {
+    "bangla_tax": "Bangla Tax Bot",
+    "agentic": "Generic Agentic Legal RAG",
+    "legacy": "Legacy Chunk RAG",
+}
+PROMPT_STRATEGY_OPTIONS = ["zero_shot", "one_shot", "few_shot", "evidence_only"]
+PROMPT_STRATEGY_LABELS = {
+    "zero_shot": "Zero Shot",
+    "one_shot": "One Shot",
+    "few_shot": "Few Shot",
+    "evidence_only": "Evidence Only",
+}
+REASONING_TRACE_MODE_OPTIONS = ["summary", "trace", "off"]
+REASONING_TRACE_MODE_LABELS = {
+    "summary": "Summary",
+    "trace": "Safe Trace",
+    "off": "Off",
+}
 AGENTIC_QUERY_TYPE_OPTIONS = [
     "auto",
     "general",
@@ -199,8 +222,9 @@ AGENTIC_QUERY_TYPE_OPTIONS = [
 def initialize_session_state() -> None:
     settings = get_settings()
     defaults: dict[str, Any] = {
-        "ui_pipeline_mode": "agentic",
+        "ui_pipeline_mode": "bangla_tax",
         "backend_base_url": settings.ui_backend_base_url,
+        "backend_api_key": settings.api_access_key or "",
         "last_query_response": None,
         "last_ingest_response": None,
         "last_build_index_response": None,
@@ -209,11 +233,19 @@ def initialize_session_state() -> None:
         "last_comparison_responses": None,
         "question_preset": GENERATION_TEST_QUESTIONS[0],
         "comparison_question_preset": COMPARISON_TEST_QUESTIONS[0],
-        "question_text": "২০২৫-২০২৬ করবর্ষে কোম্পানির করহার কী?",
+        "question_text": "২০২৫-২০২৬ করবর্ষে স্বাভাবিক ব্যক্তির করহার কী?",
         "comparison_question_text": COMPARISON_TEST_QUESTIONS[0],
         "retrieval_mode": settings.retrieval_mode,
         "agentic_query_type": "auto",
         "agentic_max_reasoning_steps": 6,
+        "bangla_tax_prompt_strategy": "zero_shot",
+        "bangla_tax_reasoning_trace_mode": "summary",
+        "bangla_tax_source_path": "/home/sonjoy/Bar tax/Income-tax_Paripatra_2025-2026-1.pdf",
+        "bangla_tax_document_id": settings.bangla_tax_default_document_id,
+        "bangla_tax_act_title": settings.bangla_tax_default_title,
+        "bangla_tax_ocr_enabled": settings.bangla_tax_ocr_enabled,
+        "bangla_tax_ocr_language": "ben+eng",
+        "bangla_tax_ocr_force": True,
         "tax_year": "",
         "top_k": settings.top_k,
         "final_evidence_k": settings.final_evidence_k,
@@ -839,9 +871,18 @@ def run_local_retrieval_inspection(
     return payload
 
 
+def api_headers() -> dict[str, str]:
+    api_key = str(st.session_state.get("backend_api_key") or "").strip()
+    return {"X-API-Key": api_key} if api_key else {}
+
+
 def api_get(base_url: str, endpoint: str) -> tuple[bool, dict[str, Any] | None, str | None]:
     try:
-        response = requests.get(f"{base_url.rstrip('/')}{endpoint}", timeout=REQUEST_TIMEOUT_SECONDS)
+        response = requests.get(
+            f"{base_url.rstrip('/')}{endpoint}",
+            headers=api_headers(),
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
         response.raise_for_status()
         return True, response.json(), None
     except requests.RequestException as exc:
@@ -859,6 +900,35 @@ def api_post(
         response = requests.post(
             f"{base_url.rstrip('/')}{endpoint}",
             json=payload,
+            headers=api_headers(),
+            timeout=timeout_seconds,
+        )
+        response.raise_for_status()
+        return True, response.json(), None
+    except requests.RequestException as exc:
+        message = str(exc)
+        if exc.response is not None:
+            try:
+                message = str(exc.response.json())
+            except ValueError:
+                message = exc.response.text or message
+        return False, None, message
+
+
+def api_post_multipart(
+    base_url: str,
+    endpoint: str,
+    *,
+    files: dict[str, Any],
+    data: dict[str, Any],
+    timeout_seconds: int = INGEST_TIMEOUT_SECONDS,
+) -> tuple[bool, dict[str, Any] | None, str | None]:
+    try:
+        response = requests.post(
+            f"{base_url.rstrip('/')}{endpoint}",
+            files=files,
+            data=data,
+            headers=api_headers(),
             timeout=timeout_seconds,
         )
         response.raise_for_status()
@@ -876,7 +946,7 @@ def api_post(
 def is_agentic_response(payload: dict[str, Any] | None) -> bool:
     if not isinstance(payload, dict):
         return False
-    if payload.get("_ui_pipeline_mode") == "agentic":
+    if payload.get("_ui_pipeline_mode") in {"agentic", "bangla_tax"}:
         return True
     return "trace_id" in payload and "execution_path" in payload
 
@@ -884,7 +954,7 @@ def is_agentic_response(payload: dict[str, Any] | None) -> bool:
 def derive_chunk_browser_default_path(last_ingest_response: dict[str, Any] | None) -> str:
     if not isinstance(last_ingest_response, dict):
         return "data/processed/income-tax-act-2023.jsonl"
-    if last_ingest_response.get("_ui_pipeline_mode") == "agentic":
+    if last_ingest_response.get("_ui_pipeline_mode") in {"agentic", "bangla_tax"}:
         graph_path = last_ingest_response.get("graph_path")
         if isinstance(graph_path, str) and graph_path.strip():
             graph = Path(graph_path)
@@ -897,7 +967,8 @@ def render_api_connection_panel(base_url: str) -> tuple[dict[str, Any] | None, b
         "Workspace Pipeline",
         options=UI_PIPELINE_MODES,
         key="ui_pipeline_mode",
-        help="Use agentic for the new graph-based runtime. Legacy keeps the original ingest/build-index/query flow.",
+        format_func=lambda value: UI_PIPELINE_LABELS.get(value, value),
+        help="Bangla Tax Bot uses the new /bangla-tax endpoints. Agentic and legacy remain for debugging.",
     )
     st.sidebar.header("API Connection")
     backend_base_url = st.sidebar.text_input(
@@ -905,6 +976,7 @@ def render_api_connection_panel(base_url: str) -> tuple[dict[str, Any] | None, b
         key="backend_base_url",
         help="Expected local default: http://127.0.0.1:4893",
     )
+    st.sidebar.text_input("API Key", key="backend_api_key", type="password")
     check_connection = st.sidebar.button("Check API Health", use_container_width=True)
     config_payload: dict[str, Any] | None = None
     api_reachable = False
@@ -918,16 +990,18 @@ def render_api_connection_panel(base_url: str) -> tuple[dict[str, Any] | None, b
                 st.sidebar.caption(f"Mode: {config_payload.get('retrieval_mode')} | Top K: {config_payload.get('top_k')}")
             elif config_error:
                 st.sidebar.warning(f"Config unavailable: {config_error}")
-            if selected_pipeline == "agentic":
-                agentic_ok, agentic_payload, agentic_error = api_get(backend_base_url, "/agentic/status")
-                if agentic_ok and agentic_payload is not None:
-                    runtime_status = "ready" if agentic_payload.get("ready") else "empty"
-                    loaded_documents = len(agentic_payload.get("loaded_documents") or [])
+            status_endpoint = "/bangla-tax/status" if selected_pipeline == "bangla_tax" else "/agentic/status"
+            if selected_pipeline in {"bangla_tax", "agentic"}:
+                runtime_ok, runtime_payload, runtime_error = api_get(backend_base_url, status_endpoint)
+                if runtime_ok and runtime_payload is not None:
+                    runtime_status = "ready" if runtime_payload.get("ready") else "empty"
+                    loaded_documents = len(runtime_payload.get("loaded_documents") or [])
+                    label = "Bangla tax runtime" if selected_pipeline == "bangla_tax" else "Agentic runtime"
                     st.sidebar.caption(
-                        f"Agentic runtime: {runtime_status} | docs={loaded_documents} | vectors={agentic_payload.get('vector_record_count', 0)}"
+                        f"{label}: {runtime_status} | docs={loaded_documents} | vectors={runtime_payload.get('vector_record_count', 0)}"
                     )
                 elif check_connection:
-                    st.sidebar.warning(f"Agentic runtime unavailable: {agentic_error}")
+                    st.sidebar.warning(f"Runtime unavailable: {runtime_error}")
         elif check_connection:
             st.sidebar.warning(f"API unreachable: {health_error}")
     return config_payload, api_reachable
@@ -935,6 +1009,126 @@ def render_api_connection_panel(base_url: str) -> tuple[dict[str, Any] | None, b
 
 def render_ingestion_panel(base_url: str) -> None:
     st.subheader("PDF Ingestion")
+    if st.session_state.get("ui_pipeline_mode") == "bangla_tax":
+        st.caption("Bangla tax ingest parses a Bangla PDF, builds the legal graph, indexes chunks, and loads the chatbot runtime.")
+        upload_tab, local_tab = st.tabs(["Upload PDF", "Local Path"])
+        with upload_tab:
+            uploaded_pdf = st.file_uploader("Bangla PDF", type=["pdf"], key="bangla_tax_uploaded_pdf")
+            upload_left, upload_right = st.columns(2)
+            with upload_left:
+                upload_document_id = st.text_input(
+                    "Document ID",
+                    value=str(st.session_state.get("bangla_tax_document_id") or ""),
+                    key="bangla_tax_upload_document_id",
+                )
+                upload_act_title = st.text_input(
+                    "Document Title",
+                    value=str(st.session_state.get("bangla_tax_act_title") or ""),
+                    key="bangla_tax_upload_act_title",
+                )
+            with upload_right:
+                upload_ocr_enabled = st.checkbox(
+                    "Enable OCR",
+                    value=bool(st.session_state.get("bangla_tax_ocr_enabled")),
+                    key="bangla_tax_upload_ocr_enabled",
+                )
+                upload_ocr_language = st.text_input(
+                    "OCR Language",
+                    value=str(st.session_state.get("bangla_tax_ocr_language") or "ben+eng"),
+                    key="bangla_tax_upload_ocr_language",
+                )
+                upload_ocr_force = st.checkbox(
+                    "Force OCR",
+                    value=bool(st.session_state.get("bangla_tax_ocr_force")),
+                    key="bangla_tax_upload_ocr_force",
+                )
+            if st.button("Upload And Load Tax Bot", use_container_width=True, disabled=uploaded_pdf is None):
+                if uploaded_pdf is None:
+                    st.warning("Choose a Bangla PDF first.")
+                else:
+                    data = {
+                        "document_id": upload_document_id or "",
+                        "act_title": upload_act_title or "",
+                        "ocr_enabled": str(bool(upload_ocr_enabled)).lower(),
+                        "ocr_language": upload_ocr_language or "ben+eng",
+                        "ocr_force": str(bool(upload_ocr_force)).lower(),
+                    }
+                    files = {
+                        "file": (
+                            uploaded_pdf.name,
+                            uploaded_pdf.getvalue(),
+                            "application/pdf",
+                        )
+                    }
+                    success, response_payload, error_message = api_post_multipart(
+                        base_url,
+                        "/bangla-tax/upload",
+                        files=files,
+                        data=data,
+                        timeout_seconds=INGEST_TIMEOUT_SECONDS,
+                    )
+                    if success and response_payload is not None:
+                        response_payload["_ui_pipeline_mode"] = "bangla_tax"
+                        st.session_state["last_ingest_response"] = response_payload
+                        st.success("Bangla tax PDF uploaded and loaded.")
+                    else:
+                        st.error(f"Bangla tax upload failed: {error_message}")
+
+        with local_tab:
+            with st.form("bangla_tax_local_ingest_form", clear_on_submit=False):
+                source_path = st.text_input("Source PDF Path", key="bangla_tax_source_path")
+                document_id = st.text_input("Document ID", key="bangla_tax_document_id")
+                act_title = st.text_input("Document Title", key="bangla_tax_act_title")
+                ocr_left, ocr_right = st.columns(2)
+                with ocr_left:
+                    ocr_enabled = st.checkbox("Enable OCR", key="bangla_tax_ocr_enabled")
+                    ocr_force = st.checkbox("Force OCR", key="bangla_tax_ocr_force")
+                with ocr_right:
+                    ocr_language = st.text_input("OCR Language", key="bangla_tax_ocr_language")
+                submitted = st.form_submit_button("Load Local PDF Into Tax Bot", use_container_width=True)
+
+            if submitted:
+                payload = {
+                    "source_path": source_path,
+                    "document_id": document_id or None,
+                    "act_title": act_title or None,
+                    "ocr_enabled": bool(ocr_enabled),
+                    "ocr_language": ocr_language or "ben+eng",
+                    "ocr_force": bool(ocr_force),
+                }
+                success, response_payload, error_message = api_post(
+                    base_url,
+                    "/bangla-tax/ingest",
+                    payload,
+                    timeout_seconds=INGEST_TIMEOUT_SECONDS,
+                )
+                if success and response_payload is not None:
+                    response_payload["_ui_pipeline_mode"] = "bangla_tax"
+                    st.session_state["last_ingest_response"] = response_payload
+                    st.success("Bangla tax PDF loaded.")
+                else:
+                    st.error(f"Bangla tax ingest failed: {error_message}")
+
+        if st.session_state.get("last_ingest_response"):
+            ingest_response = st.session_state["last_ingest_response"]
+            if ingest_response.get("_ui_pipeline_mode") == "bangla_tax":
+                st.json(
+                    {
+                        "status": ingest_response.get("status"),
+                        "document_id": ingest_response.get("document_id"),
+                        "act_title": ingest_response.get("act_title"),
+                        "parser_provider": ingest_response.get("parser_provider"),
+                        "source_path": ingest_response.get("source_path"),
+                        "graph_path": ingest_response.get("graph_path"),
+                        "bm25_index_dir": ingest_response.get("bm25_index_dir"),
+                        "retrieval_chunk_count": ingest_response.get("retrieval_chunk_count"),
+                        "reasoning_chunk_count": ingest_response.get("reasoning_chunk_count"),
+                        "vector_record_count": ingest_response.get("vector_record_count"),
+                        "ocr_applied": ingest_response.get("ocr_applied"),
+                    }
+                )
+        return
+
     if st.session_state.get("ui_pipeline_mode") == "agentic":
         st.caption("Agentic ingest builds the legal graph, chunk artifacts, BM25 index, and vector store in one step.")
         with st.form("agentic_ingest_form", clear_on_submit=False):
@@ -1049,10 +1243,10 @@ def render_ingestion_panel(base_url: str) -> None:
 
 def render_index_building_panel(base_url: str) -> None:
     st.subheader("Index Building")
-    if st.session_state.get("ui_pipeline_mode") == "agentic":
-        st.info("Agentic mode builds BM25 and vector artifacts during ingest. No separate /build-index step is required.")
+    if st.session_state.get("ui_pipeline_mode") in {"bangla_tax", "agentic"}:
+        st.info("This mode builds BM25 and vector artifacts during ingest. No separate /build-index step is required.")
         last_ingest_response = st.session_state.get("last_ingest_response") or {}
-        if isinstance(last_ingest_response, dict) and last_ingest_response.get("_ui_pipeline_mode") == "agentic":
+        if isinstance(last_ingest_response, dict) and last_ingest_response.get("_ui_pipeline_mode") in {"bangla_tax", "agentic"}:
             st.json(
                 {
                     "document_id": last_ingest_response.get("document_id"),
@@ -1121,13 +1315,17 @@ def render_query_panel(base_url: str) -> None:
         for question in GENERATION_TEST_QUESTIONS:
             st.code(question, language="text")
 
-    if st.session_state.get("ui_pipeline_mode") == "agentic":
-        with st.form("agentic_query_form", clear_on_submit=False):
+    if st.session_state.get("ui_pipeline_mode") in {"bangla_tax", "agentic"}:
+        is_bangla_tax_mode = st.session_state.get("ui_pipeline_mode") == "bangla_tax"
+        form_name = "bangla_tax_query_form" if is_bangla_tax_mode else "agentic_query_form"
+        endpoint = "/bangla-tax/query" if is_bangla_tax_mode else "/agentic/query"
+        button_label = "Ask Bangla Tax Bot" if is_bangla_tax_mode else "Run Agentic Query"
+        with st.form(form_name, clear_on_submit=False):
             question_text = st.text_area(
                 "Question Text",
                 key="question_text",
                 height=100,
-                placeholder="Ask in Bangla or English.",
+                placeholder="Ask a Bangla income-tax question.",
             )
             selection_left, selection_right = st.columns(2)
             with selection_left:
@@ -1145,7 +1343,23 @@ def render_query_panel(base_url: str) -> None:
                     step=1,
                     key="agentic_max_reasoning_steps",
                 )
-            submitted = st.form_submit_button("Run Agentic Query", use_container_width=True)
+            if is_bangla_tax_mode:
+                strategy_left, strategy_right = st.columns(2)
+                with strategy_left:
+                    st.selectbox(
+                        "Prompt Strategy",
+                        options=PROMPT_STRATEGY_OPTIONS,
+                        format_func=lambda value: PROMPT_STRATEGY_LABELS.get(value, value),
+                        key="bangla_tax_prompt_strategy",
+                    )
+                with strategy_right:
+                    st.selectbox(
+                        "Reasoning Trace",
+                        options=REASONING_TRACE_MODE_OPTIONS,
+                        format_func=lambda value: REASONING_TRACE_MODE_LABELS.get(value, value),
+                        key="bangla_tax_reasoning_trace_mode",
+                    )
+            submitted = st.form_submit_button(button_label, use_container_width=True)
 
         if submitted:
             payload = {
@@ -1155,14 +1369,17 @@ def render_query_panel(base_url: str) -> None:
             selected_query_type = str(st.session_state.get("agentic_query_type") or "auto").strip()
             if selected_query_type and selected_query_type != "auto":
                 payload["query_type"] = selected_query_type
+            if is_bangla_tax_mode:
+                payload["prompt_strategy"] = st.session_state.get("bangla_tax_prompt_strategy") or "zero_shot"
+                payload["reasoning_trace_mode"] = st.session_state.get("bangla_tax_reasoning_trace_mode") or "summary"
             success, response_payload, error_message = api_post(
                 base_url,
-                "/agentic/query",
+                endpoint,
                 payload,
                 timeout_seconds=QUERY_TIMEOUT_SECONDS,
             )
             if success and response_payload is not None:
-                response_payload["_ui_pipeline_mode"] = "agentic"
+                response_payload["_ui_pipeline_mode"] = "bangla_tax" if is_bangla_tax_mode else "agentic"
                 st.session_state["last_query_response"] = response_payload
                 trace_id = response_payload.get("trace_id")
                 if isinstance(trace_id, str) and trace_id:
@@ -1170,9 +1387,9 @@ def render_query_panel(base_url: str) -> None:
                     st.session_state["last_trace_response"] = trace_payload if trace_ok else None
                 else:
                     st.session_state["last_trace_response"] = None
-                st.success("Agentic query completed.")
+                st.success("Bangla tax query completed." if is_bangla_tax_mode else "Agentic query completed.")
             else:
-                st.error(f"Agentic query failed: {error_message}")
+                st.error(f"Query failed: {error_message}")
         return
 
     with st.form("query_form", clear_on_submit=False):
@@ -2264,11 +2481,12 @@ def render_method_comparison(base_url: str) -> None:
 
 
 def render_agentic_results_panel(base_url: str, response_payload: dict[str, Any]) -> None:
-    metric_columns = st.columns(4)
+    metric_columns = st.columns(5)
     metric_columns[0].metric("Query Type", str(response_payload.get("query_type") or "-"))
     metric_columns[1].metric("Execution Path", str(response_payload.get("execution_path") or "-"))
     metric_columns[2].metric("Confidence", f"{float(response_payload.get('confidence') or 0.0):.2f}")
     metric_columns[3].metric("Citations", str(len(response_payload.get("citations") or [])))
+    metric_columns[4].metric("Strategy", str(response_payload.get("prompt_strategy") or "-"))
 
     answer_text = response_payload.get("answer")
     if answer_text:
@@ -2282,6 +2500,11 @@ def render_agentic_results_panel(base_url: str, response_payload: dict[str, Any]
         st.markdown("**Reasoning Summary**")
         for note in reasoning_summary:
             st.write(f"- {note}")
+
+    reasoning_trace = response_payload.get("reasoning_trace") or {}
+    if isinstance(reasoning_trace, dict) and reasoning_trace:
+        with st.expander("Reasoning Trace", expanded=False):
+            st.json(reasoning_trace)
 
     missing_facts = response_payload.get("missing_facts") or []
     if missing_facts:
@@ -2405,9 +2628,9 @@ def render_results_panel(base_url: str) -> None:
 
 def main() -> None:
     initialize_session_state()
-    st.set_page_config(page_title="Bangla Tax RAG", layout="wide")
-    st.title("Bangla Tax RAG")
-    st.caption("Research UI for PDF ingestion, index building, grounded retrieval, and cited answer exploration.")
+    st.set_page_config(page_title="Bangla Legal Tax Bot", layout="wide")
+    st.title("Bangla Legal Tax Bot")
+    st.caption("Upload or load Bangla income-tax PDFs, then ask grounded legal-tax questions with citations.")
 
     st.sidebar.header("Navigation")
     view_name = st.sidebar.radio(

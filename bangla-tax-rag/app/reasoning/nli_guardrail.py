@@ -6,6 +6,7 @@ from typing import Iterable
 from pydantic import BaseModel, Field
 
 from app.domain import EvidenceItem, QueryType, canonicalize_query_type
+from app.reasoning.prompt_strategies import NON_CLAIM_PREFIXES
 from app.reasoning.state import VerificationFailure
 
 REFUSAL_TEXT = "Information not found in retrieved evidence."
@@ -17,7 +18,7 @@ DATE_CLAIM_PATTERN = re.compile(
 )
 SECTION_CLAIM_PATTERN = re.compile(r"\bsection\s+(\d+[A-Za-z]?)\b", re.IGNORECASE)
 THRESHOLD_CLAIM_PATTERN = re.compile(r"\b(?:taka|tk\.?|lakh|crore)\b", re.IGNORECASE)
-TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
+TOKEN_PATTERN = re.compile(r"[\w\u0980-\u09FF]+", re.UNICODE)
 
 STOPWORDS = {
     "the",
@@ -51,10 +52,49 @@ STOPWORDS = {
     "evidence",
     "legal",
     "basis",
+    "short",
+    "answer",
     "reasoning",
     "missing",
     "facts",
     "citations",
+    "rule",
+    "rules",
+    "table",
+    "indicate",
+    "indicates",
+    "based",
+    "provision",
+    "provisions",
+    "states",
+    "leading",
+    "according",
+    "retrieved",
+    "উদ্ধার",
+    "করা",
+    "প্রমাণ",
+    "অনুযায়ী",
+    "অনুযায়ী",
+    "হিসেবে",
+    "জন্য",
+    "এর",
+    "এবং",
+    "অথবা",
+    "উপর",
+    "হবে",
+    "হয়",
+    "হয়",
+    "সংক্ষিপ্ত",
+    "উত্তর",
+    "প্রযোজ্য",
+    "বিধান",
+    "যুক্তির",
+    "সারাংশ",
+    "অপূর্ণ",
+    "তথ্য",
+    "উৎস",
+    "যাচাই",
+    "সীমাবদ্ধতা",
 }
 
 
@@ -202,11 +242,11 @@ def _extract_claims(draft_answer: str) -> list[str]:
     lines = [line.strip() for line in draft_answer.splitlines() if line.strip()]
     claims: list[str] = []
     for line in lines:
-        if line.startswith(("Legal basis:", "Reasoning:", "Missing facts:", "Citations:", "Verification:")):
+        if line.startswith(NON_CLAIM_PREFIXES):
             continue
         claims.extend(
             sentence.strip()
-            for sentence in re.split(r"(?<=[.!?])\s+|\s*;\s*", line)
+            for sentence in re.split(r"(?<=[.!?।])\s+|\s*;\s*", line)
             if sentence.strip()
         )
     return claims or [draft_answer.strip()]

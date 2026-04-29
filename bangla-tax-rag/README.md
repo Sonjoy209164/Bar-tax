@@ -21,6 +21,73 @@ The repository supports two immediate use cases:
 
 The system can run without external APIs. By default it can fall back to deterministic grounded answer construction. If you run a local OpenAI-compatible model server such as Ollama, the same pipeline can use a real chat model for generation.
 
+## Novelty And Research Contributions
+
+This project should not be framed as "a Bangla tax chatbot." That framing is too weak for serious research. The research novelty is:
+
+> **Evidence-faithful Bangla legal-tax question answering over noisy Bangladesh government PDFs, where retrieval is constrained by legal structure, tax-year validity, taxpayer scope, source authority, table/page layout, citation support, and abstention.**
+
+### Proposed Main Contribution: BTaxBench
+
+**BTaxBench** is the benchmark contribution:
+
+- a Bangla legal-tax QA benchmark over official Bangladesh income-tax documents
+- gold answers linked to gold evidence spans
+- labels for tax year, assessment year, taxpayer class, authority type, and answerability
+- hard cases for wrong-year retrieval, table lookup, conflicting authority, ambiguous questions, and unanswerable questions
+- evaluation beyond answer accuracy, including citation support and unsupported claim rate
+
+The first implementation target is **BTaxBench-Pilot14**, built from the initial 14 official documents. That pilot is enough to start research, run baselines, expose failure modes, and validate the annotation design. The broader benchmark should scale only after the pilot shows that the task is non-trivial and the labels are reliable.
+
+### Proposed Method Contribution: TaxTrail-RAG
+
+**TaxTrail-RAG** is the retrieval and evidence-selection contribution:
+
+- models legal-tax evidence as structured nodes: act, circular, section, subsection, clause, page, table, row, tax year, and taxpayer class
+- retrieves evidence with sparse, dense, hybrid, and graph-based candidates
+- reranks evidence using temporal validity, taxpayer scope, authority level, legal hierarchy, table alignment, and extraction confidence
+- expands evidence through parent sections, sibling clauses, table rows, and linked circular/SRO references
+- uses an evidence sufficiency gate to answer, clarify, or abstain
+
+The core methodological claim is:
+
+> Legal-tax RAG is not ordinary nearest-neighbor retrieval. It is constrained evidence selection under temporal, hierarchical, authority, and layout-noise constraints.
+
+### Proposed Evaluation Contribution: Citation Faithfulness
+
+The evaluation contribution is to judge whether legal claims are supported, not merely whether the final answer sounds correct.
+
+The target metrics are:
+
+- Evidence Hit@1 / Hit@3 / Hit@5
+- Section Accuracy
+- Page Accuracy
+- Table Row Accuracy
+- Tax-Year Accuracy
+- Wrong-Year Retrieval Rate
+- Citation Support Precision / Recall / F1
+- Unsupported Claim Rate
+- Wrong Citation Rate
+- Abstention Accuracy
+- Clean-to-OCR Robustness Drop
+
+This matters because a legal-tax answer is only useful if every material claim can be traced back to valid cited evidence.
+
+### What This Project Must Not Overclaim
+
+The current repository is a research scaffold and pilot system. It becomes paper-grade only after benchmark annotation, baselines, ablations, and error analysis are complete.
+
+Do not claim:
+
+- "first legal RAG system"
+- "first tax RAG system"
+- "complete Bangla legal benchmark"
+- "A*-ready system"
+
+Safer research claim:
+
+> We introduce a pilot benchmark and constrained retrieval framework for evidence-faithful Bangla legal-tax QA over official Bangladesh income-tax PDFs, and evaluate how legal structure, tax-year metadata, citation support, and OCR/layout noise affect retrieval and answer faithfulness.
+
 ## What Is Implemented
 
 - PDF ingestion with `pdfplumber`, `PyMuPDF`, and `pymupdf4llm`

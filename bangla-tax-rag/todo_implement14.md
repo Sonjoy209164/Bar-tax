@@ -973,25 +973,25 @@ Pass condition:
 
 ### 10. Build Retrieval Indexes
 
-- [ ] Build sparse BM25 index.
+- [x] Build sparse BM25 index.
 
 ```bash
 .venv/bin/python scripts/build_sparse_index.py \
-  --input data/processed/btax14/chunks.jsonl \
+  --input data/processed/btax14/structured/chunks.jsonl \
   --output indexes/pilot14/sparse
 ```
 
-- [ ] Build dense placeholder index.
+- [x] Build dense placeholder index.
 
 ```bash
 .venv/bin/python scripts/build_dense_index.py \
-  --input data/processed/btax14/chunks.jsonl \
+  --input data/processed/btax14/structured/chunks.jsonl \
   --output indexes/pilot14/dense \
   --provider mock \
   --no-faiss
 ```
 
-- [ ] Run one smoke query.
+- [x] Run one smoke query.
 
 ```bash
 .venv/bin/python scripts/demo_query.py \
@@ -1004,9 +1004,9 @@ Pass condition:
 
 Pass condition:
 
-- [ ] sparse index builds.
-- [ ] dense placeholder index builds.
-- [ ] hybrid query returns hits.
+- [x] sparse index builds.
+- [x] dense placeholder index builds.
+- [x] hybrid query returns hits.
 
 ### 11. Generate Annotation Candidates
 

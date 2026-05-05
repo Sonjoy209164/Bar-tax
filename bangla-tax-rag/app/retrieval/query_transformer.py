@@ -10,7 +10,7 @@ from app.core.utils import (
     extract_definition_target,
     extract_informative_query_terms,
     extract_query_section_references,
-    normalize_text,
+    normalize_query_text,
     rewrite_query,
 )
 from app.domain import QueryExecutionPath, QueryType, build_query_taxonomy_decision, canonicalize_query_type
@@ -80,7 +80,7 @@ class QueryTransformer:
         self.config = config or QueryTransformerConfig()
 
     def transform(self, question: str, *, query_type: str | QueryType | None = None) -> QueryPlan:
-        normalized_question = normalize_text(question)
+        normalized_question = normalize_query_text(question)
         inferred_query_type = canonicalize_query_type(query_type or detect_query_type(normalized_question))
         if inferred_query_type is QueryType.GENERAL and _is_scenario_like(normalized_question):
             inferred_query_type = QueryType.SCENARIO_REASONING

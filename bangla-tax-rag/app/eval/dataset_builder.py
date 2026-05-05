@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from app.core.logging import get_logger
@@ -19,46 +20,190 @@ ALLOWED_QUESTION_TYPES = {
     "authority_conflict",
 }
 
+RATE_EXPLICIT_SIGNALS = (
+    "করহার",
+    "আয়কর হার",
+    "আয়কর হার",
+    "tax rate",
+    "rate",
+    "শতাংশ",
+    "স্ল্যাব",
+    "slab",
+)
+DEFINITION_SIGNALS = ("সংজ্ঞা", "অর্থ", "ব্যাখ্যা", "definition", "means", "defined")
+AMENDMENT_SIGNALS = ("সংশোধন", "প্রতিস্থাপন", "সংযোজন", "বিলোপ", "পরিবর্তন", "amend", "substitut")
+PROCEDURE_SIGNALS = (
+    "পদ্ধতি",
+    "প্রক্রিয়া",
+    "প্রক্রিয়া",
+    "দাখিল",
+    "রিটার্ন",
+    "আবেদন",
+    "পরিশোধ",
+    "জমা",
+    "শর্ত",
+    "করতে হবে",
+    "procedure",
+    "process",
+    "submit",
+    "payment",
+)
+CALCULATION_SIGNALS = ("গণনা", "পরিগণনা", "হিসাব", "calculate", "calculation")
+COMPARISON_SIGNALS = ("তুলনা", "অপেক্ষা", "comparison", "compare")
+AUTHORITY_SIGNALS = ("কর্তৃপক্ষ", "বোর্ড", "কমিশনার", "authority", "commissioner")
+EXAMPLE_SIGNALS = ("উদাহরণ", "example")
+
+GENERIC_CONTEXT_LABELS = {
+    "",
+    "বিষয়",
+    "বিষয়",
+    "পরিপত্র",
+    "সূচিপত্র",
+    "table of contents",
+    "appendix",
+    "annexure",
+}
+BOILERPLATE_LINE_PREFIXES = (
+    "গণপ্রজাতন্ত্রী বাংলাদেশ সরকার",
+    "জাতীয় রাজস্ব বোর্ড",
+    "জাতীয় রাজস্ব বোর্ড",
+    "রাজস্ব ভবন",
+    "সেগুনবাগিচা",
+    "সেগ্তনবাগিচা",
+    "নথি নং",
+    "তারিখ",
+    "পরিপত্র-",
+    "পরিপত্র ",
+    "www.",
+)
+
+
+def _contains_any(text: str, signals: tuple[str, ...]) -> bool:
+    return any(signal in text for signal in signals)
+
+
+def _looks_like_rate_lookup(chunk: ChunkRecord, heading_text: str, normalized_text: str) -> bool:
+    if chunk.chunk_type == "table":
+        return True
+    if _contains_any(heading_text, RATE_EXPLICIT_SIGNALS):
+        return True
+    if "করহার" in normalized_text or "আয়কর হার" in normalized_text or "আয়কর হার" in normalized_text:
+        return True
+    if ("%" in normalized_text or "শতাংশ" in normalized_text) and _contains_any(
+        normalized_text,
+        ("কর", "আয়", "আয়", "সারচার্জ", "মোট আয়", "মোট আয়"),
+    ):
+        return True
+    return False
+
+
+def _clean_context_label(text: str | None) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r"\s+", " ", text).strip(" -:;।|ঃ")
+    if cleaned.lower() in GENERIC_CONTEXT_LABELS:
+        return ""
+    if re.fullmatch(r"[০-৯0-9]+[।.)]?", cleaned):
+        return ""
+    if re.fullmatch(r"[০-৯0-9/., -]+", cleaned):
+        return ""
+    if re.fullmatch(r"[\d%/., -]+", cleaned):
+        return ""
+    if re.fullmatch(r"[A-Za-z]{1,4}", cleaned):
+        return ""
+    return truncate_text(cleaned, max_length=90)
+
+
+def _line_is_boilerplate(line: str) -> bool:
+    cleaned = line.strip()
+    if not cleaned:
+        return True
+    return any(cleaned.startswith(prefix) for prefix in BOILERPLATE_LINE_PREFIXES)
+
+
+def _marker_is_usable(marker: str | None) -> bool:
+    if not marker:
+        return False
+    cleaned = marker.strip()
+    if not cleaned:
+        return False
+    if len(cleaned) > 24:
+        return False
+    if cleaned.count(".") >= 3:
+        return False
+    if len(re.sub(r"[^০-৯0-9A-Za-zক-হ]", "", cleaned)) < 1:
+        return False
+    return True
+
+
+def build_context_label(chunk: ChunkRecord) -> str:
+    for heading in reversed(chunk.heading_path):
+        label = _clean_context_label(heading)
+        if label:
+            return label
+
+    for line in chunk.original_text.splitlines():
+        if _line_is_boilerplate(line):
+            continue
+        line_label = _clean_context_label(line)
+        if line_label:
+            return line_label
+
+    if _marker_is_usable(chunk.subsection_id):
+        return f"উপধারা/অনুচ্ছেদ {chunk.subsection_id}"
+    if _marker_is_usable(chunk.section_id):
+        return f"ধারা {chunk.section_id}"
+    if chunk.chunk_type == "table":
+        return "এই সারণি"
+    if chunk.chunk_type == "example":
+        return "এই উদাহরণ"
+    if chunk.chunk_type == "appendix":
+        return "এই পরিশিষ্ট"
+    return "এই অংশ"
+
 
 def infer_question_type(chunk: ChunkRecord) -> str:
     heading_text = " ".join(chunk.heading_path).lower()
     normalized_text = chunk.normalized_text.lower()
-    if chunk.chunk_type == "table" or "করহার" in heading_text or "rate" in normalized_text:
+    combined_text = f"{heading_text}\n{normalized_text}"
+
+    if _looks_like_rate_lookup(chunk, heading_text, normalized_text):
         return "rate_lookup"
-    if "সংজ্ঞা" in heading_text or "definition" in heading_text:
-        return "definition"
-    if "সংশোধন" in heading_text or "amend" in normalized_text:
-        return "amendment"
-    if chunk.chunk_type == "example" or "উদাহরণ" in heading_text:
+    if chunk.chunk_type == "example" or _contains_any(combined_text, EXAMPLE_SIGNALS):
         return "example_based"
-    if "প্রক্রিয়া" in heading_text or "পদ্ধতি" in heading_text or "procedure" in normalized_text:
-        return "procedure"
-    if "গণনা" in normalized_text or "calculate" in normalized_text:
+    if _contains_any(combined_text, AMENDMENT_SIGNALS):
+        return "amendment"
+    if _contains_any(combined_text, DEFINITION_SIGNALS):
+        return "definition"
+    if _contains_any(combined_text, CALCULATION_SIGNALS):
         return "calculation"
-    if "তুলনা" in normalized_text or "comparison" in normalized_text:
+    if _contains_any(combined_text, COMPARISON_SIGNALS):
         return "comparison"
-    if "authority" in normalized_text or "কর্তৃপক্ষ" in normalized_text:
+    if _contains_any(combined_text, AUTHORITY_SIGNALS):
         return "authority_conflict"
-    return "definition"
+    if _contains_any(combined_text, PROCEDURE_SIGNALS):
+        return "procedure"
+    return "procedure"
 
 
 def build_candidate_question_text(chunk: ChunkRecord, question_type: str) -> str:
-    section_text = chunk.subsection_id or chunk.section_id or "এই অংশ"
+    context_label = build_context_label(chunk)
+    tax_year_prefix = f"{chunk.tax_year} করবর্ষে " if chunk.tax_year else ""
     if question_type == "rate_lookup":
-        return f"{chunk.tax_year or 'প্রাসঙ্গিক'} করবর্ষে ধারা {section_text} অনুযায়ী করহার কত?"
+        return f"{tax_year_prefix}{context_label} অনুযায়ী প্রযোজ্য করহার বা হার কী?"
     if question_type == "definition":
-        return f"ধারা {section_text} এ কী সংজ্ঞা দেওয়া হয়েছে?"
+        return f"{context_label} অংশে কোন শব্দ বা ধারণার সংজ্ঞা কীভাবে দেওয়া হয়েছে?"
     if question_type == "amendment":
-        return f"ধারা {section_text} এ কী সংশোধন আনা হয়েছে?"
+        return f"{context_label} অংশে কী পরিবর্তন বা সংশোধন আনা হয়েছে?"
     if question_type == "procedure":
-        return f"ধারা {section_text} অনুযায়ী প্রক্রিয়াটি কী?"
+        return f"{context_label} অনুযায়ী কী নিয়ম বা প্রক্রিয়া অনুসরণ করতে হবে?"
     if question_type == "example_based":
-        return f"{section_text} সম্পর্কিত উদাহরণে কী দেখানো হয়েছে?"
+        return f"{context_label} উদাহরণে কী দেখানো হয়েছে?"
     if question_type == "calculation":
-        return f"ধারা {section_text} অনুযায়ী গণনার নিয়ম কী?"
+        return f"{context_label} অনুযায়ী গণনার নিয়ম কী?"
     if question_type == "comparison":
-        return f"ধারা {section_text} এ কী তুলনা করা হয়েছে?"
-    return f"ধারা {section_text} অনুযায়ী কর্তৃপক্ষগত অবস্থান কী?"
+        return f"{context_label} অংশে কী তুলনা করা হয়েছে?"
+    return f"{context_label} অনুযায়ী কোন কর্তৃপক্ষ বা আইনি অবস্থান প্রযোজ্য?"
 
 
 def build_annotation_candidates_from_chunks(chunk_records: list[ChunkRecord]) -> list[AnnotationCandidate]:
@@ -78,7 +223,7 @@ def build_annotation_candidates_from_chunks(chunk_records: list[ChunkRecord]) ->
             subsection_id=chunk.subsection_id,
             chunk_type=chunk.chunk_type,
             evidence_snippet=truncate_text(chunk.original_text, max_length=280),
-            notes="Candidate generated from chunk metadata. Fill gold answer manually.",
+            notes="Machine-generated annotation seed. Verify question, answer, tax year, and evidence manually.",
         )
         candidates.append(candidate)
     return candidates

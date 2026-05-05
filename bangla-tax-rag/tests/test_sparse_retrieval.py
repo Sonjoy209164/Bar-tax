@@ -120,6 +120,44 @@ def test_english_company_tax_question_is_rate_lookup() -> None:
     assert "software" in signals.rewritten_query
 
 
+def test_banglish_tax_year_question_expands_to_definition_terms() -> None:
+    signals = preprocess_query("kor ortho bochor ki?")
+
+    assert signals.query_type == "definition"
+    assert signals.query_intent == "definition"
+    assert "করবর্ষ" in signals.normalized_query
+    assert "অর্থ বছর" in signals.normalized_query
+    assert "সংজ্ঞা" in signals.normalized_query
+
+
+def test_banglish_rate_question_is_rate_lookup() -> None:
+    signals = preprocess_query("2025-2026 korhar koto?")
+
+    assert signals.tax_year == "2025-2026"
+    assert signals.query_type == "rate_lookup"
+    assert signals.query_intent == "rate_lookup"
+    assert "করহার" in signals.normalized_query
+    assert "tax rate" in (signals.rewritten_query or "")
+
+
+def test_banglish_section_reference_and_withholding_terms() -> None:
+    signals = preprocess_query("dhara 52 utse kor koto?")
+
+    assert signals.section_reference == "52"
+    assert signals.section_id == "52"
+    assert "উৎসে কর" in signals.normalized_query
+    assert "ধারা" in signals.normalized_query
+
+
+def test_banglish_personal_tax_question_routes_to_rate_lookup() -> None:
+    signals = preprocess_query("ami freelancer amar kor koto?")
+
+    assert signals.query_type == "rate_lookup"
+    assert signals.query_intent == "rate_lookup"
+    assert "স্বাভাবিক ব্যক্তি" in signals.normalized_query
+    assert "tax payable" in signals.normalized_query
+
+
 def test_personal_labour_tax_question_is_eligibility() -> None:
     signals = preprocess_query("I am a labour, what will be my tax?")
 

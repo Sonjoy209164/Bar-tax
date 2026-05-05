@@ -7,6 +7,112 @@ from app.domain.query_taxonomy import QueryExecutionPath, QueryType, build_query
 
 BANGLA_DIGIT_MAP = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 SECTION_KEYWORDS = ("ধারা", "উপ-ধারা", "উপধারা", "পরিশিষ্ট", "অনুচ্ছেদ")
+BANGLISH_ROMAN_PATTERN = re.compile(r"[A-Za-z]")
+BANGLISH_QUERY_EXPANSIONS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
+    (
+        re.compile(r"\b(?:ay\s*kor|aykor|aikor|income\s*tax)\b", re.IGNORECASE),
+        ("আয়কর", "আয়কর", "income tax"),
+    ),
+    (
+        re.compile(
+            r"\b(?:kor\s*ortho\s*bochor|orthobochor|ortho\s*bochor|kor\s*bochor|korborsho|tax\s*bochor|tax\s*year|fiscal\s*year|financial\s*year)\b",
+            re.IGNORECASE,
+        ),
+        ("করবর্ষ", "অর্থ বছর", "অর্থবছর", "tax year", "assessment year", "fiscal year"),
+    ),
+    (
+        re.compile(r"\b(?:korhar|kor\s*har|tax\s*har|rate\s*of\s*tax|tax\s*rate)\b", re.IGNORECASE),
+        ("করহার", "কর হার", "tax rate", "rate of tax"),
+    ),
+    (
+        re.compile(r"\b(?:kor\s*koto|tax\s*koto|koto\s*kor|koto\s*tax|how\s*much\s*tax)\b", re.IGNORECASE),
+        ("কর কত", "করহার", "tax payable", "tax rate", "how much tax"),
+    ),
+    (
+        re.compile(r"\b(?:dhara|dara|section)\b", re.IGNORECASE),
+        ("ধারা", "section"),
+    ),
+    (
+        re.compile(r"\b(?:upodhara|upo\s*dhara|sub\s*section|subsection)\b", re.IGNORECASE),
+        ("উপধারা", "উপ-ধারা", "subsection"),
+    ),
+    (
+        re.compile(r"\b(?:porishishto|porisishto|appendix|annex)\b", re.IGNORECASE),
+        ("পরিশিষ্ট", "appendix"),
+    ),
+    (
+        re.compile(r"\b(?:return\s*dakhil|ritarn\s*dakhil|return\s*file|filing|dakhil)\b", re.IGNORECASE),
+        ("রিটার্ন দাখিল", "return filing", "submit return"),
+    ),
+    (
+        re.compile(r"\b(?:nirdishto\s*tarikh|shesh\s*tarikh|last\s*date|deadline|due\s*date|tax\s*day)\b", re.IGNORECASE),
+        ("রিটার্ন দাখিলের নির্দিষ্ট তারিখ", "কর দিবস", "tax day", "due date", "deadline"),
+    ),
+    (
+        re.compile(r"\b(?:jorimana|jormana|jorimana|penalty|fine)\b", re.IGNORECASE),
+        ("জরিমানা", "penalty", "fine"),
+    ),
+    (
+        re.compile(r"\b(?:reyat|reayat|riayat|rebate|tax\s*rebate)\b", re.IGNORECASE),
+        ("রেয়াত", "রেয়াত", "কর রেয়াত", "tax rebate"),
+    ),
+    (
+        re.compile(r"\b(?:utshe\s*kor|utse\s*kor|utsho\s*kor|withholding|source\s*tax|tds)\b", re.IGNORECASE),
+        ("উৎসে কর", "উৎসে কর্তন", "withholding tax", "tax deducted at source"),
+    ),
+    (
+        re.compile(r"\b(?:surcharge|sarcharge|sarcharj|sar\s*charge)\b", re.IGNORECASE),
+        ("সারচার্জ", "সারচাজ", "surcharge"),
+    ),
+    (
+        re.compile(r"\b(?:kormukto|kor\s*mukto|tax\s*free|exempt|exemption|obbahoti|obyahoti)\b", re.IGNORECASE),
+        ("করমুক্ত", "কর অব্যাহতি", "tax exempt", "exemption"),
+    ),
+    (
+        re.compile(r"\b(?:kompani|company|firm)\b", re.IGNORECASE),
+        ("কোম্পানি", "কোম্পানির", "company", "firm"),
+    ),
+    (
+        re.compile(r"\b(?:bekti|byakti|individual|person)\b", re.IGNORECASE),
+        ("ব্যক্তি", "স্বাভাবিক ব্যক্তি", "individual", "person", "assessee"),
+    ),
+    (
+        re.compile(r"\b(?:nari|mohila|female|woman)\b", re.IGNORECASE),
+        ("নারী", "মহিলা", "female", "woman"),
+    ),
+    (
+        re.compile(r"\b(?:protibondhi|protibondi|disabled|disability)\b", re.IGNORECASE),
+        ("প্রতিবন্ধী", "প্রতিবন্ধী ব্যক্তি", "disabled", "person with disability"),
+    ),
+    (
+        re.compile(r"\b(?:muktijoddha|muktijodha|freedom\s*fighter)\b", re.IGNORECASE),
+        ("মুক্তিযোদ্ধা", "যুদ্ধাহত মুক্তিযোদ্ধা", "freedom fighter"),
+    ),
+    (
+        re.compile(r"\b(?:hishab|hisab|calculation|calculate|compute)\b", re.IGNORECASE),
+        ("হিসাব", "গণনা", "calculation", "compute"),
+    ),
+    (
+        re.compile(r"\b(?:tulona|compare|comparison|difference)\b", re.IGNORECASE),
+        ("তুলনা", "পার্থক্য", "comparison", "compare"),
+    ),
+    (
+        re.compile(r"\b(?:freelancer|employee|salaried|worker|labour|labor|businessman)\b", re.IGNORECASE),
+        ("করদাতা", "স্বাভাবিক ব্যক্তি", "individual taxpayer", "income"),
+    ),
+    (
+        re.compile(r"\b(?:ami|amar|amake|amr)\b", re.IGNORECASE),
+        ("আমি", "আমার", "individual taxpayer"),
+    ),
+    (
+        re.compile(r"\b(?:ki|kake\s*bole|mane\s*ki|meaning)\b", re.IGNORECASE),
+        ("কী", "কি", "মানে কী", "সংজ্ঞা", "definition", "meaning"),
+    ),
+    (
+        re.compile(r"\b(?:koto|kototaka|koto\s*taka|how\s*much)\b", re.IGNORECASE),
+        ("কত", "কত টাকা", "how much"),
+    ),
+)
 QUERY_TYPE_PATTERNS = {
     QueryType.ELIGIBILITY: re.compile(
         r"(\bam i\b|\bdo i (?:have to|need to) pay tax\b|\bwill i (?:have to )?pay tax\b|\bwhat will be my tax\b|\bwhat is my tax\b|\bdo i qualify\b|\bam i eligible\b|\bi am (?:a|an)\b.*\btax\b|\bas a (?:day labourer|day laborer|labourer|laborer|worker|employee|salaried|individual)\b.*\btax\b)",
@@ -182,6 +288,22 @@ def normalize_text(text: str) -> str:
     return normalize_whitespace(normalize_bangla_digits(text))
 
 
+def normalize_query_text(text: str) -> str:
+    """Normalize user queries and append Banglish/code-mixed retrieval expansions."""
+    normalized_query = normalize_text(text)
+    if not BANGLISH_ROMAN_PATTERN.search(normalized_query):
+        return normalized_query
+
+    expansions: list[str] = []
+    for pattern, terms in BANGLISH_QUERY_EXPANSIONS:
+        if pattern.search(normalized_query):
+            expansions.extend(terms)
+
+    if not expansions:
+        return normalized_query
+    return " ".join(dict.fromkeys([normalized_query, *expansions]))
+
+
 def extract_tax_years(text: str) -> list[str]:
     normalized_text = normalize_text(text)
     matches = re.findall(r"\b(20\d{2}\s*[-–]\s*20\d{2})\b", normalized_text)
@@ -220,7 +342,7 @@ def extract_query_section_references(text: str) -> list[str]:
     normalized_text = normalize_text(text)
     matches: list[str] = []
     contextual_patterns = [
-        r"(?:ধারা|উপ-ধারা|উপধারা|অনুচ্ছেদ|section|article)\s*([0-9]+(?:\.[0-9]+)*)",
+        r"(?:ধারা|উপ-ধারা|উপধারা|অনুচ্ছেদ|section|article|dhara|dara|upodhara|upo\s*dhara)\s*([0-9]+(?:\.[0-9]+)*)",
     ]
     for pattern in contextual_patterns:
         matches.extend(re.findall(pattern, normalized_text, flags=re.IGNORECASE))
@@ -334,7 +456,7 @@ def detect_heading_marker(text: str) -> str | None:
 def extract_appendix_ids(text: str) -> list[str]:
     normalized_text = normalize_text(text)
     patterns = [
-        r"(?:পরিশিষ্ট|appendix|annex)\s*[A-Za-z0-9.-]+",
+        r"(?:পরিশিষ্ট|appendix|annex|porishishto|porisishto)\s*[A-Za-z0-9.-]+",
     ]
     matches: list[str] = []
     for pattern in patterns:
@@ -491,13 +613,13 @@ def extract_definition_target(text: str) -> str | None:
 
 
 def preprocess_query(query: str) -> QuerySignals:
-    normalized_query = normalize_text(query)
+    normalized_query = normalize_query_text(query)
     query_type = detect_query_type(normalized_query)
     taxonomy = build_query_taxonomy_decision(query_type)
-    tax_years = extract_tax_years(query)
-    section_ids = extract_query_section_references(query)
-    appendix_ids = extract_appendix_ids(query)
-    sro_ids = extract_sro_ids(query)
+    tax_years = extract_tax_years(normalized_query)
+    section_ids = extract_query_section_references(normalized_query)
+    appendix_ids = extract_appendix_ids(normalized_query)
+    sro_ids = extract_sro_ids(normalized_query)
     section_id: str | None = None
     subsection_id: str | None = None
     for candidate in section_ids:

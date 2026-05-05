@@ -1010,21 +1010,21 @@ Pass condition:
 
 ### 11. Generate Annotation Candidates
 
-- [ ] Generate candidate questions from chunks.
+- [x] Generate candidate questions from chunks.
 
 ```bash
 .venv/bin/python scripts/build_annotation_candidates.py \
-  --chunks data/processed/btax14/chunks.jsonl \
+  --chunks data/processed/btax14/structured/gold_ready_chunks.jsonl \
   --output data/annotations/pilot14/candidates.jsonl
 ```
 
-- [ ] Count candidates.
+- [x] Count candidates.
 
 ```bash
 wc -l data/annotations/pilot14/candidates.jsonl
 ```
 
-- [ ] Create the first annotation working file.
+- [x] Create the first annotation working file.
 
 ```bash
 cp data/annotations/pilot14/candidates.jsonl data/annotations/pilot14/annotator_a_working.jsonl
@@ -1032,16 +1032,22 @@ cp data/annotations/pilot14/candidates.jsonl data/annotations/pilot14/annotator_
 
 Manual step:
 
-- [ ] Edit `data/annotations/pilot14/annotator_a_working.jsonl` down to the first 50 high-quality questions.
-- [ ] Fill gold answers.
-- [ ] Fill expected chunk ids.
-- [ ] Include at least 10 unanswerable/ambiguous/conflict questions.
+- [x] Edit `data/annotations/pilot14/annotator_a_working.jsonl` down to the first 50 high-quality questions.
+- [x] Fill gold answers.
+- [x] Fill expected chunk ids.
+- [x] Include at least 10 unanswerable/ambiguous/conflict questions.
+
+Reproducible shortlist command:
+
+```bash
+.venv/bin/python scripts/create_pilot14_shortlist.py
+```
 
 ### 12. Create Pilot14 Dataset Files
 
 Current validation code expects the existing `AnnotatedQuestion` schema. For now, use that schema for executable validation, then later add the richer `questions.jsonl` plus `gold_evidence.jsonl` format.
 
-- [ ] Save the first executable dataset as:
+- [x] Save the first executable dataset as:
 
 ```text
 data/btaxbench/pilot14/pilot14_50.jsonl
@@ -1053,18 +1059,54 @@ Required row shape:
 {"question_id":"btax14_q0001","question_text":"","question_type":"rate_lookup","answer_text":"","expected_chunk_ids":[],"expected_doc_ids":[],"expected_sections":[],"expected_tax_year":"2025-2026","preferred_authority_level":"national","should_abstain":false,"answer_language":"bangla","notes":""}
 ```
 
-- [ ] Validate the first 50-question dataset.
+- [x] Validate the first 50-question dataset.
 
 ```bash
 .venv/bin/python scripts/validate_dataset.py \
   --dataset data/btaxbench/pilot14/pilot14_50.jsonl \
-  --chunks data/processed/btax14/chunks.jsonl | tee results/pilot14/validate_pilot14_50.json
+  --chunks data/processed/btax14/structured/gold_ready_chunks.jsonl | tee results/pilot14/validate_pilot14_50.json
 ```
 
 Pass condition:
 
-- [ ] validator exits successfully.
-- [ ] `invalid_rows` is `0`.
+- [x] validator exits successfully.
+- [x] `invalid_rows` is `0`.
+
+### 12b. Add Bangla-English-Banglish Query Robustness
+
+Purpose: users may ask in Bangla script, English, or Banglish/code-mixed form such as `kor ortho bochor ki` or `korhar koto`.
+
+- [x] Add query-time Banglish expansion.
+- [x] Detect Banglish rate, definition, section, withholding, penalty, rebate, return-filing, exemption, company, individual, and calculation terms.
+- [x] Support Romanized section references such as `dhara 52`.
+- [x] Wire the expansion into both `preprocess_query` and query planning.
+- [x] Add regression tests.
+
+```bash
+.venv/bin/python -m pytest tests/test_sparse_retrieval.py tests/test_query_transformer.py
+```
+
+- [x] Run Banglish retrieval smoke checks.
+
+```bash
+.venv/bin/python scripts/demo_query.py \
+  --mode sparse \
+  --index-dir indexes/pilot14/sparse \
+  --query "2025-2026 bekti korhar koto" \
+  --top-k 3 | tee results/pilot14/demo_query_banglish_person_rate.txt
+
+.venv/bin/python scripts/demo_query.py \
+  --mode sparse \
+  --index-dir indexes/pilot14/sparse \
+  --query "dhara 52 utse kor koto" \
+  --top-k 3 | tee results/pilot14/demo_query_banglish_section_withholding.txt
+```
+
+Pass condition:
+
+- [x] `kor ortho bochor ki` becomes a definition-style query.
+- [x] `2025-2026 korhar koto` becomes a rate lookup.
+- [x] `dhara 52 utse kor koto` extracts section `52` and retrieves withholding-tax evidence.
 
 ### 13. Run Placeholder Evaluation
 

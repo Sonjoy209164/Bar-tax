@@ -1152,8 +1152,8 @@ Pass condition:
 
 Until a full Pilot14 retrieval evaluator is implemented, run query-level checks and record the hit quality.
 
-- [ ] Choose 10 representative questions from `pilot14_50.jsonl`.
-- [ ] Run sparse retrieval for each.
+- [x] Choose 10 representative questions from `pilot14_50.jsonl`.
+- [x] Run sparse retrieval for each.
 
 ```bash
 .venv/bin/python scripts/demo_query.py \
@@ -1163,7 +1163,7 @@ Until a full Pilot14 retrieval evaluator is implemented, run query-level checks 
   --top-k 5
 ```
 
-- [ ] Run dense retrieval for each.
+- [x] Run dense retrieval for each.
 
 ```bash
 .venv/bin/python scripts/demo_query.py \
@@ -1173,7 +1173,7 @@ Until a full Pilot14 retrieval evaluator is implemented, run query-level checks 
   --top-k 5
 ```
 
-- [ ] Run hybrid retrieval for each.
+- [x] Run hybrid retrieval for each.
 
 ```bash
 .venv/bin/python scripts/demo_query.py \
@@ -1184,7 +1184,7 @@ Until a full Pilot14 retrieval evaluator is implemented, run query-level checks 
   --top-k 5
 ```
 
-- [ ] Record manual results in:
+- [x] Record manual results in:
 
 ```text
 results/pilot14/manual_retrieval_audit.md

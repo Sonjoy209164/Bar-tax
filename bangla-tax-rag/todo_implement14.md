@@ -1112,7 +1112,7 @@ Pass condition:
 
 This is not the real paper metric yet. It only proves the evaluation script can run.
 
-- [ ] Create a simple prediction/reference file from the annotated dataset.
+- [x] Create a simple prediction/reference file from the annotated dataset.
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -1136,7 +1136,7 @@ print(out)
 PY
 ```
 
-- [ ] Run placeholder eval.
+- [x] Run placeholder eval.
 
 ```bash
 .venv/bin/python scripts/run_eval.py \
@@ -1146,7 +1146,7 @@ PY
 
 Pass condition:
 
-- [ ] `results/pilot14/eval_placeholder/evaluation_summary.json` exists.
+- [x] `results/pilot14/eval_placeholder/evaluation_summary.json` exists.
 
 ### 14. Run Manual Baseline Retrieval Checks
 

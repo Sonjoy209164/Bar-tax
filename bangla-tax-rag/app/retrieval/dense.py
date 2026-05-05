@@ -13,6 +13,8 @@ from app.core.utils import ensure_directory
 from app.core.utils import extract_definition_target, extract_informative_query_terms, preprocess_query, tokenize_for_bm25
 from app.retrieval.filters import (
     authority_value,
+    chunk_has_rate_value_language,
+    chunk_navigation_noise_score,
     chunk_quality_score,
     filter_chunk_records,
     hit_has_amount_language,
@@ -20,6 +22,7 @@ from app.retrieval.filters import (
     hit_has_duration_language,
     hit_supports_eligibility,
     hit_looks_list_like,
+    infer_chunk_tax_year,
 )
 from app.retrieval.sparse import build_weighted_search_text, load_chunk_records_from_jsonl
 
@@ -213,7 +216,7 @@ def _to_retrieval_hit(chunk: ChunkRecord, score: float) -> RetrievalHit:
         subsection_id=chunk.subsection_id,
         chunk_type=chunk.chunk_type,
         authority_level=chunk.authority_level,
-        tax_year=chunk.tax_year,
+        tax_year=infer_chunk_tax_year(chunk),
         original_text=chunk.original_text,
         normalized_text=chunk.normalized_text,
         heading_path=chunk.heading_path,
@@ -235,6 +238,9 @@ def _apply_dense_query_boosts(
     chunk_tokens = set(tokenize_for_bm25(weighted_text))
     score = base_score
     score += chunk_quality_score(chunk.normalized_text) * 0.8
+    navigation_noise_score = chunk_navigation_noise_score(chunk)
+    if navigation_noise_score:
+        score -= navigation_noise_score * 3.2
     exact_heading_match = False
     if analyzed_query.subsection_id:
         if chunk.subsection_id == analyzed_query.subsection_id:
@@ -258,6 +264,10 @@ def _apply_dense_query_boosts(
     if analyzed_query.query_intent == "rate_lookup":
         if chunk.chunk_type == "table":
             score += 1.1
+        if chunk_has_rate_value_language(chunk):
+            score += 1.4
+        elif chunk.page_no <= 5 and chunk.chunk_type in {"section", "text"}:
+            score -= 2.8
         if any(phrase in searchable_text for phrase in ("করহার", "কর হার", "tax rate", "rate of tax", "tax payable")):
             score += 0.9
         else:
@@ -378,7 +388,7 @@ def _apply_dense_query_boosts(
         subsection_id=chunk.subsection_id,
         chunk_type=chunk.chunk_type,
         authority_level=chunk.authority_level,
-        tax_year=chunk.tax_year,
+        tax_year=infer_chunk_tax_year(chunk),
         original_text=chunk.original_text,
         normalized_text=chunk.normalized_text,
         heading_path=chunk.heading_path,

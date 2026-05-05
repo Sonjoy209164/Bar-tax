@@ -1200,32 +1200,147 @@ question_id | mode | gold_chunk_in_top_1 | gold_chunk_in_top_3 | gold_chunk_in_t
 
 These checkboxes are code tasks required to make the workflow truly paper-ready.
 
-- [ ] Add `scripts/run_retrieval_eval.py`.
-- [ ] It should read `pilot14_50.jsonl`.
-- [ ] It should run `sparse`, `dense`, and `hybrid`.
-- [ ] It should compute:
-  - [ ] Evidence Hit@1
-  - [ ] Evidence Hit@3
-  - [ ] Evidence Hit@5
-  - [ ] MRR
-  - [ ] Tax-Year Accuracy
-  - [ ] Wrong-Year Retrieval Rate
-- [ ] It should write:
-  - [ ] `results/pilot14/retrieval_eval_50.json`
-  - [ ] `results/pilot14/retrieval_eval_50.md`
+- [x] Add `scripts/run_retrieval_eval.py`.
+- [x] It should read `pilot14_50.jsonl`.
+- [x] It should run `sparse`, `dense`, and `hybrid`.
+- [x] It should compute:
+  - [x] Evidence Hit@1
+  - [x] Evidence Hit@3
+  - [x] Evidence Hit@5
+  - [x] MRR
+  - [x] Tax-Year Accuracy
+  - [x] Wrong-Year Retrieval Rate
+- [x] It should write:
+  - [x] `results/pilot14/retrieval_eval_50.json`
+  - [x] `results/pilot14/retrieval_eval_50.md`
 
 Do not pretend the current placeholder eval is enough. It is not.
 
+### 15b. Replace Dense Placeholder And Fix Retrieval Failures
+
+- [x] Replace dense placeholder with real transformer embeddings.
+- [x] Build FAISS-backed `indexes/pilot14/dense` using `BAAI/bge-m3`.
+- [x] Add document/title tax-year fallback for chunks whose `tax_year` metadata is missing.
+- [x] Add query tax-year selection for multi-year questions.
+- [x] Penalize early outline/table-of-contents style chunks.
+- [x] Improve Bangla amount/penalty query routing.
+- [x] Rerun retrieval tests.
+- [x] Rerun automated retrieval evaluation.
+
+Current Pilot14 retrieval result after Step 15b:
+
+| mode | Hit@1 | Hit@3 | Hit@5 | MRR | Tax-Year Acc@1 | Wrong-Year Rate@1 |
+|---|---:|---:|---:|---:|---:|---:|
+| sparse | 0.325 | 0.500 | 0.625 | 0.4329 | 0.8649 | 0.1351 |
+| dense real BGE-M3 | 0.300 | 0.575 | 0.625 | 0.4279 | 0.8649 | 0.1351 |
+| hybrid | 0.500 | 0.700 | 0.750 | 0.6029 | 0.8649 | 0.1351 |
+
+### 15c. Audit Wrong-Year Retrieval And Add Temporal Constraint Fixes
+
+- [x] Audit wrong-year rows from `results/pilot14/retrieval_eval_50.json`.
+- [x] Separate explicit query-year failures from gold-only temporal assumptions.
+- [x] Fix tax-year range parsing so `2025-2026 পরিপত্রে` does not become `2026-2027`.
+- [x] Fix multi-year selection so `2019-2020 থেকে ... 2022-2023 সালে` targets `2022-2023`.
+- [x] Add evaluator fields:
+  - [x] `query_tax_year`
+  - [x] `temporal_constraint_source`
+  - [x] `explicit_tax_year_accuracy_top1`
+  - [x] `explicit_wrong_year_retrieval_rate_top1`
+  - [x] `gold_only_wrong_year_retrieval_rate_top1`
+- [x] Rerun retrieval tests.
+- [x] Rerun automated retrieval evaluation.
+
+Current Pilot14 retrieval result after Step 15c:
+
+| mode | Hit@1 | Hit@3 | Hit@5 | MRR | Tax-Year Acc@1 | Explicit Wrong-Year@1 | Gold-Only Wrong-Year@1 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| sparse | 0.350 | 0.525 | 0.675 | 0.4629 | 0.9189 | 0.0000 | 0.4286 |
+| dense real BGE-M3 | 0.350 | 0.625 | 0.675 | 0.4779 | 0.9189 | 0.0000 | 0.4286 |
+| hybrid | 0.550 | 0.750 | 0.800 | 0.6529 | 0.9189 | 0.0000 | 0.4286 |
+
+Interpretation:
+
+- Explicit temporal retrieval is now clean on the 50-question pilot: `0.0000` explicit wrong-year rate.
+- Remaining wrong-year rows are gold-only temporal cases where the question omits a year but the annotation expects one. These are benchmark-design issues, not pure retrieval failures.
+- Before scaling, rewrite gold-only temporal questions to include a tax year or mark them as intentionally underspecified temporal-abstention cases.
+
+### 15d. Fix Gold-Only Temporal Questions Before Scaling
+
+- [x] Identify answerable questions with `expected_tax_year` but no visible query tax year.
+- [x] Rewrite the affected questions so the tax year is explicit:
+  - [x] `btax14_q0011`
+  - [x] `btax14_q0018`
+  - [x] `btax14_q0019`
+  - [x] `btax14_q0020`
+  - [x] `btax14_q0021`
+  - [x] `btax14_q0025`
+  - [x] `btax14_q0026`
+  - [x] `btax14_q0042`
+- [x] Update all Pilot14 working dataset files:
+  - [x] `data/btaxbench/pilot14/pilot14_50.jsonl`
+  - [x] `data/annotations/pilot14/shortlist_50_with_answers.jsonl`
+  - [x] `data/annotations/pilot14/annotator_a_working.jsonl`
+  - [x] `scripts/create_pilot14_shortlist.py`
+- [x] Save rewrite audit:
+  - [x] `results/pilot14/gold_only_temporal_question_fixes.md`
+- [x] Validate dataset after the fix:
+  - [x] `results/pilot14/validate_pilot14_50_after_temporal_fixes.json`
+- [x] Confirm `answerable_gold_only_count = 0`.
+- [x] Rerun retrieval tests.
+- [x] Rerun automated retrieval evaluation.
+
+Current Pilot14 retrieval result after Step 15d:
+
+| mode | Hit@1 | Hit@3 | Hit@5 | MRR | Tax-Year Acc@1 | Wrong-Year Rate@1 | Gold-Only Temporal Questions |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| sparse | 0.325 | 0.550 | 0.700 | 0.4617 | 1.0000 | 0.0000 | 0 |
+| dense real BGE-M3 | 0.350 | 0.600 | 0.700 | 0.4779 | 1.0000 | 0.0000 | 0 |
+| hybrid | 0.600 | 0.775 | 0.800 | 0.6883 | 1.0000 | 0.0000 | 0 |
+
+Interpretation:
+
+- The benchmark no longer hides tax-year constraints in answerable questions.
+- Temporal retrieval is now clean on the 50-question pilot: `0.0000` wrong-year rate for sparse, dense, and hybrid.
+- Remaining strict Hit@5 misses are passage/table/locality failures, not year-selection failures.
+
 ### 16. Expand From 50 To 150
 
-- [ ] Add questions 51-100.
-- [ ] Validate `pilot14_100.jsonl`.
+- [x] Add questions 51-100.
+- [x] Use the fixed temporal-question policy:
+  - [x] no answerable question may hide `expected_tax_year` only in metadata.
+  - [x] year-specific answerable questions must expose the tax year in the visible query.
+  - [x] deliberately underspecified temporal questions must be marked as abstention.
+- [x] Create reproducible 100-row builder:
+  - [x] `scripts/create_pilot14_100.py`
+- [x] Write Pilot14-100 files:
+  - [x] `data/btaxbench/pilot14/pilot14_100.jsonl`
+  - [x] `data/annotations/pilot14/shortlist_100_with_answers.jsonl`
+  - [x] `data/annotations/pilot14/annotator_a_working_100.jsonl`
+  - [x] `results/pilot14/shortlist_100_report.md`
+- [x] Validate `pilot14_100.jsonl`.
 
 ```bash
 .venv/bin/python scripts/validate_dataset.py \
   --dataset data/btaxbench/pilot14/pilot14_100.jsonl \
-  --chunks data/processed/btax14/chunks.jsonl | tee results/pilot14/validate_pilot14_100.json
+  --chunks data/processed/btax14/structured/gold_ready_chunks.jsonl | tee results/pilot14/validate_pilot14_100.json
 ```
+
+Current Pilot14-100 dataset result:
+
+| rows | answerable | abstention | valid rows | invalid rows | answerable hidden-year rows |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 80 | 20 | 100 | 0 | 0 |
+
+Question type distribution:
+
+| type | count |
+|---|---:|
+| `rate_lookup` | 42 |
+| `procedure` | 28 |
+| `definition` | 13 |
+| `calculation` | 10 |
+| `amendment` | 4 |
+| `authority_conflict` | 3 |
 
 - [ ] Add questions 101-150.
 - [ ] Validate `pilot14_150.jsonl`.
@@ -1233,7 +1348,7 @@ Do not pretend the current placeholder eval is enough. It is not.
 ```bash
 .venv/bin/python scripts/validate_dataset.py \
   --dataset data/btaxbench/pilot14/pilot14_150.jsonl \
-  --chunks data/processed/btax14/chunks.jsonl | tee results/pilot14/validate_pilot14_150.json
+  --chunks data/processed/btax14/structured/gold_ready_chunks.jsonl | tee results/pilot14/validate_pilot14_150.json
 ```
 
 Pass condition:

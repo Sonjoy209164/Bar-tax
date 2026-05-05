@@ -23,6 +23,8 @@ from app.core.utils import (
 )
 from app.retrieval.filters import (
     authority_value,
+    chunk_has_rate_value_language,
+    chunk_navigation_noise_score,
     chunk_quality_score,
     filter_chunk_records,
     hit_has_amount_language,
@@ -31,6 +33,7 @@ from app.retrieval.filters import (
     hit_has_duration_language,
     hit_supports_eligibility,
     hit_looks_list_like,
+    infer_chunk_tax_year,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,6 +217,9 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
     boosted_score = base_score
     quality_score = chunk_quality_score(chunk.normalized_text)
     boosted_score += quality_score * 1.2
+    navigation_noise_score = chunk_navigation_noise_score(chunk)
+    if navigation_noise_score:
+        boosted_score -= navigation_noise_score * 4.0
     searchable_text = f"{chunk.doc_title} {' '.join(chunk.heading_path)} {chunk.normalized_text}".lower()
     exact_heading_match = False
     if query_signals.section_reference:
@@ -272,6 +278,10 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
     ):
         boosted_score -= 1.0
     if query_signals.query_intent == "rate_lookup":
+        if chunk_has_rate_value_language(chunk):
+            boosted_score += 1.8
+        elif chunk.page_no <= 5 and chunk.chunk_type in {"section", "text"}:
+            boosted_score -= 3.2
         searchable_years = set(extract_tax_years(searchable_text))
         marked_years = set(extract_tax_years_near_marker(searchable_text))
         if query_signals.tax_year:
@@ -444,7 +454,7 @@ def _to_retrieval_hit(
         subsection_id=chunk.subsection_id,
         chunk_type=chunk.chunk_type,
         authority_level=chunk.authority_level,
-        tax_year=chunk.tax_year,
+        tax_year=infer_chunk_tax_year(chunk),
         original_text=chunk.original_text,
         normalized_text=chunk.normalized_text,
         heading_path=chunk.heading_path,

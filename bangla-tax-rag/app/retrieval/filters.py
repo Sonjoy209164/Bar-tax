@@ -1,7 +1,13 @@
 import re
 
 from app.core.schemas import ChunkRecord, QuerySignals, RetrievalHit
-from app.core.utils import extract_definition_target, extract_informative_query_terms, normalize_text, tokenize_for_bm25
+from app.core.utils import (
+    extract_definition_target,
+    extract_informative_query_terms,
+    extract_tax_years,
+    normalize_text,
+    tokenize_for_bm25,
+)
 
 
 AUTHORITY_RANK = {
@@ -12,6 +18,12 @@ AUTHORITY_RANK = {
     "statute": 4,
     "constitutional": 5,
 }
+RATE_VALUE_PATTERN = re.compile(
+    r"(%|শতাংশ|টাকা|taka|percent|মোট\s+আয়|মোট আয়|প্রথম\s+[0-9]|পরবর্তী\s+[0-9]|অবশিষ্ট)",
+    re.IGNORECASE,
+)
+OUTLINE_MARKER_PATTERN = re.compile(r"^\s*(?:\([ক-হa-z0-9ivxlcdm]+\)|[ক-হ]\)|[0-9]+[.)])", re.IGNORECASE)
+LEGAL_OUTLINE_PATTERN = re.compile(r"(ধারা\s+\d+|সংশোধন|সংযোজন|প্রতিস্থাপন|অধ্যাদেশ)", re.IGNORECASE)
 
 
 def deduplicate_results(results: list[dict[str, str | float]]) -> list[dict[str, str | float]]:
@@ -30,6 +42,57 @@ def authority_value(authority_level: str | None) -> int:
     if authority_level is None:
         return AUTHORITY_RANK["unknown"]
     return AUTHORITY_RANK.get(authority_level.lower(), AUTHORITY_RANK["unknown"])
+
+
+def infer_chunk_tax_year(chunk: ChunkRecord) -> str | None:
+    if chunk.tax_year:
+        return chunk.tax_year
+    for source_text in (
+        chunk.doc_title,
+        " ".join(chunk.heading_path),
+        chunk.normalized_text[:500],
+    ):
+        tax_years = extract_tax_years(source_text or "")
+        if tax_years:
+            return tax_years[0]
+    return None
+
+
+def chunk_matches_tax_year(chunk: ChunkRecord, tax_year: str | None) -> bool:
+    if not tax_year:
+        return True
+    return infer_chunk_tax_year(chunk) == tax_year
+
+
+def chunk_has_rate_value_language(chunk: ChunkRecord) -> bool:
+    searchable_text = normalize_text(f"{' '.join(chunk.heading_path)} {chunk.normalized_text}")
+    return bool(RATE_VALUE_PATTERN.search(searchable_text))
+
+
+def chunk_navigation_noise_score(chunk: ChunkRecord) -> float:
+    text = normalize_text(chunk.normalized_text)
+    heading_text = normalize_text(" ".join(chunk.heading_path))
+    searchable_text = f"{heading_text}\n{text}".lower()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return 1.0
+
+    outline_line_count = sum(1 for line in lines if OUTLINE_MARKER_PATTERN.match(normalize_text(line)))
+    legal_outline_hits = len(LEGAL_OUTLINE_PATTERN.findall(searchable_text))
+    has_rate_heading = any(term in searchable_text for term in ("করহার", "কর হার", "আয়কর হার", "আয়কর হার", "tax rate"))
+    has_rate_values = chunk_has_rate_value_language(chunk)
+    average_line_length = sum(len(line) for line in lines) / max(len(lines), 1)
+
+    score = 0.0
+    if any(term in searchable_text for term in ("সূচিপত্র", "বিষয়", "contents", "table of contents")):
+        score += 0.8
+    if chunk.page_no <= 5 and chunk.chunk_type in {"section", "text"} and has_rate_heading and not has_rate_values:
+        score += 0.75
+    if chunk.page_no <= 5 and legal_outline_hits >= 5 and outline_line_count >= 2:
+        score += 0.7
+    if len(lines) >= 5 and average_line_length <= 34 and outline_line_count >= 3 and not has_rate_values:
+        score += 0.45
+    return max(0.0, min(1.0, score))
 
 
 def chunk_quality_score(text: str) -> float:
@@ -77,7 +140,7 @@ def passes_metadata_filters(
     authority_level_min: str | None = None,
     chunk_type: str | None = None,
 ) -> bool:
-    if tax_year and chunk.tax_year != tax_year:
+    if tax_year and not chunk_matches_tax_year(chunk, tax_year):
         return False
     if doc_type and chunk.doc_type != doc_type:
         return False

@@ -2,7 +2,13 @@ from pathlib import Path
 
 from app.core.schemas import ChunkRecord
 from app.core.utils import preprocess_query, select_primary_section_markers
-from app.retrieval.filters import authority_value, chunk_quality_score, filter_chunk_records
+from app.retrieval.filters import (
+    authority_value,
+    chunk_navigation_noise_score,
+    chunk_quality_score,
+    filter_chunk_records,
+    infer_chunk_tax_year,
+)
 from app.retrieval.sparse import (
     apply_score_boosts,
     build_sparse_index,
@@ -156,6 +162,91 @@ def test_banglish_personal_tax_question_routes_to_rate_lookup() -> None:
     assert signals.query_intent == "rate_lookup"
     assert "স্বাভাবিক ব্যক্তি" in signals.normalized_query
     assert "tax payable" in signals.normalized_query
+
+
+def test_single_paripatra_year_maps_to_tax_year() -> None:
+    signals = preprocess_query("সরকারি দপ্তর বুক-ট্রান্সফার করলে ২০১৬ পরিপত্রে কী বলা হয়েছে?")
+
+    assert signals.tax_year == "2016-2017"
+
+
+def test_multi_year_query_prefers_target_year_over_from_year() -> None:
+    signals = preprocess_query(
+        "২০১৯-২০২০ থেকে রিটার্ন বাধ্যতামূলক কিন্তু কিছুই দাখিল করেননি-২০২২-২০২৩ সালে কী করা যাবে?"
+    )
+
+    assert signals.tax_year == "2022-2023"
+    assert signals.query_type == "general"
+
+
+def test_multi_year_query_without_from_marker_prefers_first_year() -> None:
+    signals = preprocess_query("২০২৪-২০২৫ ও ২০২৫-২০২৬ করবর্ষে ট্রাস্টের হার কখন ২৫% হবে?")
+
+    assert signals.tax_year == "2024-2025"
+
+
+def test_tax_year_range_before_paripatra_does_not_create_next_year() -> None:
+    signals = preprocess_query("২০২৫-২০২৬ পরিপত্রে প্রতিবন্ধী কর্মচারী নিয়োগে কী কর রেয়াত আছে?")
+
+    assert signals.tax_year == "2025-2026"
+
+
+def test_bangla_penalty_amount_question_routes_to_amount_lookup() -> None:
+    signals = preprocess_query("আন্তর্জাতিক লেনদেনের তথ্য না দিলে জরিমানার পরিমাণ কী হতে পারে?")
+
+    assert signals.query_type == "amount_lookup"
+    assert signals.query_intent == "amount_lookup"
+
+
+def test_tax_year_filter_uses_doc_title_when_chunk_tax_year_is_missing() -> None:
+    chunk = _chunk(
+        chunk_id="c-null-year",
+        doc_id="doc-2015",
+        doc_title="Income Tax Paripatra 2015-2016",
+        authority_level="national",
+        tax_year=None,
+        page_no=48,
+        section_id="107",
+        subsection_id=None,
+        chunk_type="text",
+        heading_path=["ধারা 107"],
+        normalized_text="আন্তর্জাতিক লেনদেনের অনধিক 2% পর্যন্ত জরিমানা আরোপ করতে পারবেন।",
+    )
+
+    assert infer_chunk_tax_year(chunk) == "2015-2016"
+    assert filter_chunk_records([chunk], tax_year="2015-2016") == [chunk]
+
+
+def test_navigation_noise_penalizes_early_outline_not_real_rate_table() -> None:
+    outline_chunk = _chunk(
+        chunk_id="outline",
+        doc_id="doc-2019",
+        doc_title="Income Tax Paripatra 2019-2020",
+        authority_level="national",
+        tax_year="2019-2020",
+        page_no=3,
+        section_id=None,
+        subsection_id=None,
+        chunk_type="section",
+        heading_path=["২০১৯-২০২০ কর বছরের জন্য প্রযোজ্য আয়কর হার"],
+        normalized_text="(ক) ব্যক্তি করদাতার জন্য সাধারণ করহার\n(খ) কোম্পানি ব্যতীত করহার\n(গ) কোম্পানির করহার",
+    )
+    table_chunk = _chunk(
+        chunk_id="rate-table",
+        doc_id="doc-2019",
+        doc_title="Income Tax Paripatra 2019-2020",
+        authority_level="national",
+        tax_year=None,
+        page_no=10,
+        section_id=None,
+        subsection_id=None,
+        chunk_type="table",
+        heading_path=["২০১৯-২০ কর বছরের জন্য প্রযোজ্য আয়কর হার"],
+        normalized_text="মোট আয়\nহার\nপ্রথম 250,000 টাকা পর্যন্ত শূন্য\nপরবর্তী 4,00,000 টাকা 10%",
+    )
+
+    assert chunk_navigation_noise_score(outline_chunk) > 0.5
+    assert chunk_navigation_noise_score(table_chunk) == 0.0
 
 
 def test_personal_labour_tax_question_is_eligibility() -> None:

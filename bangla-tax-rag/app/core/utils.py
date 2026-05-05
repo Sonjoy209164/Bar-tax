@@ -119,7 +119,7 @@ QUERY_TYPE_PATTERNS = {
         re.IGNORECASE,
     ),
     QueryType.AMOUNT_LOOKUP: re.compile(
-        r"(threshold|amount|limit|maximum|minim(?:um)?|ceiling|floor|not more than|no more than|exceeds? taka|taka|lakh|crore)",
+        r"(threshold|amount|limit|maximum|minim(?:um)?|ceiling|floor|not more than|no more than|exceeds? taka|taka|lakh|crore|পরিমাণ|সীমা|সর্বোচ্চ|ন্যূনতম|অনধিক|জরিমানার\s+পরিমাণ|জরিমানার\s+সীমা)",
         re.IGNORECASE,
     ),
     QueryType.COUNT_LOOKUP: re.compile(
@@ -196,7 +196,31 @@ ENGLISH_STOPWORDS = {
     "what",
     "will",
 }
-BANGla_STOPWORDS = {"এ", "কি", "কী", "কি?", "কী?", "আমি", "আমার", "এর", "ও", "এবং"}
+BANGla_STOPWORDS = {
+    "এ",
+    "এই",
+    "কি",
+    "কী",
+    "কি?",
+    "কী?",
+    "আমি",
+    "আমার",
+    "এর",
+    "ও",
+    "এবং",
+    "না",
+    "হতে",
+    "হবে",
+    "হয়",
+    "হলে",
+    "দিলে",
+    "পারে",
+    "করে",
+    "করা",
+    "করতে",
+    "কীভাবে",
+    "কখন",
+}
 GENERIC_QUERY_TERMS = {
     "act",
     "amount",
@@ -231,6 +255,9 @@ GENERIC_QUERY_TERMS = {
     "which",
     "year",
     "years",
+    "করবর্ষে",
+    "করবছরে",
+    "সালে",
 }
 DOCUMENT_HEADER_PATTERN = re.compile(r"আয়কর\s+পররপত্র\s+20\d{2}\s*-\s*20\d{2}\s*\|\s*\d+", re.IGNORECASE)
 TABLE_HEADER_LINES = {
@@ -307,7 +334,41 @@ def normalize_query_text(text: str) -> str:
 def extract_tax_years(text: str) -> list[str]:
     normalized_text = normalize_text(text)
     matches = re.findall(r"\b(20\d{2}\s*[-–]\s*20\d{2})\b", normalized_text)
-    return list(dict.fromkeys(match.replace(" ", "") for match in matches))
+    normalized_matches = [match.replace(" ", "") for match in matches]
+    for match in re.finditer(r"\b(20\d{2})\b(?=[^\n]{0,24}(?:পরিপত্র|circular|paripatra))", normalized_text, flags=re.IGNORECASE):
+        preceding_text = normalized_text[max(match.start() - 3, 0) : match.start()]
+        following_text = normalized_text[match.end() : min(match.end() + 3, len(normalized_text))]
+        if "-" in preceding_text or "–" in preceding_text or "-" in following_text or "–" in following_text:
+            continue
+        start_year = int(match.group(1))
+        normalized_matches.append(f"{start_year}-{start_year + 1}")
+    return list(dict.fromkeys(normalized_matches))
+
+
+def select_query_tax_year(text: str) -> str | None:
+    normalized_text = normalize_text(text)
+    tax_years = extract_tax_years(normalized_text)
+    if not tax_years:
+        return None
+    if len(tax_years) == 1:
+        return tax_years[0]
+
+    scored_years: list[tuple[float, str]] = []
+    for position, tax_year in enumerate(tax_years):
+        match = re.search(re.escape(tax_year), normalized_text)
+        if not match:
+            scored_years.append((float(position), tax_year))
+            continue
+        start = max(match.start() - 36, 0)
+        end = min(match.end() + 36, len(normalized_text))
+        window = normalized_text[start:end].lower()
+        score = -float(position) * 0.01
+        if any(marker in window for marker in ("করবর্ষে", "কর বছরে", "সালে", "for tax year", "in tax year")):
+            score += 2.0
+        if any(marker in window for marker in ("থেকে", "হইতে", "from", "since")):
+            score -= 1.5
+        scored_years.append((score, tax_year))
+    return max(scored_years, key=lambda item: item[0])[1]
 
 
 def extract_tax_years_near_marker(text: str) -> list[str]:
@@ -487,6 +548,11 @@ def extract_informative_query_terms(text: str, query_type: str | QueryType | Non
         if token in GENERIC_QUERY_TERMS:
             continue
         informative_terms.add(token)
+        if re.search(r"[\u0980-\u09ff]", token):
+            for suffix in ("গুলোর", "গুলির", "দের", "টির", "এর", "ের", "র"):
+                if token.endswith(suffix) and len(token) > len(suffix) + 2:
+                    informative_terms.add(token[: -len(suffix)])
+                    break
     if query_type == QueryType.ELIGIBILITY:
         normalized_text = normalize_text(text).lower()
         for phrase in (
@@ -616,7 +682,7 @@ def preprocess_query(query: str) -> QuerySignals:
     normalized_query = normalize_query_text(query)
     query_type = detect_query_type(normalized_query)
     taxonomy = build_query_taxonomy_decision(query_type)
-    tax_years = extract_tax_years(normalized_query)
+    tax_year = select_query_tax_year(normalized_query)
     section_ids = extract_query_section_references(normalized_query)
     appendix_ids = extract_appendix_ids(normalized_query)
     sro_ids = extract_sro_ids(normalized_query)
@@ -637,7 +703,7 @@ def preprocess_query(query: str) -> QuerySignals:
         original_query=query,
         normalized_query=normalized_query,
         rewritten_query=rewrite_query(normalized_query, query_type),
-        tax_year=tax_years[0] if tax_years else None,
+        tax_year=tax_year,
         section_reference=section_ids[0] if section_ids else None,
         section_id=section_id,
         subsection_id=subsection_id,

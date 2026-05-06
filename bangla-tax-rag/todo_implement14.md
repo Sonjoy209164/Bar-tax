@@ -1342,8 +1342,104 @@ Question type distribution:
 | `amendment` | 4 |
 | `authority_conflict` | 3 |
 
-- [ ] Add questions 101-150.
-- [ ] Validate `pilot14_150.jsonl`.
+### 16b. Run Retrieval Evaluation On Pilot14-100 And Audit Failures
+
+- [x] Run sparse, dense, and hybrid retrieval on `pilot14_100.jsonl`.
+- [x] Write automated retrieval reports:
+  - [x] `results/pilot14/retrieval_eval_100.json`
+  - [x] `results/pilot14/retrieval_eval_100.md`
+- [x] Write failure audit:
+  - [x] `results/pilot14/retrieval_failure_audit_100.json`
+  - [x] `results/pilot14/retrieval_failure_audit_100.md`
+- [x] Confirm answerable temporal behavior:
+  - [x] `wrong_year_retrieval_rate_top1 = 0.0000`
+  - [x] `gold_only_tax_year_questions = 0`
+
+Current Pilot14-100 retrieval result:
+
+| mode | Hit@1 | Hit@3 | Hit@5 | MRR | Tax-Year Acc@1 | Wrong-Year Rate@1 | Doc Hit@5 | Page Hit@5 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| sparse | 0.2625 | 0.5000 | 0.5875 | 0.3902 | 1.0000 | 0.0000 | 0.9375 | 0.6875 |
+| dense real BGE-M3 | 0.3625 | 0.5750 | 0.6500 | 0.4738 | 1.0000 | 0.0000 | 0.9625 | 0.8125 |
+| hybrid | 0.5625 | 0.7625 | 0.7875 | 0.6633 | 1.0000 | 0.0000 | 0.9750 | 0.8250 |
+
+Hybrid strict Hit@5 miss breakdown:
+
+| category | count |
+|---|---:|
+| `same_doc_wrong_section` | 9 |
+| `same_page_wrong_chunk` | 3 |
+| `adjacent_page_near_miss` | 3 |
+| `wrong_doc_top5` | 2 |
+| `wrong_year_top1` | 0 |
+
+Interpretation:
+
+- The 100-question expansion did not break temporal behavior.
+- Hybrid is still strongest and remains close to the 50-question pilot result.
+- The main bottleneck is evidence locality over tables, examples, repeated appendix text, and near-duplicate legal passages.
+- Before adding questions 101-150, repair or explicitly tag the 17 hybrid strict Hit@5 misses.
+
+### 16c. Repair High-Priority Pilot14-100 Retrieval Failures
+
+- [x] Inspect the 17 hybrid strict Hit@5 misses from Step 16b.
+- [x] Fix canonical paripatra tax-year inference so example years inside a document do not override the document tax year.
+- [x] Add Bangla/Banglish query handling for:
+  - [x] clarification/spষ্টীকরণ questions
+  - [x] surcharge questions
+  - [x] international transaction penalty questions
+  - [x] Bangla eligibility yes/no questions
+- [x] Penalize table-of-contents/navigation chunks in final hybrid ranking.
+- [x] Downweight late appendix/statute duplicate material unless the query explicitly asks for appendix/SRO/schedule evidence.
+- [x] Expand same-page neighboring chunks for table/example/procedure evidence packs.
+- [x] Fill hybrid evidence packs to `final_top_k` with the best remaining supportive candidates.
+- [x] Add regression tests for the temporal and Bangla-query fixes.
+- [x] Rerun Pilot14-100 retrieval evaluation.
+- [x] Regenerate failure audit:
+  - [x] `results/pilot14/retrieval_eval_100.json`
+  - [x] `results/pilot14/retrieval_eval_100.md`
+  - [x] `results/pilot14/retrieval_failure_audit_100.json`
+  - [x] `results/pilot14/retrieval_failure_audit_100.md`
+
+Current Pilot14-100 retrieval result after Step 16c:
+
+| mode | Hit@1 | Hit@3 | Hit@5 | MRR | Tax-Year Acc@1 | Wrong-Year Rate@1 | Doc Hit@5 | Page Hit@5 | Adjacent Page Hit@5 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| sparse | 0.3375 | 0.5875 | 0.7625 | 0.4900 | 1.0000 | 0.0000 | 0.9750 | 0.7875 | 0.8125 |
+| dense real BGE-M3 | 0.3875 | 0.6125 | 0.7125 | 0.5065 | 1.0000 | 0.0000 | 0.9750 | 0.7875 | 0.9000 |
+| hybrid | 0.6375 | 0.7875 | 0.8875 | 0.7265 | 1.0000 | 0.0000 | 0.9875 | 0.9000 | 0.9375 |
+
+Hybrid strict Hit@5 miss breakdown after Step 16c:
+
+| category | count |
+|---|---:|
+| `same_doc_wrong_section` | 4 |
+| `same_page_wrong_chunk` | 1 |
+| `adjacent_page_near_miss` | 3 |
+| `wrong_doc_top5` | 1 |
+| `wrong_year_top1` | 0 |
+
+Interpretation:
+
+- Hybrid crossed the 80% gate: strict Hit@5 improved from `0.7875` to `0.8875`.
+- Hybrid strict hits improved from `63/80` to `71/80`.
+- Wrong-year retrieval remains `0.0000`.
+- Remaining misses are mostly evidence-locality and annotation-granularity cases, so it is now reasonable to continue scaling to 150 while keeping a failure-audit loop.
+
+### 16d. Expand Pilot14-100 To Pilot14-150 And Audit Failures
+
+- [x] Add questions 101-150.
+- [x] Use the same fixed temporal-question policy from Step 16:
+  - [x] answerable year-specific questions expose the tax year in the visible query.
+  - [x] deliberately underspecified/future/out-of-scope questions are marked as abstention.
+- [x] Create reproducible 150-row builder:
+  - [x] `scripts/create_pilot14_150.py`
+- [x] Write Pilot14-150 files:
+  - [x] `data/btaxbench/pilot14/pilot14_150.jsonl`
+  - [x] `data/annotations/pilot14/shortlist_150_with_answers.jsonl`
+  - [x] `data/annotations/pilot14/annotator_a_working_150.jsonl`
+  - [x] `results/pilot14/shortlist_150_report.md`
+- [x] Validate `pilot14_150.jsonl`.
 
 ```bash
 .venv/bin/python scripts/validate_dataset.py \
@@ -1353,18 +1449,76 @@ Question type distribution:
 
 Pass condition:
 
-- [ ] `pilot14_150.jsonl` has at least 150 valid rows.
-- [ ] at least 30 rows have `should_abstain: true` or conflict/ambiguous notes.
+- [x] `pilot14_150.jsonl` has at least 150 valid rows.
+- [x] at least 30 rows have `should_abstain: true` or conflict/ambiguous notes.
+
+Current Pilot14-150 dataset result:
+
+| rows | answerable | abstention | valid rows | invalid rows | answerable hidden-year rows |
+|---:|---:|---:|---:|---:|---:|
+| 150 | 120 | 30 | 150 | 0 | 0 |
+
+Question type distribution:
+
+| type | count |
+|---|---:|
+| `rate_lookup` | 59 |
+| `procedure` | 51 |
+| `definition` | 20 |
+| `calculation` | 12 |
+| `amendment` | 5 |
+| `authority_conflict` | 3 |
+
+- [x] Run sparse, dense, and hybrid retrieval on `pilot14_150.jsonl`.
+- [x] Repair the new high-priority temporal failure:
+  - [x] explicit chunk tax-year headings such as `2026-2027 করবর্ষের` now override the document title year when filtering.
+  - [x] example-year metadata without a tax-year marker still falls back to the paripatra document year.
+- [x] Add regression test for future tax-year headings inside a current-year paripatra.
+- [x] Add reusable failure-audit script:
+  - [x] `scripts/audit_retrieval_failures.py`
+- [x] Write automated retrieval reports:
+  - [x] `results/pilot14/retrieval_eval_150.json`
+  - [x] `results/pilot14/retrieval_eval_150.md`
+- [x] Write failure audit:
+  - [x] `results/pilot14/retrieval_failure_audit_150.json`
+  - [x] `results/pilot14/retrieval_failure_audit_150.md`
+
+Current Pilot14-150 retrieval result after Step 16d:
+
+| mode | Hit@1 | Hit@3 | Hit@5 | MRR | Tax-Year Acc@1 | Wrong-Year Rate@1 | Doc Hit@5 | Page Hit@5 | Adjacent Page Hit@5 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| sparse | 0.3583 | 0.6083 | 0.7333 | 0.4988 | 1.0000 | 0.0000 | 0.9833 | 0.7583 | 0.7917 |
+| dense real BGE-M3 | 0.4167 | 0.6000 | 0.7000 | 0.5192 | 1.0000 | 0.0000 | 0.9833 | 0.7917 | 0.9000 |
+| hybrid | 0.6333 | 0.7667 | 0.8583 | 0.7119 | 1.0000 | 0.0000 | 0.9917 | 0.8667 | 0.9083 |
+
+Hybrid strict Hit@5 miss breakdown after Step 16d:
+
+| category | count |
+|---|---:|
+| `same_doc_wrong_section` | 10 |
+| `adjacent_page_near_miss` | 5 |
+| `same_page_wrong_chunk` | 1 |
+| `wrong_doc_top5` | 1 |
+| `no_results` | 0 |
+| `wrong_year_top1` | 0 |
+
+Interpretation:
+
+- Pilot14 now meets the 150-row pilot threshold with 30 abstention/ambiguous cases.
+- Hybrid remains strongest at `0.8583` strict Evidence Hit@5 and `1.0000` Tax-Year Accuracy@1.
+- Scaling from 100 to 150 lowered hybrid Hit@5 from `0.8875` to `0.8583`; this is acceptable because the added questions are harder, but it exposes the next bottleneck: exact evidence locality within long paripatras.
+- The new future-year failure was real and is fixed: 2026-2027/2027-2028 chunks inside the 2025-2026 paripatra are no longer filtered out by document-title year.
+- Next retrieval work should focus on parent/neighbor evidence expansion and page/section locality, not broad tax-year filtering.
 
 ### 17. Freeze Pilot14 v0.1
 
-- [ ] Copy the final validated pilot.
+- [x] Copy the final validated pilot.
 
 ```bash
 cp data/btaxbench/pilot14/pilot14_150.jsonl data/btaxbench/pilot14/btaxbench_pilot14_v0_1.jsonl
 ```
 
-- [ ] Create checksum.
+- [x] Create checksum.
 
 ```bash
 sha256sum data/btaxbench/pilot14/btaxbench_pilot14_v0_1.jsonl \
@@ -1372,7 +1526,7 @@ sha256sum data/btaxbench/pilot14/btaxbench_pilot14_v0_1.jsonl \
   data/metadata/corpus_manifest_btax14.csv | tee results/pilot14/pilot14_v0_1_checksums.txt
 ```
 
-- [ ] Write a short freeze note.
+- [x] Write a short freeze note.
 
 ```text
 results/pilot14/freeze_note_v0_1.md
@@ -1380,15 +1534,173 @@ results/pilot14/freeze_note_v0_1.md
 
 Freeze note must include:
 
-- [ ] number of documents
-- [ ] number of chunks
-- [ ] number of QA pairs
-- [ ] number of answerable rows
-- [ ] number of abstention/conflict/ambiguous rows
-- [ ] known parser limitations
-- [ ] known evaluation limitations
+- [x] number of documents
+- [x] number of chunks
+- [x] number of QA pairs
+- [x] number of answerable rows
+- [x] number of abstention/conflict/ambiguous rows
+- [x] known parser limitations
+- [x] known evaluation limitations
 
-### 18. Current JSONL Inventory Check
+Frozen Pilot14 v0.1 snapshot:
+
+| item | count |
+|---|---:|
+| official documents | 14 |
+| indexed chunks | 7,985 |
+| QA pairs | 150 |
+| answerable rows | 120 |
+| abstention / ambiguous / out-of-scope rows | 30 |
+
+Frozen files:
+
+- `data/btaxbench/pilot14/btaxbench_pilot14_v0_1.jsonl`
+- `results/pilot14/pilot14_v0_1_checksums.txt`
+- `results/pilot14/freeze_note_v0_1.md`
+
+Freeze rule:
+
+- Do not mutate `btaxbench_pilot14_v0_1.jsonl`.
+- Future dataset edits should become `v0.2`.
+
+### 18. Build and Evaluate TaxTrail v0.1
+
+- [x] Implement guarded TaxTrail structure-aware retrieval:
+  - [x] hybrid sparse+dense seed retrieval
+  - [x] tax-year filtering before expansion
+  - [x] same page / adjacent page expansion
+  - [x] same section and same heading expansion
+  - [x] document-level legal-term fallback
+  - [x] guarded top-four hybrid preservation
+  - [x] high-confidence structure replacement threshold
+- [x] Add `taxtrail` as an evaluation retrieval mode.
+- [x] Add API/schema support for `taxtrail`.
+- [x] Compare sparse, dense, hybrid, and TaxTrail on frozen Pilot14 v0.1.
+- [x] Refresh TaxTrail failure audit.
+- [x] Add citation faithfulness scaffold.
+- [x] Write TaxTrail method note.
+
+Commands run:
+
+```bash
+.venv/bin/python scripts/run_retrieval_eval.py \
+  --dataset data/btaxbench/pilot14/btaxbench_pilot14_v0_1.jsonl \
+  --index-dir indexes/pilot14/sparse \
+  --dense-index-dir indexes/pilot14/dense \
+  --output-json results/pilot14/retrieval_eval_150_taxtrail.json \
+  --output-md results/pilot14/retrieval_eval_150_taxtrail.md \
+  --top-k 5 \
+  --modes taxtrail
+
+.venv/bin/python scripts/compare_retrieval_reports.py \
+  --reports results/pilot14/retrieval_eval_150.json results/pilot14/retrieval_eval_150_taxtrail.json \
+  --output-json results/pilot14/retrieval_eval_150_taxtrail_comparison.json \
+  --output-md results/pilot14/retrieval_eval_150_taxtrail_comparison.md
+
+.venv/bin/python scripts/audit_retrieval_failures.py \
+  --input-json results/pilot14/retrieval_eval_150_taxtrail.json \
+  --output-json results/pilot14/retrieval_failure_audit_150_taxtrail.json \
+  --output-md results/pilot14/retrieval_failure_audit_150_taxtrail.md \
+  --priority-mode taxtrail
+
+.venv/bin/python scripts/run_citation_faithfulness_eval.py \
+  --dataset data/btaxbench/pilot14/btaxbench_pilot14_v0_1.jsonl \
+  --chunks data/processed/btax14/chunks.jsonl \
+  --output-json results/pilot14/citation_faithfulness_v0_1.json \
+  --output-md results/pilot14/citation_faithfulness_v0_1.md
+```
+
+Current Pilot14 v0.1 retrieval comparison:
+
+| mode | Hit@1 | Hit@3 | Hit@5 | MRR | Tax-Year Acc@1 | Wrong-Year@1 | Page Hit@5 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| sparse | 0.3583 | 0.6083 | 0.7333 | 0.4988 | 1.0000 | 0.0000 | 0.7583 |
+| dense real BGE-M3 | 0.4167 | 0.6000 | 0.7000 | 0.5192 | 1.0000 | 0.0000 | 0.7917 |
+| hybrid | 0.6333 | 0.7667 | 0.8583 | 0.7119 | 1.0000 | 0.0000 | 0.8667 |
+| TaxTrail guarded | 0.6083 | 0.7500 | 0.8917 | 0.7037 | 1.0000 | 0.0000 | 0.9000 |
+
+Current citation faithfulness scaffold:
+
+| metric | value |
+|---|---:|
+| citation support precision | 0.8959 |
+| citation support recall | 0.8417 |
+| citation support F1 | 0.8679 |
+| unsupported claim rate | 0.1041 |
+| abstention accuracy | 0.9667 |
+
+Important interpretation:
+
+- TaxTrail improves strict Evidence Hit@5 over hybrid by `+0.0334`.
+- TaxTrail improves evidence page locality, from Page Hit@5 `0.8667` to `0.9000`.
+- TaxTrail does not improve Hit@1 or MRR yet.
+- The contribution is evidence coverage under legal structure constraints, not first-rank precision.
+- Runtime is currently high and should be optimized with cached query embeddings or batched dense evaluation.
+
+Novelty and theory note:
+
+- Current architectural novelty:
+  - `TaxTrail` is guarded structure-aware legal evidence path retrieval, not a plain Bangla tax chatbot.
+  - It combines hybrid lexical-semantic retrieval with legal-tax constraints: tax year, document, page, section, heading, adjacent chunks, and citation-ready evidence.
+  - The key design insight is the guard: naive structure expansion can hurt retrieval, while guarded expansion preserves high-confidence hybrid evidence and only admits structure-expanded candidates above a confidence threshold.
+- Current theoretical framing:
+  - Model the corpus as a legal evidence graph `G = (V, E)`.
+  - Nodes `V`: tax years, documents, pages, sections, headings, chunks, tables, citation/evidence units.
+  - Edges `E`: `contains`, `adjacent_to`, `same_section`, `same_heading`, `mentions_reference`, `tax_year_valid`.
+  - Retrieval objective:
+
+```text
+argmax EvidenceScore(q, v)
+subject to:
+  TaxYear(v) = TaxYear(q)
+  Authority(v) >= required authority
+  SupportRisk(v) <= threshold
+```
+
+- Guarded TaxTrail rule:
+
+```text
+TaxTrail(q) = Top_m(Hybrid(q)) union {v in Expand_G(Hybrid(q)) : score(q, v) >= tau}
+
+Current pilot setting:
+  m = 4
+  tau = 12.0
+```
+
+- Best paper claim:
+  - We introduce `TaxTrail`, a guarded evidence-path retrieval architecture for legal-tax RAG over noisy Bangla government PDFs.
+  - TaxTrail treats the parsed corpus as a constrained legal evidence graph and expands retrieval through tax-year, page, section, and heading structure.
+  - Unlike naive graph expansion, TaxTrail preserves top hybrid evidence and admits expanded evidence only under a confidence guard.
+  - On Pilot14 v0.1, TaxTrail improves strict Evidence Hit@5 from `0.8583` to `0.8917` while keeping Wrong-Year@1 at `0.0000`.
+- What is not yet proven:
+  - No final theorem yet.
+  - The threshold `tau = 12.0` is pilot-tuned and must be validated on a dev split.
+  - The current result shows an algorithmic/architectural contribution, not a full theoretical guarantee.
+- Required next experiments to make the novelty stronger:
+  - [ ] dev/test split to avoid label leakage.
+  - [ ] ablation: hybrid vs unguarded TaxTrail vs guarded TaxTrail.
+  - [ ] ablation: with/without tax-year constraint.
+  - [ ] ablation: with/without page/section/heading expansion.
+  - [ ] threshold curve over `tau`.
+  - [ ] prove or state prefix-preservation property: top `m` baseline evidence is unchanged by TaxTrail.
+  - [ ] report precision/coverage tradeoff: TaxTrail improves Hit@5 but currently lowers Hit@1/MRR.
+
+Artifacts:
+
+- `app/retrieval/taxtrail.py`
+- `scripts/compare_retrieval_reports.py`
+- `scripts/run_citation_faithfulness_eval.py`
+- `results/pilot14/retrieval_eval_150_taxtrail.json`
+- `results/pilot14/retrieval_eval_150_taxtrail.md`
+- `results/pilot14/retrieval_eval_150_taxtrail_comparison.json`
+- `results/pilot14/retrieval_eval_150_taxtrail_comparison.md`
+- `results/pilot14/retrieval_failure_audit_150_taxtrail.json`
+- `results/pilot14/retrieval_failure_audit_150_taxtrail.md`
+- `results/pilot14/citation_faithfulness_v0_1.json`
+- `results/pilot14/citation_faithfulness_v0_1.md`
+- `results/pilot14/taxtrail_v0_1_method_note.md`
+
+### 19. Current JSONL Inventory Check
 
 ```bash
 wc -l data/processed/*.jsonl data/agentic_store/*/chunks/*.jsonl 2>/dev/null

@@ -5,6 +5,7 @@ from app.core.utils import (
     extract_definition_target,
     extract_informative_query_terms,
     extract_tax_years,
+    extract_tax_years_near_marker,
     normalize_text,
     tokenize_for_bm25,
 )
@@ -24,6 +25,11 @@ RATE_VALUE_PATTERN = re.compile(
 )
 OUTLINE_MARKER_PATTERN = re.compile(r"^\s*(?:\([ক-হa-z0-9ivxlcdm]+\)|[ক-হ]\)|[0-9]+[.)])", re.IGNORECASE)
 LEGAL_OUTLINE_PATTERN = re.compile(r"(ধারা\s+\d+|সংশোধন|সংযোজন|প্রতিস্থাপন|অধ্যাদেশ)", re.IGNORECASE)
+LATE_REFERENCE_PATTERN = re.compile(
+    r"(পরিশিষ্ট|তফসিল|আয়কর\s+আইন,\s*20\d{2}|আয়কর\s+আইন,\s*20\d{2}|অনুচ্ছেদ-[ক-হ]|schedule|appendix)",
+    re.IGNORECASE,
+)
+REFERENCE_QUERY_PATTERN = re.compile(r"(পরিশিষ্ট|তফসিল|appendix|schedule|sro|এস\.?\s*আর\.?\s*ও\.?)", re.IGNORECASE)
 
 
 def deduplicate_results(results: list[dict[str, str | float]]) -> list[dict[str, str | float]]:
@@ -45,10 +51,20 @@ def authority_value(authority_level: str | None) -> int:
 
 
 def infer_chunk_tax_year(chunk: ChunkRecord) -> str | None:
+    chunk_marked_tax_years = extract_tax_years_near_marker(
+        f"{' '.join(chunk.heading_path)} {chunk.normalized_text[:500]}"
+    )
+    if chunk.tax_year and chunk.tax_year in chunk_marked_tax_years:
+        return chunk.tax_year
+    title_tax_years = extract_tax_years(chunk.doc_title or "")
+    title_text = normalize_text(chunk.doc_title or "").lower()
+    if title_tax_years and ("paripatra" in title_text or "পরিপত্র" in title_text):
+        return title_tax_years[0]
     if chunk.tax_year:
         return chunk.tax_year
+    if title_tax_years:
+        return title_tax_years[0]
     for source_text in (
-        chunk.doc_title,
         " ".join(chunk.heading_path),
         chunk.normalized_text[:500],
     ):
@@ -69,6 +85,32 @@ def chunk_has_rate_value_language(chunk: ChunkRecord) -> bool:
     return bool(RATE_VALUE_PATTERN.search(searchable_text))
 
 
+def query_requests_reference_material(query_text: str | None) -> bool:
+    if not query_text:
+        return False
+    return bool(REFERENCE_QUERY_PATTERN.search(normalize_text(query_text)))
+
+
+def looks_like_late_reference_material(
+    *,
+    doc_title: str | None,
+    page_no: int,
+    heading_path: list[str] | None,
+    normalized_text: str | None,
+    chunk_type: str | None = None,
+    appendix_id: str | None = None,
+) -> bool:
+    title_text = normalize_text(doc_title or "").lower()
+    if "paripatra" not in title_text and "পরিপত্র" not in title_text:
+        return False
+    if page_no < 120 and not appendix_id and chunk_type != "appendix":
+        return False
+    searchable_text = normalize_text(f"{' '.join(heading_path or [])} {normalized_text or ''}")
+    if appendix_id or chunk_type == "appendix":
+        return True
+    return bool(LATE_REFERENCE_PATTERN.search(searchable_text[:700]))
+
+
 def chunk_navigation_noise_score(chunk: ChunkRecord) -> float:
     text = normalize_text(chunk.normalized_text)
     heading_text = normalize_text(" ".join(chunk.heading_path))
@@ -84,8 +126,10 @@ def chunk_navigation_noise_score(chunk: ChunkRecord) -> float:
     average_line_length = sum(len(line) for line in lines) / max(len(lines), 1)
 
     score = 0.0
-    if any(term in searchable_text for term in ("সূচিপত্র", "বিষয়", "contents", "table of contents")):
+    if any(term in searchable_text for term in ("সূচিপত্র", "সূচীপত্র", "বিষয়", "contents", "table of contents")):
         score += 0.8
+    if chunk.page_no <= 6 and any(term in searchable_text for term in ("সূচিপত্র", "সূচীপত্র", "ক্রমিক", "বিষয়", "পৃষ্ঠ", "শিরোনাম")):
+        score += 0.7
     if chunk.page_no <= 5 and chunk.chunk_type in {"section", "text"} and has_rate_heading and not has_rate_values:
         score += 0.75
     if chunk.page_no <= 5 and legal_outline_hits >= 5 and outline_line_count >= 2:
@@ -215,7 +259,7 @@ def has_exact_section_heading_match(hit: RetrievalHit, section_reference: str) -
 
 
 AMOUNT_PATTERN = re.compile(
-    r"(taka|crore|lakh|percent|%|threshold|limit|not more than|no more than|exceeds?|minimum|maximum)",
+    r"(taka|crore|lakh|percent|%|threshold|limit|not more than|no more than|exceeds?|minimum|maximum|টাকা|লক্ষ|লাখ|কোটি|শতাংশ|সীমা|ন্যূনতম|অনধিক|অধিক|পরিমাণ|হার)",
     re.IGNORECASE,
 )
 DURATION_PATTERN = re.compile(
@@ -228,7 +272,7 @@ DATE_PATTERN = re.compile(
 )
 LIST_PATTERN = re.compile(r"(\([a-z]\)|\([ivx]+\)|namely|following classes|following items|following incomes|first year|second year)", re.IGNORECASE)
 ELIGIBILITY_PATTERN = re.compile(
-    r"(chargeable to tax|taxable income|tax exemption|employee|employment|income from employment|salary|salaried|individual|resident|assessee|day labourer|day laborer|worker|labour|labor|wage|wages)",
+    r"(chargeable to tax|taxable income|tax exemption|employee|employment|income from employment|salary|salaried|individual|resident|assessee|day labourer|day laborer|worker|labour|labor|wage|wages|প্রাপ্য|সুবিধা|কর\s+অব্যাহতি|হ্রাসকৃত\s+করহার|বাধ্যবাধকতা|বাধ্য)",
     re.IGNORECASE,
 )
 

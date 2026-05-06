@@ -34,6 +34,8 @@ from app.retrieval.filters import (
     hit_supports_eligibility,
     hit_looks_list_like,
     infer_chunk_tax_year,
+    looks_like_late_reference_material,
+    query_requests_reference_material,
 )
 
 logger = logging.getLogger(__name__)
@@ -242,6 +244,20 @@ def apply_score_boosts(chunk: ChunkRecord, query_signals: QuerySignals, base_sco
             boosted_score -= 1.5
     if query_signals.tax_year and chunk.tax_year == query_signals.tax_year:
         boosted_score += 1.5
+    if query_signals.tax_year and infer_chunk_tax_year(chunk) == query_signals.tax_year:
+        boosted_score += 1.2
+    if looks_like_late_reference_material(
+        doc_title=chunk.doc_title,
+        page_no=chunk.page_no,
+        heading_path=chunk.heading_path,
+        normalized_text=chunk.normalized_text,
+        chunk_type=chunk.chunk_type,
+        appendix_id=chunk.appendix_id,
+    ):
+        if query_requests_reference_material(query_signals.normalized_query):
+            boosted_score += 0.6
+        else:
+            boosted_score -= 4.6
     if query_signals.appendix_reference and chunk.appendix_id == query_signals.appendix_reference:
         boosted_score += 1.5
     if query_signals.sro_reference and chunk.sro_id == query_signals.sro_reference:

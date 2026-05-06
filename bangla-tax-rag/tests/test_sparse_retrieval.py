@@ -196,6 +196,23 @@ def test_bangla_penalty_amount_question_routes_to_amount_lookup() -> None:
 
     assert signals.query_type == "amount_lookup"
     assert signals.query_intent == "amount_lookup"
+    assert "international transactions" in (signals.rewritten_query or "")
+
+
+def test_bangla_surcharge_question_is_rate_not_definition() -> None:
+    signals = preprocess_query("২০২৪-২০২৫ করবর্ষের সারচার্জে তামাকজাত পণ্য প্রস্তুতকারকের জন্য অতিরিক্ত কী বলা হয়েছে?")
+
+    assert signals.tax_year == "2024-2025"
+    assert signals.query_type == "rate_lookup"
+    assert signals.query_intent == "rate_lookup"
+    assert "surcharge" in (signals.rewritten_query or "")
+
+
+def test_bangla_exemption_yes_no_question_is_eligibility() -> None:
+    signals = preprocess_query("রিটার্ন দাখিলে বাধ্য করদাতা রিটার্ন না দিলে কর অব্যাহতি বা হ্রাসকৃত করহার পাবে কি?")
+
+    assert signals.query_type == "eligibility"
+    assert signals.query_intent == "eligibility"
 
 
 def test_tax_year_filter_uses_doc_title_when_chunk_tax_year_is_missing() -> None:
@@ -215,6 +232,46 @@ def test_tax_year_filter_uses_doc_title_when_chunk_tax_year_is_missing() -> None
 
     assert infer_chunk_tax_year(chunk) == "2015-2016"
     assert filter_chunk_records([chunk], tax_year="2015-2016") == [chunk]
+
+
+def test_paripatra_doc_title_overrides_example_year_metadata() -> None:
+    chunk = _chunk(
+        chunk_id="c-example-year",
+        doc_id="doc-2022",
+        doc_title="Income Tax Paripatra 2022-2023",
+        authority_level="national",
+        tax_year="2019-2020",
+        page_no=47,
+        section_id=None,
+        subsection_id=None,
+        chunk_type="example",
+        heading_path=["উদাহরণ"],
+        normalized_text="2019-2020 আয়বর্ষে পরিচালক ছিলেন। 2022-2023 অর্থবর্ষে কোম্পানির করদায় পরিশোধে ব্যর্থ হয়েছে।",
+    )
+
+    assert infer_chunk_tax_year(chunk) == "2022-2023"
+    assert filter_chunk_records([chunk], tax_year="2022-2023") == [chunk]
+    assert filter_chunk_records([chunk], tax_year="2019-2020") == []
+
+
+def test_explicit_future_tax_year_heading_overrides_paripatra_doc_title() -> None:
+    chunk = _chunk(
+        chunk_id="c-future-year-heading",
+        doc_id="doc-2025",
+        doc_title="Income Tax Paripatra 2025-2026",
+        authority_level="national",
+        tax_year="2026-2027",
+        page_no=12,
+        section_id=None,
+        subsection_id=None,
+        chunk_type="table",
+        heading_path=["১.৪ ২০২৬-২০২৭ এবং ২০২৭-২০২৮ করবর্ষের সারচার্জের হার"],
+        normalized_text="নীট পরিসম্পদের পরিমাণ চার কোটি টাকা পর্যন্ত শূন্য।",
+    )
+
+    assert infer_chunk_tax_year(chunk) == "2026-2027"
+    assert filter_chunk_records([chunk], tax_year="2026-2027") == [chunk]
+    assert filter_chunk_records([chunk], tax_year="2025-2026") == []
 
 
 def test_navigation_noise_penalizes_early_outline_not_real_rate_table() -> None:

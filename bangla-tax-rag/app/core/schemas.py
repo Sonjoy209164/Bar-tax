@@ -81,7 +81,7 @@ class ChunkRecord(BaseModel):
 
 class QueryRequest(BaseModel):
     question_text: str
-    retrieval_mode: Literal["sparse", "dense", "hybrid"] = "hybrid"
+    retrieval_mode: Literal["sparse", "dense", "hybrid", "taxtrail"] = "hybrid"
     tax_year: str | None = None
     doc_type: str | None = None
     authority_level_min: str | None = None
@@ -203,7 +203,7 @@ class GeneratedAnswer(BaseModel):
 
 class QueryAPIResponse(BaseModel):
     status: str
-    retrieval_mode: Literal["sparse", "dense", "hybrid"]
+    retrieval_mode: Literal["sparse", "dense", "hybrid", "taxtrail"]
     analyzed_query: QuerySignals
     generation_model_name: str | None = None
     final_hits: list[RetrievalHit] = Field(default_factory=list)
@@ -220,7 +220,7 @@ class QueryAPIResponse(BaseModel):
 
 class EvalRequest(BaseModel):
     dataset_path: str
-    retrieval_modes: list[Literal["sparse", "dense", "hybrid"]] = Field(default_factory=lambda: ["hybrid"])
+    retrieval_modes: list[Literal["sparse", "dense", "hybrid", "taxtrail"]] = Field(default_factory=lambda: ["hybrid"])
     generate_answers: bool = True
     output_dir: str | None = None
 

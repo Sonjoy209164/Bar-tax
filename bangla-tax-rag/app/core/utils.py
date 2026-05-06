@@ -61,6 +61,10 @@ BANGLISH_QUERY_EXPANSIONS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] =
         ("উৎসে কর", "উৎসে কর্তন", "withholding tax", "tax deducted at source"),
     ),
     (
+        re.compile(r"\b(?:clarification|spostikoron|sposhtikoron|spashtikaran)\b", re.IGNORECASE),
+        ("স্পষ্টীকরণ", "clarification", "circular"),
+    ),
+    (
         re.compile(r"\b(?:surcharge|sarcharge|sarcharj|sar\s*charge)\b", re.IGNORECASE),
         ("সারচার্জ", "সারচাজ", "surcharge"),
     ),
@@ -115,11 +119,11 @@ BANGLISH_QUERY_EXPANSIONS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] =
 )
 QUERY_TYPE_PATTERNS = {
     QueryType.ELIGIBILITY: re.compile(
-        r"(\bam i\b|\bdo i (?:have to|need to) pay tax\b|\bwill i (?:have to )?pay tax\b|\bwhat will be my tax\b|\bwhat is my tax\b|\bdo i qualify\b|\bam i eligible\b|\bi am (?:a|an)\b.*\btax\b|\bas a (?:day labourer|day laborer|labourer|laborer|worker|employee|salaried|individual)\b.*\btax\b)",
+        r"(\bam i\b|\bdo i (?:have to|need to) pay tax\b|\bwill i (?:have to )?pay tax\b|\bwhat will be my tax\b|\bwhat is my tax\b|\bdo i qualify\b|\bam i eligible\b|\bi am (?:a|an)\b.*\btax\b|\bas a (?:day labourer|day laborer|labourer|laborer|worker|employee|salaried|individual)\b.*\btax\b|পাবে\s*কি|প্রাপ্য\s*হবে\s*কি|সুবিধা\s+পাবে|কর\s+অব্যাহতি.*পাবে|হ্রাসকৃত\s+করহার.*পাবে)",
         re.IGNORECASE,
     ),
     QueryType.AMOUNT_LOOKUP: re.compile(
-        r"(threshold|amount|limit|maximum|minim(?:um)?|ceiling|floor|not more than|no more than|exceeds? taka|taka|lakh|crore|পরিমাণ|সীমা|সর্বোচ্চ|ন্যূনতম|অনধিক|জরিমানার\s+পরিমাণ|জরিমানার\s+সীমা)",
+        r"(threshold|amount|limit|maximum|minim(?:um)?|ceiling|floor|not more than|no more than|exceeds? taka|taka|lakh|crore|how much|কত|পর্যন্ত|টাকা|লক্ষ|লাখ|কোটি|পরিমাণ|সীমা|সর্বোচ্চ|ন্যূনতম|অনধিক|জরিমানার\s+পরিমাণ|জরিমানার\s+সীমা)",
         re.IGNORECASE,
     ),
     QueryType.COUNT_LOOKUP: re.compile(
@@ -135,7 +139,7 @@ QUERY_TYPE_PATTERNS = {
         re.IGNORECASE,
     ),
     QueryType.RATE_LOOKUP: re.compile(
-        r"(হার|rate|slab|করহার|tax rate|rate of tax|what tax|how much tax|tax payable|pay tax|percentage)",
+        r"(হার|হারে|শতাংশ|সারচার্জ|rate|slab|করহার|কর\s+হার|tax rate|rate of tax|what tax|how much tax|tax payable|pay tax|percentage|surcharge)",
         re.IGNORECASE,
     ),
     QueryType.AMENDMENT: re.compile(r"(amend|সংশোধন|পরিবর্তন|change)", re.IGNORECASE),
@@ -145,14 +149,17 @@ QUERY_TYPE_PATTERNS = {
         re.IGNORECASE,
     ),
     QueryType.MENTION_LOOKUP: re.compile(
-        r"(mentioned|mention|appears?|included?|include|listed?|contains?|is .*mentioned|is .*included|say about|says about|what does .* say about|উল্লেখ|আছে কি|আছে কিনা)",
+        r"(mentioned|mention|appears?|included?|include|listed?|contains?|is .*mentioned|is .*included|say about|says about|what does .* say about|উল্লেখ|আছে কি|আছে কিনা|কি বলা হয়েছে|কী বলা হয়েছে|বলা হয়েছে)",
         re.IGNORECASE,
     ),
     QueryType.DEFINITION: re.compile(
-        r"(definition|defined as|what is the definition of|definition of|what does .* mean|meaning of|সংজ্ঞা|মানে কী|কি বলা হয়েছে|কী বলা হয়েছে)",
+        r"(definition|defined as|what is the definition of|definition of|what does .* mean|meaning of|সংজ্ঞা|মানে কী|কাকে\s+বলে)",
         re.IGNORECASE,
     ),
-    QueryType.PROCEDURE: re.compile(r"(প্রক্রিয়া|পদ্ধতি|how to|process|steps)", re.IGNORECASE),
+    QueryType.PROCEDURE: re.compile(
+        r"(প্রক্রিয়া|পদ্ধতি|কীভাবে|কিভাবে|কি করতে|কী করতে|না দিলে|প্রমাণ|শর্ত|দায়ী হতে পারেন|করতে বলা|how to|process|steps)",
+        re.IGNORECASE,
+    ),
     QueryType.CALCULATION: re.compile(r"(calculate|calculation|গণনা|compute)", re.IGNORECASE),
     QueryType.COMPARISON: re.compile(r"(compare|comparison|তুলনা|versus|পার্থক্য)", re.IGNORECASE),
 }
@@ -273,6 +280,10 @@ TABLE_HEADER_LINES = {
     "(3)",
     "(4)",
 }
+RATE_QUERY_OVERRIDE_PATTERN = re.compile(
+    r"(করহার|কর\s+হার|কর\s+কত|কর\s+কতো|tax\s+rate|rate\s+of\s+tax|how\s+much\s+tax|tax\s+koto|kor\s*har|korhar|kor\s*koto|সারচার্জ|surcharge)",
+    re.IGNORECASE,
+)
 
 
 def is_year_like_marker(marker: str) -> bool:
@@ -583,6 +594,10 @@ def extract_informative_query_terms(text: str, query_type: str | QueryType | Non
 
 
 def detect_query_type(text: str) -> QueryType:
+    if QUERY_TYPE_PATTERNS[QueryType.ELIGIBILITY].search(text):
+        return QueryType.ELIGIBILITY
+    if RATE_QUERY_OVERRIDE_PATTERN.search(text):
+        return QueryType.RATE_LOOKUP
     for query_type in QUERY_TYPE_PRIORITY:
         pattern = QUERY_TYPE_PATTERNS[query_type]
         if pattern.search(text):
@@ -632,6 +647,8 @@ def rewrite_query(normalized_query: str, query_type: str | QueryType) -> str:
             rewritten_terms.extend(["tax rate", "rate of tax", "tax payable"])
         if "করহার" in lower_query:
             rewritten_terms.extend(["করহার", "কর হার"])
+        if "সারচার্জ" in lower_query or "সারচাজ" in lower_query:
+            rewritten_terms.extend(["সারচার্জ", "surcharge", "percentage"])
     if query_type == QueryType.MENTION_LOOKUP:
         rewritten_terms.extend(["mentioned", "included", "listed"])
         if "software" in lower_query:
@@ -658,6 +675,14 @@ def rewrite_query(normalized_query: str, query_type: str | QueryType) -> str:
         rewritten_terms.extend(["list", "listed", "namely", "following", "classes"])
     if query_type == QueryType.COMPARISON:
         rewritten_terms.extend(["compare", "versus", "difference", "company", "other than company"])
+    if "স্পষ্টীকরণ" in lower_query or "clarification" in lower_query:
+        rewritten_terms.extend(["স্পষ্টীকরণ", "clarification", "circular"])
+    if "আন্তর্জাতিক লেনদেন" in lower_query:
+        rewritten_terms.extend(["international transaction", "international transactions", "transactions"])
+    if "রিটার্ন দাখিলের প্রমাণ" in lower_query or "proof" in lower_query:
+        rewritten_terms.extend(["proof of submission of return", "psr"])
+    if "সুদ" in lower_query or "মুনাফা" in lower_query:
+        rewritten_terms.extend(["interest", "profit"])
     return " ".join(dict.fromkeys(rewritten_terms))
 
 

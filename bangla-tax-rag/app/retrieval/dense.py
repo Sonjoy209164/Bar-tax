@@ -23,6 +23,8 @@ from app.retrieval.filters import (
     hit_supports_eligibility,
     hit_looks_list_like,
     infer_chunk_tax_year,
+    looks_like_late_reference_material,
+    query_requests_reference_material,
 )
 from app.retrieval.sparse import build_weighted_search_text, load_chunk_records_from_jsonl
 
@@ -261,6 +263,20 @@ def _apply_dense_query_boosts(
         )
         if exact_heading_match:
             score += 1.8
+    if analyzed_query.tax_year and infer_chunk_tax_year(chunk) == analyzed_query.tax_year:
+        score += 1.0
+    if looks_like_late_reference_material(
+        doc_title=chunk.doc_title,
+        page_no=chunk.page_no,
+        heading_path=chunk.heading_path,
+        normalized_text=chunk.normalized_text,
+        chunk_type=chunk.chunk_type,
+        appendix_id=chunk.appendix_id,
+    ):
+        if query_requests_reference_material(analyzed_query.normalized_query):
+            score += 0.5
+        else:
+            score -= 3.8
     if analyzed_query.query_intent == "rate_lookup":
         if chunk.chunk_type == "table":
             score += 1.1

@@ -10,6 +10,7 @@ from app.retrieval.dense import dense_search
 from app.retrieval.filters import filter_supportive_hits
 from app.retrieval.hybrid import run_hybrid_retrieval
 from app.retrieval.sparse import load_sparse_index, search_sparse_index
+from app.retrieval.taxtrail import taxtrail_search
 
 router = APIRouter(tags=["query"])
 
@@ -70,6 +71,14 @@ def _run_query_pipeline(request: QueryRequest) -> QueryAPIResponse:
         fused_hits = hybrid_response.fused_hits
         final_hits = hybrid_response.final_hits
         conflict_notes = hybrid_response.conflict_notes
+    elif request.retrieval_mode == "taxtrail":
+        final_hits = taxtrail_search(
+            request.question_text,
+            top_k=effective_final_k,
+            index_dir=index_dir,
+            dense_index_dir=settings.dense_index_dir,
+            tax_year=request.tax_year,
+        )
     else:
         raise ValueError(f"Unsupported retrieval mode: {request.retrieval_mode}")
 

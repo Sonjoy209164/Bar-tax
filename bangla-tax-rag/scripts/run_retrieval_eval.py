@@ -17,6 +17,7 @@ from app.core.utils import preprocess_query
 from app.retrieval.dense import dense_search, load_dense_index_metadata
 from app.retrieval.hybrid import run_hybrid_retrieval
 from app.retrieval.sparse import load_sparse_index, search_sparse_index
+from app.retrieval.taxtrail import taxtrail_search
 
 
 DEFAULT_DATASET_PATH = Path("data/btaxbench/pilot14/pilot14_50.jsonl")
@@ -25,6 +26,7 @@ DEFAULT_DENSE_INDEX_DIR = Path("indexes/pilot14/dense")
 DEFAULT_OUTPUT_JSON = Path("results/pilot14/retrieval_eval_50.json")
 DEFAULT_OUTPUT_MD = Path("results/pilot14/retrieval_eval_50.md")
 DEFAULT_MODES = ("sparse", "dense", "hybrid")
+AVAILABLE_MODES = ("sparse", "dense", "hybrid", "taxtrail")
 TOP_K_VALUES = (1, 3, 5)
 CHUNK_ID_PAGE_PATTERN = re.compile(r"^(?P<doc_id>.+)-p(?P<page>\d+)-c\d+$")
 
@@ -68,7 +70,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--modes",
         nargs="+",
-        choices=list(DEFAULT_MODES),
+        choices=list(AVAILABLE_MODES),
         default=list(DEFAULT_MODES),
         help="Retrieval modes to run.",
     )
@@ -336,6 +338,13 @@ def run_mode_for_question(
             dense_index_dir=dense_index_dir,
         )
         return response.final_hits
+    if mode == "taxtrail":
+        return taxtrail_search(
+            question.question_text,
+            top_k=top_k,
+            index_dir=index_dir,
+            dense_index_dir=dense_index_dir,
+        )
     raise ValueError(f"Unsupported retrieval mode: {mode}")
 
 

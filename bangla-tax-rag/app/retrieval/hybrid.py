@@ -23,8 +23,11 @@ from app.retrieval.filters import (
     hit_matches_definition_target_exactly,
     hit_supports_definition,
     hit_supports_eligibility,
+    infer_chunk_tax_year,
     hit_looks_list_like,
     hit_supports_query,
+    looks_like_late_reference_material,
+    query_requests_reference_material,
 )
 from app.retrieval.reranker import rerank_retrieval_hits
 from app.retrieval.sparse import DEFAULT_INDEX_DIR, load_sparse_index, sparse_search
@@ -51,6 +54,11 @@ GENERIC_HEADING_TERMS = {
     "in",
 }
 LIST_CONTINUATION_PATTERN = re.compile(r"^(?:\([a-z0-9ivxlcdm]+\)|[a-z]\)|\d+\.)\s+", re.IGNORECASE)
+
+
+def _chunk_number(hit: RetrievalHit) -> int | None:
+    chunk_match = re.search(r"-c(\d+)$", hit.chunk_id)
+    return int(chunk_match.group(1)) if chunk_match else None
 
 
 def _load_dense_hits_for_hybrid(
@@ -145,6 +153,23 @@ def _same_logical_unit(anchor_hit: RetrievalHit, candidate_hit: RetrievalHit, an
     if anchor_hit.subsection_id and candidate_hit.subsection_id and anchor_hit.subsection_id == candidate_hit.subsection_id:
         return True
 
+    anchor_chunk_number = _chunk_number(anchor_hit)
+    candidate_chunk_number = _chunk_number(candidate_hit)
+    if (
+        page_distance == 0
+        and anchor_chunk_number is not None
+        and candidate_chunk_number is not None
+        and abs(anchor_chunk_number - candidate_chunk_number) <= 2
+        and analyzed_query.query_intent
+        in {"amount_lookup", "rate_lookup", "date_lookup", "example", "calculation", "procedure"}
+        and (
+            anchor_hit.chunk_type == candidate_hit.chunk_type
+            or _informative_overlap(candidate_hit, analyzed_query) > 0
+            or _informative_overlap(anchor_hit, analyzed_query) > 0
+        )
+    ):
+        return True
+
     heading_overlap = _heading_term_overlap(anchor_hit, candidate_hit)
     if anchor_hit.section_id and candidate_hit.section_id and anchor_hit.section_id == candidate_hit.section_id:
         if page_distance <= 1 and heading_overlap >= 1:
@@ -204,7 +229,11 @@ def _expand_logical_unit_hits(
         "date_lookup",
         "amount_lookup",
         "duration_lookup",
+        "rate_lookup",
         "definition",
+        "example",
+        "calculation",
+        "procedure",
     }
     if not should_expand or not candidate_hits:
         return candidate_hits
@@ -258,6 +287,13 @@ def _unique_hits_preserving_order(hits: list[RetrievalHit]) -> list[RetrievalHit
         seen_chunk_ids.add(hit.chunk_id)
         unique_hits.append(hit)
     return unique_hits
+
+
+def _looks_like_navigation_noise(hit: RetrievalHit) -> bool:
+    if hit.page_no > 6:
+        return False
+    searchable_text = normalize_text(f"{' '.join(hit.heading_path)} {hit.normalized_text}").lower()
+    return any(term in searchable_text for term in ("সূচিপত্র", "সূচীপত্র", "ক্রমিক", "বিষয়", "পৃষ্ঠ", "শিরোনাম"))
 
 
 def _informative_overlap(hit: RetrievalHit, analyzed_query: QuerySignals) -> int:
@@ -392,6 +428,15 @@ def _build_contextual_evidence_hits(
         key=_document_order_key,
     )
     anchor_and_context.extend(trailing_hits)
+    if len(anchor_and_context) < final_top_k:
+        seen_chunk_ids = {hit.chunk_id for hit in anchor_and_context}
+        for hit in candidate_hits:
+            if hit.chunk_id in seen_chunk_ids:
+                continue
+            anchor_and_context.append(hit)
+            seen_chunk_ids.add(hit.chunk_id)
+            if len(anchor_and_context) >= final_top_k:
+                break
     return anchor_and_context[:final_top_k]
 
 
@@ -611,7 +656,16 @@ def _select_evidence_hits_by_query_type(
             final_top_k=final_top_k,
             candidate_pool=candidate_pool,
         )
-    if analyzed_query.query_intent in {"amount_lookup", "duration_lookup", "date_lookup", "eligibility"}:
+    if analyzed_query.query_intent in {
+        "amount_lookup",
+        "rate_lookup",
+        "duration_lookup",
+        "date_lookup",
+        "eligibility",
+        "example",
+        "calculation",
+        "procedure",
+    }:
         return _build_contextual_evidence_hits(
             candidate_hits,
             all_hits,
@@ -690,6 +744,20 @@ def apply_hybrid_post_ranking(hit: RetrievalHit, analyzed_query: QuerySignals) -
         adjusted_score += 1.2
     if analyzed_query.sro_id and adjusted_hit.intermediate_scores.get("sro_id") == analyzed_query.sro_id:
         adjusted_score += 1.4
+    if _looks_like_navigation_noise(adjusted_hit):
+        adjusted_score -= 4.5
+    if looks_like_late_reference_material(
+        doc_title=adjusted_hit.doc_title,
+        page_no=adjusted_hit.page_no,
+        heading_path=adjusted_hit.heading_path,
+        normalized_text=adjusted_hit.normalized_text,
+        chunk_type=adjusted_hit.chunk_type,
+        appendix_id=str(adjusted_hit.intermediate_scores.get("appendix_id") or "") or None,
+    ):
+        if query_requests_reference_material(analyzed_query.normalized_query):
+            adjusted_score += 0.5
+        else:
+            adjusted_score -= 4.2
     query_terms = set(tokenize_for_bm25(analyzed_query.normalized_query))
     heading_terms = set(tokenize_for_bm25(" ".join(adjusted_hit.heading_path)))
     heading_overlap = len(query_terms & heading_terms)
@@ -959,7 +1027,7 @@ def run_hybrid_retrieval(
                 subsection_id=chunk.subsection_id,
                 chunk_type=chunk.chunk_type,
                 authority_level=chunk.authority_level,
-                tax_year=chunk.tax_year,
+                tax_year=infer_chunk_tax_year(chunk),
                 original_text=chunk.original_text,
                 normalized_text=chunk.normalized_text,
                 heading_path=chunk.heading_path,

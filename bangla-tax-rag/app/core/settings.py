@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     milvus_uri: str | None = Field(default=None, alias="MILVUS_URI")
     milvus_token: str | None = Field(default=None, alias="MILVUS_TOKEN")
     milvus_collection_name: str | None = Field(default=None, alias="MILVUS_COLLECTION_NAME")
+    elasticsearch_url: str | None = Field(default=None, alias="ELASTICSEARCH_URL")
+    elasticsearch_api_key: str | None = Field(default=None, alias="ELASTICSEARCH_API_KEY")
+    elasticsearch_username: str | None = Field(default=None, alias="ELASTICSEARCH_USERNAME")
+    elasticsearch_password: str | None = Field(default=None, alias="ELASTICSEARCH_PASSWORD")
+    elasticsearch_index_name: str | None = Field(default="inventory-rag", alias="ELASTICSEARCH_INDEX_NAME")
     reranker_provider: str = Field(default="transformers", alias="RERANKER_PROVIDER")
     reranker_model_name: str = Field(default="BAAI/bge-reranker-v2-m3", alias="RERANKER_MODEL_NAME")
     reranker_base_url: str | None = Field(default=None, alias="RERANKER_BASE_URL")
@@ -156,6 +161,8 @@ class Settings(BaseSettings):
             "pinecone_host": self.pinecone_host,
             "milvus_uri": self.milvus_uri,
             "milvus_collection_name": self.milvus_collection_name,
+            "elasticsearch_url": self.elasticsearch_url,
+            "elasticsearch_index_name": self.elasticsearch_index_name,
             "reranker_provider": self.reranker_provider,
             "reranker_model_name": self.reranker_model_name,
             "reranker_base_url": self.reranker_base_url,
@@ -282,6 +289,16 @@ def get_settings() -> Settings:
         apply_yaml_override("milvus_uri", vector_store_config["milvus_uri"])
     if "milvus_collection_name" in vector_store_config:
         apply_yaml_override("milvus_collection_name", vector_store_config["milvus_collection_name"])
+    if "elasticsearch_url" in vector_store_config:
+        apply_yaml_override("elasticsearch_url", vector_store_config["elasticsearch_url"])
+    if "elasticsearch_api_key" in vector_store_config:
+        apply_yaml_override("elasticsearch_api_key", vector_store_config["elasticsearch_api_key"])
+    if "elasticsearch_username" in vector_store_config:
+        apply_yaml_override("elasticsearch_username", vector_store_config["elasticsearch_username"])
+    if "elasticsearch_password" in vector_store_config:
+        apply_yaml_override("elasticsearch_password", vector_store_config["elasticsearch_password"])
+    if "elasticsearch_index_name" in vector_store_config:
+        apply_yaml_override("elasticsearch_index_name", vector_store_config["elasticsearch_index_name"])
     if "provider" in reranker_config:
         apply_yaml_override("reranker_provider", reranker_config["provider"])
     if "model_name" in reranker_config:

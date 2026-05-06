@@ -56,6 +56,8 @@ vector_store:
   pinecone_host:
   milvus_uri:
   milvus_collection_name:
+  elasticsearch_url: http://localhost:9200
+  elasticsearch_index_name: inventory-rag
 reranker:
   provider: transformers
   model_name: BAAI/bge-reranker-v2-m3

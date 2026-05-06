@@ -13,6 +13,7 @@ class VectorStoreProvider(StrEnum):
     LOCAL = "local"
     PINECONE = "pinecone"
     MILVUS = "milvus"
+    ELASTICSEARCH = "elasticsearch"
 
 
 class VectorStoreConfig(BaseModel):
@@ -116,6 +117,10 @@ def build_vector_store(config: VectorStoreConfig | None = None) -> VectorStore:
         from app.retrieval.milvus_store import MilvusVectorStore
 
         return MilvusVectorStore(resolved_config)
+    if resolved_config.provider is VectorStoreProvider.ELASTICSEARCH:
+        from app.retrieval.elasticsearch_store import ElasticsearchVectorStore
+
+        return ElasticsearchVectorStore(resolved_config)
     raise ValueError(f"Unsupported vector store provider: {resolved_config.provider}")
 
 

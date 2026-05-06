@@ -39,39 +39,39 @@ Decision lock:
 
 ### Provider Wiring
 
-- [ ] Add `ELASTICSEARCH = "elasticsearch"` to `VectorStoreProvider`.
-- [ ] Add Elasticsearch branch to `build_vector_store()`.
-- [ ] Create `app/retrieval/elasticsearch_store.py`.
-- [ ] Export Elasticsearch store if needed from `app/retrieval/__init__.py`.
+- [x] Add `ELASTICSEARCH = "elasticsearch"` to `VectorStoreProvider`.
+- [x] Add Elasticsearch branch to `build_vector_store()`.
+- [x] Create `app/retrieval/elasticsearch_store.py`.
+- [x] Export Elasticsearch store if needed from `app/retrieval/__init__.py`.
 
 ### Elasticsearch Adapter
 
-- [ ] Implement `ElasticsearchVectorStore.__init__`.
-- [ ] Implement `_client()`.
-- [ ] Implement `_index_name()`.
-- [ ] Implement `_document_id(record_id, namespace)`.
-- [ ] Implement `_ensure_index(dimensions)`.
-- [ ] Implement `_to_document(record, namespace)`.
-- [ ] Implement `_to_match(hit, namespace)`.
-- [ ] Implement `_build_filter_clauses(filters, namespace)`.
-- [ ] Implement `upsert()`.
-- [ ] Implement `query()`.
-- [ ] Implement `delete()`.
-- [ ] Implement `describe()`.
-- [ ] Use deterministic document IDs: `namespace::record_id`.
-- [ ] Store `record_id`, `namespace`, `text`, metadata, and vector.
-- [ ] Use bulk indexing for multi-record upserts.
-- [ ] Return `VectorSearchResult` with `VectorSearchMatch` objects.
-- [ ] Support `$eq`, `$in`, `$gte`, and `$lte` filters.
+- [x] Implement `ElasticsearchVectorStore.__init__`.
+- [x] Implement `_client()`.
+- [x] Implement `_index_name()`.
+- [x] Implement `_document_id(record_id, namespace)`.
+- [x] Implement `_ensure_index(dimensions)`.
+- [x] Implement `_to_document(record, namespace)`.
+- [x] Implement `_to_match(hit, namespace)`.
+- [x] Implement `_build_filter_clauses(filters, namespace)`.
+- [x] Implement `upsert()`.
+- [x] Implement `query()`.
+- [x] Implement `delete()`.
+- [x] Implement `describe()`.
+- [x] Use deterministic document IDs: `namespace::record_id`.
+- [x] Store `record_id`, `namespace`, `text`, metadata, and vector.
+- [x] Use bulk indexing for multi-record upserts.
+- [x] Return `VectorSearchResult` with `VectorSearchMatch` objects.
+- [x] Support `$eq`, `$in`, `$gte`, and `$lte` filters.
 
 ### Index Mapping
 
-- [ ] Define mapping for keyword fields: `namespace`, `record_id`, `product_id`, `sku`, `brand`, `category`, `status`.
-- [ ] Define mapping for text fields: `name`, `text`.
-- [ ] Define mapping for numeric fields: `stock`, `price`.
-- [ ] Define `dense_vector` mapping for `vector`.
-- [ ] Confirm embedding dimension before creating the index.
-- [ ] Ensure cosine similarity matches current vector scoring assumptions.
+- [x] Define mapping for keyword fields: `namespace`, `record_id`, `product_id`, `sku`, `brand`, `category`, `status`.
+- [x] Define mapping for text fields: `name`, `text`.
+- [x] Define mapping for numeric fields: `stock`, `price`.
+- [x] Define `dense_vector` mapping for `vector`.
+- [x] Confirm embedding dimension before creating the index.
+- [x] Ensure cosine similarity matches current vector scoring assumptions.
 - [ ] Decide how to handle existing index with wrong dimensions.
 
 ### Inventory Sync

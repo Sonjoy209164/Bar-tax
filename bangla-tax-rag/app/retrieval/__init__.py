@@ -51,6 +51,7 @@ from app.retrieval.hybrid_retriever import (
     HybridSearchRequest,
 )
 from app.retrieval.local_store import LocalVectorStore
+from app.retrieval.elasticsearch_store import ElasticsearchVectorStore
 from app.retrieval.milvus_store import MilvusVectorStore
 from app.retrieval.pinecone_store import PineconeVectorStore
 from app.retrieval.query_transformer import (
@@ -96,6 +97,7 @@ __all__ = [
     "EmbedderConfig",
     "EmbeddingBatch",
     "EmbeddingProvider",
+    "ElasticsearchVectorStore",
     "ExpandedGraphNode",
     "EvidencePack",
     "EvidencePackBuilder",

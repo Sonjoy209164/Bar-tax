@@ -2005,6 +2005,9 @@ class InventoryService:
             "dense_raw_matches": 0,
             "dense_pool_candidates": 0,
             "lexical_pool_candidates": 0,
+            "elastic_lexical_raw_matches": 0,
+            "elastic_lexical_pool_candidates": 0,
+            "elastic_hybrid_pool_candidates": 0,
             "merged_pool_candidates": 0,
             "spec_filtered_candidates": 0,
             "type_gated_candidates": 0,
@@ -2078,6 +2081,64 @@ class InventoryService:
             )
         return lexical_scores
 
+    def _external_lexical_candidate_scores(
+        self,
+        *,
+        query_text: str,
+        top_k: int,
+        catalog: dict[str, InventoryItemRecord],
+        filters: InventorySearchFilters,
+        query_terms: list[str],
+        subject_phrase: str | None,
+        derived_filters: dict[str, object] | None = None,
+    ) -> tuple[dict[str, tuple[float, int]], int]:
+        lexical_query = getattr(self.vector_store, "lexical_query", None)
+        if not callable(lexical_query):
+            return {}, 0
+        vector_filters = self._build_vector_filters(filters)
+        if derived_filters:
+            vector_filters.update(derived_filters)
+        candidate_limit = max(top_k * self.config.search_candidate_multiplier, top_k)
+        result = lexical_query(
+            query_text,
+            top_k=candidate_limit,
+            filters=vector_filters or None,
+            namespace=self.config.namespace,
+        )
+        max_score = max((match.score for match in result.matches), default=0.0)
+        lexical_scores: dict[str, tuple[float, int]] = {}
+        for match in result.matches:
+            if match.record_id not in catalog:
+                continue
+            item = catalog[match.record_id]
+            if not self._item_matches_filters(item, filters):
+                continue
+            local_score = self._lexical_match_score(
+                item=item,
+                query_terms=query_terms,
+                subject_phrase=subject_phrase,
+            )
+            external_score = min(12.0, (match.score / max_score) * 12.0) if max_score > 0 else 0.0
+            lexical_score = max(local_score, external_score)
+            if lexical_score <= 0:
+                continue
+            lexical_scores[item.product_id] = (
+                lexical_score,
+                self._query_term_coverage(item=item, query_terms=query_terms),
+            )
+        return lexical_scores, len(result.matches)
+
+    @staticmethod
+    def _merge_lexical_candidate_scores(
+        primary: dict[str, tuple[float, int]],
+        secondary: dict[str, tuple[float, int]],
+    ) -> dict[str, tuple[float, int]]:
+        merged = dict(primary)
+        for product_id, (score, coverage) in secondary.items():
+            existing_score, existing_coverage = merged.get(product_id, (0.0, 0))
+            merged[product_id] = (max(existing_score, score), max(existing_coverage, coverage))
+        return merged
+
     def _semantic_search(
         self,
         *,
@@ -2104,12 +2165,13 @@ class InventoryService:
             filters=filters,
             products=list(catalog.values()),
         )
+        derived_vector_filters = self._build_requirement_vector_filters(preference_profile)
         vector_scores, dense_raw_matches = self._dense_candidate_scores(
             query_text=query_text,
             top_k=top_k,
             filters=filters,
             catalog=catalog,
-            derived_filters=self._build_requirement_vector_filters(preference_profile),
+            derived_filters=derived_vector_filters,
         )
         retrieval_stage_counts["dense_raw_matches"] = dense_raw_matches
         retrieval_stage_counts["dense_pool_candidates"] = len(vector_scores)
@@ -2117,13 +2179,31 @@ class InventoryService:
         if detail_request and subject_phrase and len(subject_phrase.split()) >= 3:
             requested_product_type = None
 
-        lexical_candidates = self._lexical_candidate_scores(
+        local_lexical_candidates = self._lexical_candidate_scores(
             catalog=catalog,
             filters=filters,
             query_terms=query_terms,
             subject_phrase=subject_phrase,
         )
+        external_lexical_candidates, external_lexical_raw_matches = self._external_lexical_candidate_scores(
+            query_text=query_text,
+            top_k=top_k,
+            catalog=catalog,
+            filters=filters,
+            query_terms=query_terms,
+            subject_phrase=subject_phrase,
+            derived_filters=derived_vector_filters,
+        )
+        lexical_candidates = self._merge_lexical_candidate_scores(
+            local_lexical_candidates,
+            external_lexical_candidates,
+        )
         retrieval_stage_counts["lexical_pool_candidates"] = len(lexical_candidates)
+        retrieval_stage_counts["elastic_lexical_raw_matches"] = external_lexical_raw_matches
+        retrieval_stage_counts["elastic_lexical_pool_candidates"] = len(external_lexical_candidates)
+        retrieval_stage_counts["elastic_hybrid_pool_candidates"] = len(
+            dict.fromkeys([*external_lexical_candidates.keys(), *vector_scores.keys()])
+        )
         merged_candidate_ids = list(dict.fromkeys([*lexical_candidates.keys(), *vector_scores.keys()]))
         retrieval_stage_counts["merged_pool_candidates"] = len(merged_candidate_ids)
 
@@ -6030,6 +6110,7 @@ class InventoryService:
             metadata={
                 "product_id": item.product_id,
                 "sku": item.sku,
+                "name": item.name,
                 "category": item.category,
                 "category_key": item.category.casefold() if item.category else None,
                 "brand": item.brand,

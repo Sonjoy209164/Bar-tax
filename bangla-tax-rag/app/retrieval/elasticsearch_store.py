@@ -24,22 +24,6 @@ except Exception:  # pragma: no cover - exercised through graceful error/tests
 
 
 _RESERVED_SOURCE_FIELDS = {"record_id", "namespace", "text", "vector", "metadata"}
-_COMMON_KEYWORD_FIELDS = {
-    "namespace",
-    "record_id",
-    "product_id",
-    "sku",
-    "brand",
-    "brand_key",
-    "category",
-    "category_key",
-    "status",
-    "status_key",
-    "currency",
-    "updated_at",
-}
-_COMMON_NUMERIC_FIELDS = {"stock", "price"}
-_COMMON_BOOLEAN_FIELDS = {"include_in_rag"}
 
 
 class ElasticsearchVectorStore(VectorStore):
@@ -102,6 +86,43 @@ class ElasticsearchVectorStore(VectorStore):
             namespace=target_namespace,
         )
 
+    def lexical_query(
+        self,
+        query_text: str,
+        *,
+        top_k: int,
+        filters: dict[str, Any] | None = None,
+        namespace: str | None = None,
+    ) -> VectorSearchResult:
+        client = self._client()
+        index_name = self._index_name()
+        if not client.indices.exists(index=index_name):
+            if self.config.dimensions:
+                self._ensure_index(self.config.dimensions)
+            else:
+                return VectorSearchResult(
+                    provider=self.provider,
+                    matches=[],
+                    top_k=top_k,
+                    namespace=namespace or self.config.namespace,
+                )
+        target_namespace = namespace or self.config.namespace
+        filter_clauses = self._build_filter_clauses(filters, target_namespace)
+        query = self._build_lexical_query(query_text=query_text, filter_clauses=filter_clauses)
+        response = client.search(
+            index=index_name,
+            query=query,
+            size=top_k,
+            source_excludes=["vector"],
+        )
+        raw_hits = _read_path(response, "hits", "hits", default=[]) or []
+        return VectorSearchResult(
+            provider=self.provider,
+            matches=[self._to_match(hit, target_namespace) for hit in raw_hits],
+            top_k=top_k,
+            namespace=target_namespace,
+        )
+
     def delete(self, record_ids: list[str], *, namespace: str | None = None) -> None:
         if not record_ids:
             return
@@ -121,6 +142,39 @@ class ElasticsearchVectorStore(VectorStore):
                 client.delete(index=index_name, id=self._document_id(record_id, target_namespace), refresh=True)
             except NotFoundError:
                 continue
+
+    def record_ids(self, *, namespace: str | None = None) -> list[str]:
+        client = self._client()
+        index_name = self._index_name()
+        target_namespace = namespace or self.config.namespace
+        if not client.indices.exists(index=index_name):
+            return []
+        filter_clauses = self._build_filter_clauses(None, target_namespace)
+        query = {"bool": {"filter": filter_clauses}} if filter_clauses else {"match_all": {}}
+        if helpers is not None and hasattr(helpers, "scan"):
+            hits = helpers.scan(
+                client,
+                index=index_name,
+                query={"query": query, "_source": ["record_id"]},
+                size=1000,
+            )
+            return [
+                str(source["record_id"])
+                for hit in hits
+                if (source := (_read_attr(hit, "_source", default={}) or {})).get("record_id") is not None
+            ]
+        response = client.search(
+            index=index_name,
+            query=query,
+            size=10000,
+            source_includes=["record_id"],
+        )
+        raw_hits = _read_path(response, "hits", "hits", default=[]) or []
+        return [
+            str(source["record_id"])
+            for hit in raw_hits
+            if (source := (_read_attr(hit, "_source", default={}) or {})).get("record_id") is not None
+        ]
 
     def describe(self, *, namespace: str | None = None) -> VectorStoreStats:
         client = self._client()
@@ -174,6 +228,14 @@ class ElasticsearchVectorStore(VectorStore):
         client = self._client()
         index_name = self._index_name()
         if client.indices.exists(index=index_name):
+            existing_dimensions = self._existing_vector_dimensions()
+            if existing_dimensions is not None and existing_dimensions != dimensions:
+                raise ValueError(
+                    "Elasticsearch index "
+                    f"{index_name!r} has vector dimensions {existing_dimensions}, "
+                    f"but this record has dimensions {dimensions}. "
+                    "Create a new index or rebuild the existing index with the matching embedding model."
+                )
             return
         client.indices.create(
             index=index_name,
@@ -207,6 +269,19 @@ class ElasticsearchVectorStore(VectorStore):
                 },
             },
         )
+
+    def _existing_vector_dimensions(self) -> int | None:
+        client = self._client()
+        get_mapping = getattr(client.indices, "get_mapping", None)
+        if not callable(get_mapping):
+            return None
+        response = get_mapping(index=self._index_name())
+        index_mapping = _read_attr(response, self._index_name(), default=None)
+        if index_mapping is None and isinstance(response, Mapping) and response:
+            index_mapping = next(iter(response.values()))
+        vector_mapping = _read_path(index_mapping or {}, "mappings", "properties", "vector", default={}) or {}
+        dimensions = _read_attr(vector_mapping, "dims", default=None)
+        return int(dimensions) if dimensions is not None else None
 
     def _to_document(self, record: VectorRecord, namespace: str | None) -> dict[str, Any]:
         metadata = dict(record.metadata)
@@ -271,6 +346,34 @@ class ElasticsearchVectorStore(VectorStore):
                 continue
             clauses.append({"term": {key: expected}})
         return clauses
+
+    def _build_lexical_query(
+        self,
+        *,
+        query_text: str,
+        filter_clauses: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        stripped_query = query_text.strip()
+        should_clauses: list[dict[str, Any]] = [
+            {"term": {"sku": {"value": stripped_query, "boost": 8.0}}},
+            {"term": {"product_id": {"value": stripped_query, "boost": 7.0}}},
+            {"match_phrase": {"name": {"query": stripped_query, "boost": 5.0}}},
+            {
+                "multi_match": {
+                    "query": stripped_query,
+                    "fields": ["name^4", "sku^5", "brand^2", "category^2", "text"],
+                    "type": "best_fields",
+                    "fuzziness": "AUTO",
+                }
+            },
+        ]
+        return {
+            "bool": {
+                "filter": filter_clauses,
+                "should": should_clauses,
+                "minimum_should_match": 1,
+            }
+        }
 
 
 def _elasticsearch_similarity(metric: str) -> str:

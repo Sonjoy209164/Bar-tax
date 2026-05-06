@@ -72,7 +72,13 @@ Decision lock:
 - [x] Define `dense_vector` mapping for `vector`.
 - [x] Confirm embedding dimension before creating the index.
 - [x] Ensure cosine similarity matches current vector scoring assumptions.
-- [ ] Decide how to handle existing index with wrong dimensions.
+- [x] Decide how to handle existing index with wrong dimensions.
+
+Dimension policy:
+
+- If an existing Elasticsearch index has a `vector` mapping with different dimensions, the adapter raises a clear error.
+- The system does not auto-delete or auto-recreate the index because that could destroy production search data.
+- Use a new index name or manually rebuild the index with the correct embedding model.
 
 ### Inventory Sync
 
@@ -96,32 +102,34 @@ Decision lock:
 
 ### Phase 2 Hybrid Search
 
-- [ ] Add optional Elasticsearch lexical query method.
-- [ ] Query BM25 across `sku`, `name`, `brand`, `category`, and `text`.
-- [ ] Boost exact SKU and phrase name matches.
-- [ ] Add typo tolerance with fuzzy matching where useful.
-- [ ] Merge BM25 and vector candidate pools.
-- [ ] Preserve dense and lexical scores in diagnostics.
-- [ ] Keep existing product-type, category, exact lookup, and reranker gates.
+- [x] Add optional Elasticsearch lexical query method.
+- [x] Query BM25 across `sku`, `name`, `brand`, `category`, and `text`.
+- [x] Boost exact SKU and phrase name matches.
+- [x] Add typo tolerance with fuzzy matching where useful.
+- [x] Merge BM25 and vector candidate pools.
+- [x] Preserve dense and lexical scores in diagnostics.
+- [x] Keep existing product-type, category, exact lookup, and reranker gates.
 - [ ] Evaluate Reciprocal Rank Fusion after the simple merge works.
 
 ### Tests
 
-- [ ] Add `tests/test_elasticsearch_store.py`.
-- [ ] Mock Elasticsearch client for adapter unit tests.
-- [ ] Test missing URL failure.
-- [ ] Test client auth setup.
-- [ ] Test deterministic IDs.
-- [ ] Test upsert payload shape.
-- [ ] Test query result conversion.
-- [ ] Test namespace filtering.
-- [ ] Test metadata filter conversion.
-- [ ] Test delete behavior.
-- [ ] Test describe behavior.
-- [ ] Add inventory service test with mocked Elasticsearch backend.
-- [ ] Run `pytest tests/test_elasticsearch_store.py`.
-- [ ] Run `pytest tests/test_vector_store.py`.
-- [ ] Run `pytest tests/test_inventory_api.py`.
+- [x] Add `tests/test_elasticsearch_store.py`.
+- [x] Mock Elasticsearch client for adapter unit tests.
+- [x] Test missing URL failure.
+- [x] Test client auth setup.
+- [x] Test deterministic IDs.
+- [x] Test upsert payload shape.
+- [x] Test query result conversion.
+- [x] Test namespace filtering.
+- [x] Test metadata filter conversion.
+- [x] Test delete behavior.
+- [x] Test describe behavior.
+- [x] Add inventory service test with mocked Elasticsearch backend.
+- [x] Run `pytest tests/test_elasticsearch_store.py`.
+- [x] Run `pytest tests/test_vector_store.py`.
+- [x] Run `pytest tests/test_inventory_api.py`.
+
+These test files were covered by the full pytest run on 2026-05-06. The Elasticsearch-related tests passed, but the full repository suite still has two unrelated failures documented in `results/test_logs/full_pytest_20260506_181154_audit.md`.
 
 ### Local Validation
 

@@ -18,8 +18,12 @@ from app.retrieval import (
     LocalVectorStore,
     TextEmbedder,
     VectorRecord,
+    VectorSearchMatch,
+    VectorSearchResult,
+    VectorStore,
     VectorStoreConfig,
     VectorStoreProvider,
+    VectorStoreStats,
 )
 from app.services.inventory_service import InventoryReply, InventoryService, InventoryServiceConfig
 
@@ -160,6 +164,85 @@ def _build_spec_inventory_service(tmp_path, *, storage_backend: str = "jsonl") -
             inventory_sqlite_path=str(tmp_path / "inventory_mirror_specs.sqlite3"),
         ),
     )
+
+
+class MockElasticsearchHybridVectorStore(VectorStore):
+    def __init__(self) -> None:
+        super().__init__(
+            VectorStoreConfig(
+                provider=VectorStoreProvider.ELASTICSEARCH,
+                elasticsearch_url="http://localhost:9200",
+                elasticsearch_index_name="inventory-test",
+                namespace="inventory-test",
+                dimensions=10,
+            )
+        )
+        self.records: dict[str, VectorRecord] = {}
+        self.deleted_ids: list[str] = []
+        self.lexical_filters: dict[str, object] | None = None
+
+    def upsert(self, records: list[VectorRecord], *, namespace: str | None = None) -> None:
+        for record in records:
+            self.records[record.record_id] = record.model_copy(update={"namespace": namespace or record.namespace})
+
+    def query(
+        self,
+        query_vector: list[float],
+        *,
+        top_k: int,
+        filters: dict[str, object] | None = None,
+        namespace: str | None = None,
+    ) -> VectorSearchResult:
+        matches = []
+        if "prod-bag" in self.records:
+            matches.append(
+                VectorSearchMatch(
+                    record_id="prod-bag",
+                    score=0.8,
+                    metadata=dict(self.records["prod-bag"].metadata),
+                    text=self.records["prod-bag"].text,
+                    namespace=namespace,
+                )
+            )
+        return VectorSearchResult(provider=self.provider, matches=matches[:top_k], top_k=top_k, namespace=namespace)
+
+    def lexical_query(
+        self,
+        query_text: str,
+        *,
+        top_k: int,
+        filters: dict[str, object] | None = None,
+        namespace: str | None = None,
+    ) -> VectorSearchResult:
+        self.lexical_filters = dict(filters or {})
+        matches = []
+        if "prod-headphones" in self.records:
+            matches.append(
+                VectorSearchMatch(
+                    record_id="prod-headphones",
+                    score=10.0,
+                    metadata=dict(self.records["prod-headphones"].metadata),
+                    text=self.records["prod-headphones"].text,
+                    namespace=namespace,
+                )
+            )
+        return VectorSearchResult(provider=self.provider, matches=matches[:top_k], top_k=top_k, namespace=namespace)
+
+    def delete(self, record_ids: list[str], *, namespace: str | None = None) -> None:
+        self.deleted_ids.extend(record_ids)
+        for record_id in record_ids:
+            self.records.pop(record_id, None)
+
+    def describe(self, *, namespace: str | None = None) -> VectorStoreStats:
+        return VectorStoreStats(
+            provider=self.provider,
+            index_name="inventory-test",
+            total_vector_count=len(self.records),
+            namespace=namespace,
+        )
+
+    def record_ids(self, *, namespace: str | None = None) -> list[str]:
+        return sorted(self.records)
 
 
 def test_inventory_vector_record_normalizes_curated_spec_metadata(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -661,6 +744,76 @@ def test_inventory_search_combines_dense_and_lexical_candidate_pools_before_rera
     assert retrieval_stage_counts["merged_pool_candidates"] >= 1
     assert retrieval_stage_counts["reranked_candidates"] >= response.total_hits
     assert retrieval_stage_counts["returned_hits"] == response.total_hits
+
+
+def test_inventory_search_merges_elasticsearch_lexical_candidates_before_reranking(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    vector_store = MockElasticsearchHybridVectorStore()
+    embedder = KeywordEmbedder(
+        EmbedderConfig(
+            provider=EmbeddingProvider.DETERMINISTIC,
+            model_name="keyword-embedder",
+            dimensions=10,
+            normalize=False,
+        )
+    )
+    service = InventoryService(
+        embedder=embedder,
+        vector_store=vector_store,
+        config=InventoryServiceConfig(
+            catalog_path=str(tmp_path / "inventory_catalog_elastic.jsonl"),
+            namespace="inventory-test",
+            low_stock_threshold=10,
+            agentic_trace_dir=str(tmp_path / "inventory_agentic_traces_elastic"),
+            business_signal_path=str(tmp_path / "inventory_business_signals_elastic.jsonl"),
+        ),
+    )
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="prod-headphones",
+                sku="AUD-HP-001",
+                name="Wireless Headphones Pro",
+                category="Audio",
+                brand="AudioTech",
+                short_description="Premium wireless headphones with noise cancellation",
+                price=299.99,
+                currency="USD",
+                stock=45,
+                status="Active",
+                tags=["wireless", "audio", "premium"],
+                include_in_rag=True,
+            ),
+            InventoryItemRecord(
+                product_id="prod-bag",
+                sku="BAG-003",
+                name="Travel Laptop Bag",
+                category="Accessories",
+                brand="CarryAll",
+                short_description="Water-resistant bag for laptops and accessories",
+                price=79.99,
+                currency="USD",
+                stock=20,
+                status="Active",
+                tags=["bag", "travel"],
+                include_in_rag=True,
+            ),
+        ]
+    )
+
+    response, retrieval_stage_counts = service._search_with_diagnostics(
+        InventorySearchRequest(
+            query_text="wireles headfones",
+            top_k=3,
+            filters=InventorySearchFilters(categories=["Audio"]),
+        )
+    )
+
+    assert response.hits[0].product_id == "prod-headphones"
+    assert vector_store.lexical_filters == {"category_key": ["audio"]}
+    assert retrieval_stage_counts["elastic_lexical_raw_matches"] == 1
+    assert retrieval_stage_counts["elastic_lexical_pool_candidates"] == 1
+    assert retrieval_stage_counts["elastic_hybrid_pool_candidates"] >= 1
+    assert retrieval_stage_counts["lexical_pool_candidates"] >= 1
 
 
 def test_inventory_search_applies_explicit_category_gate_before_reranking(tmp_path) -> None:  # type: ignore[no-untyped-def]

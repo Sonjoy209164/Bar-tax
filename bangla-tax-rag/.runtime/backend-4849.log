@@ -1,0 +1,113 @@
+INFO:     Started server process [455218]
+INFO:     Waiting for application startup.
+2026-05-07 12:28:39,280 | INFO | app.main | FastAPI app started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:4849 (Press CTRL+C to quit)
+2026-05-07 12:28:40,586 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.003s]
+2026-05-07 12:28:40,588 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.003s]
+2026-05-07 12:28:40,596 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.007s]
+2026-05-07 12:28:40,618 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.003s]
+2026-05-07 12:28:40,792 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.174s]
+2026-05-07 12:28:40,867 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=18a9ad4b-1d63-401c-bdb4-56e2123aa90e execution_path=inventory_ask intent=restock answer_engine=deterministic total_hits=10 latency_ms=287.585 fallback_reason=None
+INFO:     127.0.0.1:48956 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36604 - "OPTIONS /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36610 - "OPTIONS /inventory/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36614 - "OPTIONS /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36624 - "OPTIONS /inventory/business/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36638 - "OPTIONS /inventory/production/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36646 - "OPTIONS /inventory/agentic/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36604 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36638 - "GET /inventory/production/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:36610 - "GET /inventory/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:36646 - "GET /inventory/agentic/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:36624 - "GET /inventory/business/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:36614 - "GET /inventory/sync/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:36662 - "OPTIONS /config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36672 - "GET /config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45354 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45362 - "GET /config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45364 - "OPTIONS /inventory/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45372 - "OPTIONS /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45384 - "OPTIONS /inventory/business/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45396 - "OPTIONS /inventory/production/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45354 - "OPTIONS /inventory/agentic/status HTTP/1.1" 200 OK
+2026-05-07 12:37:01,728 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:37:01,732 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:45362 - "GET /inventory/agentic/status HTTP/1.1" 200 OK
+2026-05-07 12:37:01,739 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.003s]
+2026-05-07 12:37:01,743 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:45364 - "GET /inventory/status HTTP/1.1" 200 OK
+2026-05-07 12:37:01,748 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:37:01,764 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.014s]
+2026-05-07 12:37:01,768 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.004s]
+2026-05-07 12:37:01,772 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 12:37:01,774 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:37:01,777 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:45372 - "GET /inventory/sync/status HTTP/1.1" 200 OK
+2026-05-07 12:37:01,858 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:37:01,861 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:45396 - "GET /inventory/production/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45384 - "GET /inventory/business/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45396 - "OPTIONS /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45384 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45384 - "OPTIONS /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45396 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45396 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45396 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45396 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45384 - "GET /config HTTP/1.1" 200 OK
+2026-05-07 12:37:04,622 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.003s]
+2026-05-07 12:37:04,626 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.004s]
+INFO:     127.0.0.1:45372 - "GET /inventory/status HTTP/1.1" 200 OK
+2026-05-07 12:37:04,630 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:37:04,645 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.014s]
+2026-05-07 12:37:04,649 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.004s]
+2026-05-07 12:37:04,653 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.003s]
+2026-05-07 12:37:04,655 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:37:04,658 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:45364 - "GET /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45362 - "GET /inventory/business/status HTTP/1.1" 200 OK
+2026-05-07 12:37:04,743 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 12:37:04,746 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:45354 - "GET /inventory/production/status HTTP/1.1" 200 OK
+2026-05-07 12:37:04,750 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:37:04,753 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:45396 - "GET /inventory/agentic/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45396 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45396 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48862 - "OPTIONS /inventory/route HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48870 - "POST /inventory/route HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48870 - "OPTIONS /inventory/ask/stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48862 - "POST /inventory/ask/stream HTTP/1.1" 200 OK
+2026-05-07 12:37:25,173 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:37:25,176 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.003s]
+2026-05-07 12:37:25,188 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.011s]
+2026-05-07 12:37:25,199 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:37:25,277 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.077s]
+2026-05-07 12:37:34,053 | INFO | httpx | HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-07 12:37:34,054 | WARNING | app.services.inventory_service | Natural answer model returned invalid structured output; deterministic fallback was used.
+2026-05-07 12:37:34,060 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=4270a062-758e-42a5-8614-e927ab2b1bb8 execution_path=inventory_ask intent=product_search answer_engine=deterministic total_hits=2 latency_ms=8890.903 fallback_reason=Natural answer model returned invalid structured output; deterministic fallback was used.
+INFO:     127.0.0.1:48862 - "OPTIONS /inventory/chat/trace/4270a062-758e-42a5-8614-e927ab2b1bb8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34980 - "GET /inventory/chat/trace/4270a062-758e-42a5-8614-e927ab2b1bb8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47394 - "POST /inventory/route HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47394 - "POST /inventory/ask/stream HTTP/1.1" 200 OK
+2026-05-07 12:37:55,032 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:37:55,035 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.003s]
+2026-05-07 12:37:55,043 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.007s]
+2026-05-07 12:37:55,046 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:37:55,100 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.053s]
+2026-05-07 12:37:55,110 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=e730b9e0-2c1a-4c3b-9873-291fc16bdca5 execution_path=inventory_ask intent=product_detail answer_engine=deterministic total_hits=0 latency_ms=87.007 fallback_reason=No reliable catalog evidence was found for this request.
+INFO:     127.0.0.1:47394 - "OPTIONS /inventory/chat/trace/e730b9e0-2c1a-4c3b-9873-291fc16bdca5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47406 - "GET /inventory/chat/trace/e730b9e0-2c1a-4c3b-9873-291fc16bdca5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53440 - "POST /inventory/route HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53440 - "POST /inventory/ask/stream HTTP/1.1" 200 OK
+2026-05-07 12:38:15,116 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:38:15,119 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.002s]
+2026-05-07 12:38:15,127 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.007s]
+2026-05-07 12:38:15,130 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 12:38:15,140 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.009s]
+2026-05-07 12:38:21,677 | INFO | httpx | HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-07 12:38:21,678 | WARNING | app.services.inventory_service | Natural answer model returned invalid structured output; deterministic fallback was used.
+2026-05-07 12:38:21,684 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=fe1ceac6-28ab-4122-9423-1cc3afcad5e9 execution_path=inventory_ask intent=business_analysis answer_engine=deterministic total_hits=2 latency_ms=6573.153 fallback_reason=Natural answer model returned invalid structured output; deterministic fallback was used.
+INFO:     127.0.0.1:53440 - "OPTIONS /inventory/chat/trace/fe1ceac6-28ab-4122-9423-1cc3afcad5e9 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58974 - "GET /inventory/chat/trace/fe1ceac6-28ab-4122-9423-1cc3afcad5e9 HTTP/1.1" 200 OK

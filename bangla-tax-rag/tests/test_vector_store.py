@@ -254,9 +254,10 @@ def test_elasticsearch_store_translates_upsert_query_delete_and_describe_payload
             captured.setdefault("exists_indices", []).append(index)
             return bool(captured.get("index_exists", False))
 
-        def create(self, *, index, mappings):
+        def create(self, *, index, mappings, settings=None):
             captured["created_index"] = index
             captured["created_mappings"] = mappings
+            captured["created_settings"] = settings
             captured["index_exists"] = True
 
     class FakeElasticsearchClient:
@@ -299,9 +300,10 @@ def test_elasticsearch_store_translates_upsert_query_delete_and_describe_payload
 
     class FakeHelpers:
         @staticmethod
-        def bulk(client, actions):
+        def bulk(client, actions, refresh=None):
             captured["bulk_client"] = client
             captured["bulk_actions"] = list(actions)
+            captured["bulk_refresh"] = refresh
 
     class FakeElasticsearchStore(ElasticsearchVectorStore):
         def __init__(self, config):
@@ -351,6 +353,7 @@ def test_elasticsearch_store_translates_upsert_query_delete_and_describe_payload
 
     mappings = captured["created_mappings"]
     assert captured["created_index"] == "income-tax-vectors"
+    assert captured["created_settings"] == {"index": {"number_of_replicas": 0}}
     assert mappings["properties"]["vector"] == {
         "type": "dense_vector",
         "dims": 2,
@@ -379,6 +382,7 @@ def test_elasticsearch_store_translates_upsert_query_delete_and_describe_payload
             },
         }
     ]
+    assert captured["bulk_refresh"] is True
     assert captured["search_index"] == "income-tax-vectors"
     assert captured["search_knn"] == {
         "field": "vector",

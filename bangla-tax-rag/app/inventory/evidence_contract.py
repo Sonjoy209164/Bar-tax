@@ -13,6 +13,7 @@ from app.core.schemas import (
 )
 from app.inventory.ontology import ProductOntology, normalize_inventory_text
 from app.inventory.preferences import InventoryPreferenceProfile
+from app.inventory.spec_utils import normalized_spec_facts
 
 
 class InventoryEvidenceContractBuilder:
@@ -506,19 +507,7 @@ class InventoryEvidenceContractBuilder:
 
     @staticmethod
     def _normalized_specs(hit: InventorySearchHit) -> dict[str, object]:
-        specs: dict[str, object] = {}
-        raw_attributes = hit.metadata.get("raw_attributes")
-        if isinstance(raw_attributes, dict):
-            for key, value in raw_attributes.items():
-                normalized_key = str(key).strip().casefold()
-                if normalized_key and value not in (None, ""):
-                    specs[normalized_key] = value
-        for key, value in hit.attributes.items():
-            normalized_key = str(key).strip().casefold()
-            if not normalized_key or normalized_key in specs or value in (None, ""):
-                continue
-            specs[normalized_key] = value
-        return specs
+        return normalized_spec_facts(attributes=hit.attributes, metadata=hit.metadata)
 
     @staticmethod
     def _dedupe(items: Iterable[str]) -> list[str]:

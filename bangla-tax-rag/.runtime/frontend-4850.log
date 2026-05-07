@@ -1,0 +1,24 @@
+127.0.0.1 - - [06/May/2026 18:21:19] "HEAD / HTTP/1.1" 200 -
+127.0.0.1 - - [06/May/2026 18:25:34] "HEAD / HTTP/1.1" 200 -
+127.0.0.1 - - [06/May/2026 18:27:22] "HEAD / HTTP/1.1" 200 -
+127.0.0.1 - - [06/May/2026 18:28:37] "HEAD / HTTP/1.1" 200 -
+127.0.0.1 - - [06/May/2026 18:29:20] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [06/May/2026 18:29:20] "GET /styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [06/May/2026 18:29:20] "GET /app.js HTTP/1.1" 200 -
+127.0.0.1 - - [06/May/2026 18:29:20] code 404, message File not found
+127.0.0.1 - - [06/May/2026 18:29:20] "GET /runtime-config.json HTTP/1.1" 404 -
+127.0.0.1 - - [06/May/2026 18:29:20] code 404, message File not found
+127.0.0.1 - - [06/May/2026 18:29:20] "GET /favicon.ico HTTP/1.1" 404 -
+127.0.0.1 - - [06/May/2026 18:29:20] "GET /config.local.json HTTP/1.1" 200 -
+127.0.0.1 - - [06/May/2026 18:29:20] "GET /data/products.json HTTP/1.1" 200 -
+127.0.0.1 - - [07/May/2026 12:23:20] "GET / HTTP/1.1" 304 -
+127.0.0.1 - - [07/May/2026 12:23:20] "GET /styles.css HTTP/1.1" 304 -
+127.0.0.1 - - [07/May/2026 12:23:20] "GET /app.js HTTP/1.1" 304 -
+127.0.0.1 - - [07/May/2026 12:23:20] code 404, message File not found
+127.0.0.1 - - [07/May/2026 12:23:20] "GET /runtime-config.json HTTP/1.1" 404 -
+127.0.0.1 - - [07/May/2026 12:23:20] "GET /config.local.json HTTP/1.1" 200 -
+127.0.0.1 - - [07/May/2026 12:23:20] "GET /data/products.json HTTP/1.1" 304 -
+127.0.0.1 - - [07/May/2026 12:36:49] "GET / HTTP/1.1" 304 -
+127.0.0.1 - - [07/May/2026 12:36:49] code 404, message File not found
+127.0.0.1 - - [07/May/2026 12:36:49] "GET /runtime-config.json HTTP/1.1" 404 -
+127.0.0.1 - - [07/May/2026 12:36:49] "GET /config.local.json HTTP/1.1" 200 -

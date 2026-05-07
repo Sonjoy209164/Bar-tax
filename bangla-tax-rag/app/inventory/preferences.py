@@ -84,7 +84,7 @@ class InventoryPreferenceExtractor:
         re.IGNORECASE,
     )
     MAX_PRICE_PATTERN = re.compile(
-        r"(?:under|below|less than|up to|within|max|maximum)\s*\$?\s*(\d+(?:\.\d+)?)",
+        r"(?:under|below|less than|up to|within|max|maximum|around|about|roughly|near|stretch to|can stretch to)\s*\$?\s*(\d+(?:\.\d+)?)",
         re.IGNORECASE,
     )
     MIN_PRICE_PATTERN = re.compile(
@@ -92,25 +92,44 @@ class InventoryPreferenceExtractor:
         re.IGNORECASE,
     )
     FEATURE_KEYWORDS: dict[str, tuple[str, ...]] = {
-        "wireless": ("wireless", "bluetooth"),
+        "wireless": ("wireless", "bluetooth", "cordless"),
+        "wired": ("wired", "3.5mm", "ethernet"),
         "noise_cancellation": ("noise cancellation", "noise cancelling", "anc"),
-        "usb_c": ("usb c", "usb-c"),
+        "usb": ("usb",),
+        "usb_c": ("usb c", "usb-c", "type c"),
+        "xlr": ("xlr",),
         "battery_life": ("battery", "battery life", "hours"),
         "ergonomic": ("ergonomic", "lumbar"),
         "gps": ("gps",),
+        "built_in_gps": ("built-in gps", "built in gps", "multi-band gps", "offline route"),
         "heart_rate": ("heart rate", "heart-rate"),
         "inverter": ("inverter",),
+        "water_resistance": ("water resistant", "water-resistant", "water resistance", "ipx", "5atm", "10atm"),
+        "oled": ("oled",),
+        "wifi_6": ("wi-fi 6", "wifi 6", "wifi6", "ax1800"),
+        "mesh": ("mesh",),
+        "high_refresh": ("high refresh", "165hz", "144hz", "120hz", "gaming monitor"),
+        "lockable": ("lockable", "locking", "keyed", "secure"),
+        "quiet": ("quiet", "silent"),
+        "mechanical": ("mechanical", "tactile", "switches"),
         "portable": ("portable", "travel"),
         "premium": ("premium", "flagship", "high end", "high-end"),
     }
     USE_CASE_KEYWORDS: dict[str, tuple[str, ...]] = {
         "office_calls": ("office call", "office calls", "meeting", "meetings", "calls", "webinar"),
+        "support_calls": ("support", "support team", "customer service", "sales calls", "daily calling"),
+        "meeting_rooms": ("meeting room", "meeting rooms", "conference room", "hybrid meeting", "group calls"),
         "gaming": ("gaming", "game"),
+        "outdoor": ("outdoor", "hiking", "trail", "adventure"),
         "travel": ("travel", "commute", "commuter"),
         "fitness": ("fitness", "workout", "running", "health"),
-        "podcasting": ("podcast", "podcasting", "recording", "webinar"),
+        "podcasting": ("podcast", "podcasting", "recording", "webinar", "streaming", "creator mic"),
+        "creator": ("creator", "content creator", "streamer", "studio", "editing"),
         "business": ("business", "manager", "analyst", "client"),
         "editing": ("editing", "studio", "content"),
+        "backup": ("backup", "archive", "archives"),
+        "networking_coverage": ("coverage", "dead spot", "larger home", "small home", "internet"),
+        "desk_setup": ("desk setup", "workstation", "desk planning", "office setup"),
     }
     PREMIUM_HINTS = ("premium", "best", "top", "flagship", "high end", "high-end", "luxury", "pro")
     BUDGET_HINTS = ("budget", "affordable", "value", "cheap", "cheapest", "lower price", "low price")
@@ -323,6 +342,12 @@ class InventoryPreferenceExtractor:
                 operator="eq",
                 value=True,
             )
+        if "built_in_gps" in feature_requirements:
+            requirements["built_in_gps_support"] = InventorySpecRequirement(
+                key="built_in_gps_support",
+                operator="eq",
+                value=True,
+            )
         if "noise_cancellation" in feature_requirements:
             requirements["anc_support"] = InventorySpecRequirement(
                 key="anc_support",
@@ -332,6 +357,66 @@ class InventoryPreferenceExtractor:
         if "inverter" in feature_requirements:
             requirements["inverter_support"] = InventorySpecRequirement(
                 key="inverter_support",
+                operator="eq",
+                value=True,
+            )
+        if "wireless" in feature_requirements:
+            requirements["wireless_support"] = InventorySpecRequirement(
+                key="wireless_support",
+                operator="eq",
+                value=True,
+            )
+        if "wired" in feature_requirements:
+            requirements["wired_support"] = InventorySpecRequirement(
+                key="wired_support",
+                operator="eq",
+                value=True,
+            )
+        if "usb" in feature_requirements:
+            requirements["usb_input"] = InventorySpecRequirement(
+                key="usb_input",
+                operator="eq",
+                value=True,
+            )
+        if "usb_c" in feature_requirements:
+            requirements["usb_c_input"] = InventorySpecRequirement(
+                key="usb_c_input",
+                operator="eq",
+                value=True,
+            )
+        if "xlr" in feature_requirements:
+            requirements["xlr_input"] = InventorySpecRequirement(
+                key="xlr_input",
+                operator="eq",
+                value=True,
+            )
+        if "water_resistance" in feature_requirements:
+            requirements["water_resistance_support"] = InventorySpecRequirement(
+                key="water_resistance_support",
+                operator="eq",
+                value=True,
+            )
+        if "oled" in feature_requirements:
+            requirements["oled_support"] = InventorySpecRequirement(
+                key="oled_support",
+                operator="eq",
+                value=True,
+            )
+        if "wifi_6" in feature_requirements:
+            requirements["wifi6_support"] = InventorySpecRequirement(
+                key="wifi6_support",
+                operator="eq",
+                value=True,
+            )
+        if "mesh" in feature_requirements:
+            requirements["mesh_support"] = InventorySpecRequirement(
+                key="mesh_support",
+                operator="eq",
+                value=True,
+            )
+        if "high_refresh" in feature_requirements:
+            requirements["high_refresh_support"] = InventorySpecRequirement(
+                key="high_refresh_support",
                 operator="eq",
                 value=True,
             )
@@ -391,7 +476,14 @@ class InventoryPreferenceExtractor:
 
     @staticmethod
     def _has_any(text: str, phrases: tuple[str, ...]) -> bool:
-        return any(phrase in text for phrase in phrases)
+        for phrase in phrases:
+            if " " in phrase or "-" in phrase:
+                if phrase in text:
+                    return True
+                continue
+            if re.search(rf"\b{re.escape(phrase)}\b", text):
+                return True
+        return False
 
     @staticmethod
     def _capacity_to_gb(value: str, unit: str) -> float:

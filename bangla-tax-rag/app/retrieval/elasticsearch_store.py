@@ -49,7 +49,7 @@ class ElasticsearchVectorStore(VectorStore):
             }
             for record in records
         ]
-        helpers.bulk(self._client(), actions)
+        helpers.bulk(self._client(), actions, refresh=True)
 
     def query(
         self,
@@ -239,6 +239,11 @@ class ElasticsearchVectorStore(VectorStore):
             return
         client.indices.create(
             index=index_name,
+            settings={
+                "index": {
+                    "number_of_replicas": 0,
+                }
+            },
             mappings={
                 "dynamic": True,
                 "properties": {
@@ -411,4 +416,14 @@ def _read_path(obj: Any, *keys: str, default: Any = None) -> Any:
 def _read_attr(obj: Any, key: str, *, default: Any = None) -> Any:
     if isinstance(obj, Mapping):
         return obj.get(key, default)
-    return getattr(obj, key, default)
+    value = getattr(obj, key, default)
+    if value is not default:
+        return value
+    try:
+        return obj[key]
+    except (KeyError, IndexError, TypeError, AttributeError):
+        pass
+    body = getattr(obj, "body", None)
+    if isinstance(body, Mapping):
+        return body.get(key, default)
+    return default

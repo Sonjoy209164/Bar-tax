@@ -203,6 +203,37 @@ def test_elasticsearch_record_ids_uses_scan_with_namespace(monkeypatch) -> None:
     assert captured["scan_size"] == 1000
 
 
+def test_elasticsearch_describe_reads_object_api_response_body() -> None:
+    class CountResponse:
+        body = {"count": 60}
+
+    class FakeIndices:
+        def exists(self, *, index):
+            return True
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.indices = FakeIndices()
+
+        def count(self, *, index, query):
+            return CountResponse()
+
+    class FakeElasticsearchStore(ElasticsearchVectorStore):
+        def _client(self):
+            return FakeClient()
+
+    store = FakeElasticsearchStore(
+        VectorStoreConfig(
+            provider=VectorStoreProvider.ELASTICSEARCH,
+            elasticsearch_url="http://localhost:9200",
+            elasticsearch_index_name="inventory-rag",
+            namespace="inventory",
+        )
+    )
+
+    assert store.describe().total_vector_count == 60
+
+
 def test_elasticsearch_existing_index_dimension_mismatch_fails(monkeypatch) -> None:
     class FakeIndices:
         def exists(self, *, index):
@@ -228,7 +259,7 @@ def test_elasticsearch_existing_index_dimension_mismatch_fails(monkeypatch) -> N
 
     class FakeHelpers:
         @staticmethod
-        def bulk(client, actions):
+        def bulk(client, actions, refresh=None):
             raise AssertionError("bulk should not run when dimensions mismatch")
 
     class FakeElasticsearchStore(ElasticsearchVectorStore):

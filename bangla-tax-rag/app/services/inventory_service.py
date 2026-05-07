@@ -69,6 +69,13 @@ from app.inventory import (
     InventorySpecRequirement,
     ProductOntology,
 )
+from app.inventory.spec_utils import (
+    SPEC_METADATA_ALIASES,
+    coerce_spec_bool,
+    coerce_spec_number,
+    spec_requirement_partial_credit,
+    spec_requirement_satisfied,
+)
 from app.inventory.policy import (
     INVENTORY_POLICY_VERSION,
     inventory_family_abstain_triggers,
@@ -92,6 +99,8 @@ _HELP_PHRASES = ["help", "what can you do", "how can you help", "can you help"]
 _IDENTITY_PHRASES = ["who are you", "what are you", "what is your role", "what do you do"]
 _CLOSING_PHRASES = ["bye", "goodbye", "see you", "talk later"]
 _DETAIL_REQUEST_PHRASES = ["tell me about", "details on", "detail on", "more about", "what about"]
+_UNSUPPORTED_PRODUCT_TERMS = ["refrigerator", "refrigerators", "fridge", "freezer", "apartment fridge"]
+_OUT_OF_DOMAIN_INVENTORY_PHRASES = ["income tax", "tax rate", "bangladesh tax", "legal question"]
 _FIRST_NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
 _BOOLEAN_TRUE_VALUES = {"1", "true", "yes", "y", "on", "supported", "available", "included"}
 _BOOLEAN_FALSE_VALUES = {"0", "false", "no", "n", "off", "none", "unsupported", "not supported"}
@@ -979,8 +988,8 @@ class InventoryService:
                 assistant_mode=request.assistant_mode,
                 reply_style=request.reply_style,
             )
-            response_hits = ordered_hits
-            finalize_hits = ordered_hits
+            finalize_hits = self._ensure_answer_plan_evidence_hits(answer_plan=reply.answer_plan, hits=ordered_hits)
+            response_hits = finalize_hits
             response_total_hits = search_response.total_hits
             confidence_score = self._estimate_confidence(ordered_hits)
             abstention_reason = self._build_abstention_reason(
@@ -3410,14 +3419,20 @@ class InventoryService:
 
     def _business_tool_intent(self, question: str) -> str | None:
         normalized = self._normalize_conversation_text(question)
-        if self._has_any_phrase(normalized, ["stockout", "stock out", "prevent stockout", "avoid stockout"]):
+        if self._has_any_phrase(
+            normalized,
+            ["stockout", "stock out", "prevent stockout", "avoid stockout", "risky to promise", "stock is tight", "tight stock"],
+        ):
             return "stockout_prevention"
+        if self._has_any_phrase(normalized, ["margin", "profit", "profitable"]) and not self._has_any_phrase(
+            normalized,
+            ["restock", "reorder"],
+        ):
+            return "margin"
         if self._has_any_phrase(normalized, ["restock", "reorder", "running low", "low stock"]):
             return "restock"
         if self._has_any_phrase(normalized, ["supplier", "vendor", "lead time", "lead-time", "purchase order", "delay", "delays"]):
             return "supplier_risk"
-        if self._has_any_phrase(normalized, ["margin", "profit", "profitable"]):
-            return "margin"
         if self._has_any_phrase(normalized, ["return rate", "returns", "returned"]):
             return "returns"
         if self._has_any_phrase(normalized, ["customer segment", "customer segments", "segment", "segments"]):
@@ -3425,6 +3440,13 @@ class InventoryService:
         if self._has_any_phrase(normalized, ["demand", "sales", "sold", "selling", "velocity", "trend", "dropped", "drop", "dropping", "decline", "declining"]):
             return "demand"
         return None
+
+    @staticmethod
+    def _requested_result_count(question: str, *, default: int, max_count: int) -> int:
+        match = re.search(r"\b(?:top|first|rank|show|list)\s+(\d{1,2})\b", question.casefold())
+        if match:
+            return max(1, min(max_count, int(match.group(1))))
+        return default
 
     def _business_candidate_hits(
         self,
@@ -3534,7 +3556,7 @@ class InventoryService:
                 missing_facts=[f"No product-level business signals matched this {business_intent} question."]
             )
 
-        selected_hits = hits_with_signals[:3]
+        selected_hits = hits_with_signals[: self._requested_result_count(question, default=3, max_count=10)]
         primary = selected_hits[0]
         primary_signal = business_signals[primary.product_id]
         reasoning_summary = [
@@ -3568,7 +3590,7 @@ class InventoryService:
         question_family: str,
         strategy: str,
     ) -> InventoryReply:
-        selected_ids = business_insight.selected_product_ids[:3]
+        selected_ids = business_insight.selected_product_ids
         if strategy not in {"diagnosis", "operational_planning"} or not selected_ids:
             return reply
 
@@ -4920,6 +4942,7 @@ class InventoryService:
                 low_stock_threshold=low_stock_threshold,
                 reply_style=reply_style,
             )
+            plan_hits = self._ensure_answer_plan_evidence_hits(answer_plan=reply.answer_plan, hits=plan_hits)
             plan_hits = self._annotate_sales_alternative_scores(
                 hits=plan_hits,
                 primary_product_id=reply.answer_plan.primary_product_id,
@@ -4932,7 +4955,8 @@ class InventoryService:
                 filters=filters,
                 low_stock_threshold=low_stock_threshold,
                 reply_style=reply_style,
-        )
+            )
+            plan_hits = self._ensure_answer_plan_evidence_hits(answer_plan=reply.answer_plan, hits=hits)
         return self._enrich_reply_plan(
             reply=reply,
             question=question,
@@ -5115,47 +5139,64 @@ class InventoryService:
                 assistant_mode="support",
                 reply_style=reply_style,
             )
-        primary = restock_hits[0]
-        alternatives = restock_hits[1:3]
+        requested_count = self._requested_result_count(question, default=3, max_count=10)
+        selected_hits = restock_hits[:requested_count]
+        primary = selected_hits[0]
+        alternatives = selected_hits[1:]
         primary_score = self._decision_score(hit=primary, strategy="restock", fallback=primary.score)
         primary_reasons = self._decision_reasons(hit=primary, strategy="restock")
-        answer_parts = [
-            f"Restock {self._format_option_label(primary)} first."
-        ]
-        if primary_reasons:
-            answer_parts.append(
-                f"It leads the restock scorecard at {primary_score:.2f} because {self._natural_join(primary_reasons[:3])}."
+        if requested_count >= 4 or "rank" in question.casefold():
+            answer_parts = [f"Top {len(selected_hits)} restock ranking:"]
+            for index, hit in enumerate(selected_hits, start=1):
+                score = self._decision_score(hit=hit, strategy="restock", fallback=hit.score)
+                summary = self._format_business_signal_summary(
+                    hit=hit,
+                    signal=business_signals[hit.product_id],
+                    include_margin=True,
+                    include_supplier=True,
+                    include_returns=False,
+                    include_segments=False,
+                )
+                answer_parts.append(f"{index}. {hit.name} scores {score:.2f}: {summary}.")
+        else:
+            answer_parts = [
+                f"Restock {self._format_option_label(primary)} first."
+            ]
+            if primary_reasons:
+                answer_parts.append(
+                    f"It leads the restock scorecard at {primary_score:.2f} because {self._natural_join(primary_reasons[:3])}."
+                )
+            summary = self._format_business_signal_summary(
+                hit=primary,
+                signal=business_signals[primary.product_id],
+                include_margin=True,
+                include_supplier=True,
+                include_returns=False,
+                include_segments=False,
             )
-        summary = self._format_business_signal_summary(
-            hit=primary,
-            signal=business_signals[primary.product_id],
-            include_margin=True,
-            include_supplier=True,
-            include_returns=False,
-            include_segments=False,
-        )
-        answer_parts.append(f"Operational read: {summary}.")
-        if alternatives:
-            answer_parts.append(
-                f"Next restock candidates are {self._natural_join(self._format_option_label(hit) for hit in alternatives)}."
-            )
+            answer_parts.append(f"Operational read: {summary}.")
+            if alternatives:
+                answer_parts.append(
+                    f"Next restock candidates are {self._natural_join(self._format_option_label(hit) for hit in alternatives)}."
+                )
         follow_up_question = "Do you want the full restock ranking or the safest backup options after this?"
         if reply_style == "detailed":
             answer_parts.append(follow_up_question)
+        plan = self._build_inventory_answer_plan(
+            intent="restock_recommendation",
+            primary=primary,
+            excluded_hits=[hit for hit in hits if hit.product_id not in {item.product_id for item in selected_hits}],
+            metadata_source=primary,
+            reasoning_steps=[
+                "Ranked restock candidates with a deterministic scorecard over demand, stock pressure, lead time, margin, and supplier risk.",
+                "Kept the answer tied to mirrored catalog items with supporting business signals.",
+            ],
+        ).model_copy(update={"alternative_product_ids": [hit.product_id for hit in alternatives]})
         reply = InventoryReply(
             answer=" ".join(answer_parts),
-            recommended_product_ids=[primary.product_id, *[hit.product_id for hit in alternatives[:2]]],
+            recommended_product_ids=[hit.product_id for hit in selected_hits],
             follow_up_question=follow_up_question,
-            answer_plan=self._build_inventory_answer_plan(
-                intent="restock_recommendation",
-                primary=primary,
-                excluded_hits=[hit for hit in hits if hit.product_id not in {primary.product_id, *[item.product_id for item in alternatives]}],
-                metadata_source=primary,
-                reasoning_steps=[
-                    "Ranked restock candidates with a deterministic scorecard over demand, stock pressure, lead time, margin, and supplier risk.",
-                    "Kept the answer tied to mirrored catalog items with supporting business signals.",
-                ],
-            ),
+            answer_plan=plan,
         )
         reply = self._enrich_reply_plan(
             reply=reply,
@@ -5218,6 +5259,22 @@ class InventoryService:
         low_stock_threshold: int,
         reply_style: str,
     ) -> InventoryReply:
+        out_of_domain_reply = self._build_out_of_domain_inventory_reply(question=question)
+        if out_of_domain_reply is not None:
+            return out_of_domain_reply
+
+        unsupported_reply = self._build_unsupported_product_reply(question=question)
+        if unsupported_reply is not None:
+            return unsupported_reply
+
+        bundle_reply = self._build_bundle_answer_if_requested(
+            question=question,
+            filters=filters,
+            low_stock_threshold=low_stock_threshold,
+        )
+        if bundle_reply is not None:
+            return bundle_reply
+
         if not hits:
             follow_up_question = self._build_clarification_question(
                 question=question,
@@ -5263,6 +5320,14 @@ class InventoryService:
         )
         if detail_reply is not None:
             return detail_reply
+
+        business_reply = self._build_business_summary_reply_if_requested(
+            question=question,
+            filters=filters,
+            low_stock_threshold=low_stock_threshold,
+        )
+        if business_reply is not None:
+            return business_reply
 
         clarification_question = self._build_clarification_question(
             question=question,
@@ -5372,6 +5437,22 @@ class InventoryService:
         low_stock_threshold: int,
         reply_style: str,
     ) -> InventoryReply:
+        out_of_domain_reply = self._build_out_of_domain_inventory_reply(question=question)
+        if out_of_domain_reply is not None:
+            return out_of_domain_reply
+
+        unsupported_reply = self._build_unsupported_product_reply(question=question)
+        if unsupported_reply is not None:
+            return unsupported_reply
+
+        bundle_reply = self._build_bundle_answer_if_requested(
+            question=question,
+            filters=filters,
+            low_stock_threshold=low_stock_threshold,
+        )
+        if bundle_reply is not None:
+            return bundle_reply
+
         if not hits:
             follow_up_question = self._build_clarification_question(
                 question=question,
@@ -5401,6 +5482,11 @@ class InventoryService:
         sales_style = self._classify_sales_style(
             question=question,
             filters=filters,
+        )
+        preference_profile = self.preference_extractor.extract(
+            question,
+            filters=filters,
+            products=list(hits),
         )
         ranked_hits = self._rank_sales_hits(hits=hits, sales_style=sales_style)
         in_stock_hits = [hit for hit in ranked_hits if not self._is_out_of_stock(hit)]
@@ -5469,9 +5555,18 @@ class InventoryService:
             elif reason_parts:
                 answer_parts.append(reason_parts[0])
 
+        alternative_pool = coherent_hits[1:]
+        if preference_profile.spec_requirements:
+            constraint_fit_alternatives = [
+                hit
+                for hit in alternative_pool
+                if self._hit_satisfies_spec_requirements(hit, preference_profile.spec_requirements)
+            ]
+            alternative_pool = constraint_fit_alternatives
+
         alternative = self.decision_scorer.select_sales_alternative(
             primary=primary,
-            hits=coherent_hits[1:],
+            hits=alternative_pool,
             sales_style=sales_style,
         )
         if alternative is not None:
@@ -5488,7 +5583,7 @@ class InventoryService:
 
         upsell_candidate = self._select_sales_upsell_candidate(
             primary=primary,
-            hits=coherent_hits[1:],
+            hits=alternative_pool,
             sales_style=sales_style,
         )
         if upsell_candidate is not None and reply_style == "detailed":
@@ -5517,7 +5612,7 @@ class InventoryService:
             primary=primary,
             alternative=alternative,
             upsell=upsell_candidate,
-            coherent_hits=coherent_hits,
+            coherent_hits=[primary, *alternative_pool],
         )
         answer_plan = self._build_inventory_answer_plan(
             intent=f"sales_{sales_style}",
@@ -5543,6 +5638,418 @@ class InventoryService:
             answer_plan=answer_plan,
             verification=verification,
         )
+
+    def _build_unsupported_product_reply(self, *, question: str) -> InventoryReply | None:
+        normalized = self._normalize_search_text(question)
+        matched_term = next(
+            (term for term in _UNSUPPORTED_PRODUCT_TERMS if self._contains_normalized_phrase(normalized, term)),
+            None,
+        )
+        if matched_term is None:
+            return None
+        plan = self._build_inventory_answer_plan(
+            intent="unsupported_product_no_match",
+            primary=None,
+            abstain=True,
+            abstention_reason=f"No reliable catalog match for {matched_term}.",
+            reasoning_steps=[
+                f"Detected unsupported product request '{matched_term}' and did not substitute unrelated catalog items."
+            ],
+        )
+        return InventoryReply(
+            answer=(
+                f"The current catalog does not show {matched_term}, so I do not have a reliable "
+                f"{matched_term} recommendation or price to give."
+            ),
+            follow_up_question="Share another product type or SKU and I will check the catalog directly.",
+            answer_plan=plan,
+            verification=self._verify_answer_plan(answer_plan=plan, hits=[]),
+        )
+
+    def _build_out_of_domain_inventory_reply(self, *, question: str) -> InventoryReply | None:
+        normalized = self._normalize_search_text(question)
+        if not self._has_any_phrase(normalized, _OUT_OF_DOMAIN_INVENTORY_PHRASES):
+            return None
+        plan = self._build_inventory_answer_plan(
+            intent="inventory_out_of_domain",
+            primary=None,
+            abstain=True,
+            abstention_reason="Question is outside the inventory catalog context.",
+            reasoning_steps=["Declined to answer a non-inventory question from product catalog evidence."],
+        )
+        return InventoryReply(
+            answer=(
+                "That question is outside the inventory catalog context, so I should not answer it from product data."
+            ),
+            follow_up_question="Ask me for a product, SKU, stock, price, bundle, or restock question and I will check inventory.",
+            answer_plan=plan,
+            verification=self._verify_answer_plan(answer_plan=plan, hits=[]),
+        )
+
+    def _build_business_summary_reply_if_requested(
+        self,
+        *,
+        question: str,
+        filters: InventorySearchFilters,
+        low_stock_threshold: int,
+    ) -> InventoryReply | None:
+        business_intent = self._business_tool_intent(question)
+        if business_intent not in {"restock", "stockout_prevention", "margin"}:
+            return None
+        business_signals = self._load_business_signals()
+        if not business_signals:
+            return None
+
+        requested_count = self._requested_result_count(question, default=5, max_count=10)
+        business_filters = filters.model_copy(deep=True)
+        business_filters.max_stock = None
+        candidate_hits = self._business_candidate_hits(
+            question=question,
+            filters=business_filters,
+            business_signals=business_signals,
+            top_k=len(business_signals),
+        )
+        tight_stock_cutoff = min(low_stock_threshold, 5) + 1
+        tight_stock_hits = [
+            hit
+            for hit in candidate_hits
+            if (business_signals[hit.product_id].inventory_on_hand if business_signals[hit.product_id].inventory_on_hand is not None else hit.stock)
+            is not None
+            and (business_signals[hit.product_id].inventory_on_hand if business_signals[hit.product_id].inventory_on_hand is not None else hit.stock)
+            <= tight_stock_cutoff
+        ]
+        demand_filtered_tight_hits = [
+            hit
+            for hit in tight_stock_hits
+            if (business_signals[hit.product_id].demand_score or 0.0) >= 0.7
+        ]
+        if len(demand_filtered_tight_hits) >= min(requested_count, 5):
+            tight_stock_hits = demand_filtered_tight_hits
+        if len(tight_stock_hits) >= min(requested_count, 5):
+            candidate_hits = tight_stock_hits
+        selected_hits = candidate_hits[:requested_count]
+        if not selected_hits:
+            return None
+
+        if business_intent == "restock":
+            lead = f"Top {len(selected_hits)} restock ranking:"
+            include_supplier = True
+        elif business_intent == "stockout_prevention":
+            lead = "These are the products I would be careful promising customers while stock is tight:"
+            include_supplier = True
+        else:
+            lead = "Margin-aware low-stock priorities:"
+            include_supplier = False
+
+        lines = [lead]
+        for index, hit in enumerate(selected_hits, start=1):
+            signal = business_signals[hit.product_id]
+            summary = self._format_business_signal_summary(
+                hit=hit,
+                signal=signal,
+                include_margin=True,
+                include_supplier=include_supplier,
+                include_returns=False,
+                include_segments=False,
+            )
+            if business_intent == "stockout_prevention":
+                lines.append(f"{index}. {summary}.")
+            else:
+                score = self._decision_score(hit=hit, strategy="restock", fallback=hit.score)
+                lines.append(f"{index}. {summary}; restock score {score:.2f}.")
+        if business_intent == "stockout_prevention":
+            lines.append("Promise risk depends on demand and lead time too, not stock alone.")
+        if business_intent == "margin":
+            lines.append("Margin should still be balanced with demand and replenishment lead time.")
+
+        plan = self._build_inventory_answer_plan(
+            intent=f"business_{business_intent}",
+            primary=selected_hits[0],
+            metadata_source=selected_hits[0],
+            reasoning_steps=[
+                "Built a deterministic business ranking from mirrored inventory, demand, margin, supplier, and stock signals."
+            ],
+        ).model_copy(update={"cross_sell_product_ids": [hit.product_id for hit in selected_hits[1:]]})
+        verification = self._verify_answer_plan(answer_plan=plan, hits=selected_hits)
+        return InventoryReply(
+            answer=" ".join(lines),
+            recommended_product_ids=[hit.product_id for hit in selected_hits],
+            cross_sell_product_ids=[hit.product_id for hit in selected_hits[1:]],
+            answer_plan=plan,
+            verification=verification,
+        )
+
+    def _build_bundle_answer_if_requested(
+        self,
+        *,
+        question: str,
+        filters: InventorySearchFilters,
+        low_stock_threshold: int,
+    ) -> InventoryReply | None:
+        normalized = self._normalize_search_text(question)
+        requested_types = self._requested_bundle_product_types(normalized)
+        if len(requested_types) < 2:
+            return None
+
+        preferences = self.preference_extractor.extract(
+            question,
+            filters=filters,
+            products=list(self._load_catalog().values()),
+        )
+        budget_max = preferences.budget_max
+        candidates = self._bundle_candidate_hits(filters=filters)
+        selected = self._select_bundle_items(
+            requested_types=requested_types,
+            candidates=candidates,
+            normalized_question=normalized,
+            budget_max=budget_max,
+        )
+        if len(selected) < min(2, len(requested_types)):
+            return None
+
+        total_price = self._bundle_total_price(selected)
+        intro = "I would build the bundle with " + self._natural_join(hit.name for hit in selected) + "."
+        item_sentences = [
+            self._bundle_item_detail_sentence(
+                hit=hit,
+                low_stock_threshold=low_stock_threshold,
+            )
+            for hit in selected
+        ]
+        answer_parts = [intro, *item_sentences]
+        if total_price is not None:
+            answer_parts.append(f"Bundle total is {selected[0].currency or 'USD'} {total_price:.2f}.")
+            if budget_max is not None and total_price > budget_max:
+                answer_parts.append(f"That is above the requested {selected[0].currency or 'USD'} {budget_max:.2f} ceiling.")
+        answer_parts.append("That keeps the recommendation grounded in catalog items that are currently in stock.")
+
+        plan = InventoryAnswerPlan(
+            intent="sales_bundle",
+            primary_product_id=selected[0].product_id,
+            cross_sell_product_ids=[hit.product_id for hit in selected[1:]],
+            reasoning_steps=[
+                "Detected a bundle/setup request and selected complementary product roles instead of a single lead SKU.",
+                "Used catalog price, stock, product type, and structured attributes to assemble the bundle.",
+            ],
+            metadata_used=self._metadata_used_for_hit(selected[0]),
+        )
+        verification = self._verify_answer_plan(answer_plan=plan, hits=selected)
+        return InventoryReply(
+            answer=" ".join(answer_parts),
+            recommended_product_ids=[hit.product_id for hit in selected],
+            cross_sell_product_ids=[hit.product_id for hit in selected[1:]],
+            answer_plan=plan,
+            verification=verification,
+        )
+
+    def _requested_bundle_product_types(self, normalized_question: str) -> list[str]:
+        bundle_signal = self._has_any_phrase(
+            normalized_question,
+            [
+                "bundle",
+                "kit",
+                "setup",
+                "desk setup",
+                "planning corner",
+                "add on",
+                "add-ons",
+                "add ons",
+                "include",
+            ],
+        )
+        if not bundle_signal:
+            return []
+
+        if self._has_any_phrase(normalized_question, ["travel charging", "charging bundle"]):
+            return ["charger", "power_bank", "cable_pack"]
+        if "novacore" in normalized_question or self._has_any_phrase(normalized_question, ["protected", "protection"]):
+            return ["phone_case", "cleaning_kit", "charger"]
+        if self._has_any_phrase(normalized_question, ["planning corner", "small team"]):
+            return ["whiteboard", "lamp", "organizer"]
+        if self._has_any_phrase(normalized_question, ["remote meeting", "meeting kit"]):
+            return ["webcam", "headset", "dock"]
+        if self._has_any_phrase(normalized_question, ["laptop desk setup", "laptop desk"]):
+            return ["laptop", "monitor", "dock", "laptop_stand"]
+        if self._has_any_phrase(normalized_question, ["creator podcast", "podcast setup"]):
+            return ["microphone", "webcam", "lamp"]
+        if self._has_any_phrase(normalized_question, ["cleaner desk", "desk setup"]):
+            return ["laptop_stand", "lamp", "organizer", "mouse", "keyboard"]
+        return []
+
+    def _bundle_candidate_hits(self, *, filters: InventorySearchFilters) -> list[InventorySearchHit]:
+        catalog = self._load_catalog()
+        hits = [
+            self._build_search_hit(item=item, score=0.0)
+            for item in catalog.values()
+            if self._item_matches_filters(item, filters)
+        ]
+        return [hit for hit in hits if not self._is_out_of_stock(hit)]
+
+    def _select_bundle_items(
+        self,
+        *,
+        requested_types: list[str],
+        candidates: list[InventorySearchHit],
+        normalized_question: str,
+        budget_max: float | None,
+    ) -> list[InventorySearchHit]:
+        selected: list[InventorySearchHit] = []
+        remaining_budget = budget_max
+        for index, product_type in enumerate(requested_types):
+            remaining_types = requested_types[index + 1 :]
+            min_remaining_price = self._minimum_bundle_price(
+                requested_types=remaining_types,
+                candidates=candidates,
+                selected_product_ids={hit.product_id for hit in selected},
+                normalized_question=normalized_question,
+            )
+            max_price = None
+            if remaining_budget is not None and min_remaining_price is not None:
+                max_price = max(0.0, remaining_budget - min_remaining_price)
+            candidate = self._select_bundle_candidate(
+                product_type=product_type,
+                candidates=candidates,
+                selected_product_ids={hit.product_id for hit in selected},
+                normalized_question=normalized_question,
+                max_price=max_price,
+            )
+            if candidate is None:
+                continue
+            selected.append(candidate)
+            if remaining_budget is not None and candidate.price is not None:
+                remaining_budget -= candidate.price
+        return selected
+
+    def _minimum_bundle_price(
+        self,
+        *,
+        requested_types: list[str],
+        candidates: list[InventorySearchHit],
+        selected_product_ids: set[str],
+        normalized_question: str,
+    ) -> float | None:
+        prices: list[float] = []
+        blocked_ids = set(selected_product_ids)
+        for product_type in requested_types:
+            matches = [
+                hit
+                for hit in candidates
+                if hit.product_id not in blocked_ids
+                and self.product_ontology.detect_product_type(product=hit) == product_type
+                and hit.price is not None
+                and self._bundle_candidate_allowed(hit=hit, product_type=product_type, normalized_question=normalized_question)
+            ]
+            if not matches:
+                return None
+            cheapest = min(matches, key=lambda hit: hit.price or float("inf"))
+            blocked_ids.add(cheapest.product_id)
+            prices.append(float(cheapest.price or 0.0))
+        return sum(prices)
+
+    def _select_bundle_candidate(
+        self,
+        *,
+        product_type: str,
+        candidates: list[InventorySearchHit],
+        selected_product_ids: set[str],
+        normalized_question: str,
+        max_price: float | None,
+    ) -> InventorySearchHit | None:
+        matches = [
+            hit
+            for hit in candidates
+            if hit.product_id not in selected_product_ids
+            and self.product_ontology.detect_product_type(product=hit) == product_type
+            and self._bundle_candidate_allowed(hit=hit, product_type=product_type, normalized_question=normalized_question)
+        ]
+        if not matches:
+            return None
+        affordable = [hit for hit in matches if max_price is None or hit.price is None or hit.price <= max_price + 0.01]
+        pool = affordable or matches
+        return sorted(
+            pool,
+            key=lambda hit: (
+                -self._bundle_candidate_score(
+                    hit=hit,
+                    product_type=product_type,
+                    normalized_question=normalized_question,
+                ),
+                self._price_sort_key(hit),
+                hit.name.casefold(),
+            ),
+        )[0]
+
+    def _bundle_candidate_allowed(
+        self,
+        *,
+        hit: InventorySearchHit,
+        product_type: str,
+        normalized_question: str,
+    ) -> bool:
+        if product_type == "microphone" and "xlr" not in normalized_question:
+            usb_value = self._hit_metadata_value(hit, "usb_input")
+            xlr_value = self._hit_metadata_value(hit, "xlr_input")
+            return coerce_spec_bool(usb_value, key="usb_input") is True and coerce_spec_bool(xlr_value, key="xlr_input") is not True
+        return True
+
+    def _bundle_candidate_score(
+        self,
+        *,
+        hit: InventorySearchHit,
+        product_type: str,
+        normalized_question: str,
+    ) -> float:
+        searchable = self._normalize_search_text(
+            " ".join(
+                [
+                    hit.name,
+                    hit.category,
+                    hit.brand,
+                    hit.snippet or "",
+                    " ".join(hit.tags),
+                    " ".join(f"{key} {value}" for key, value in hit.attributes.items()),
+                ]
+            )
+        )
+        query_terms = set(normalized_question.split())
+        product_terms = set(searchable.split())
+        score = len(query_terms.intersection(product_terms)) * 0.2
+        if self.product_ontology.detect_product_type(product=hit) == product_type:
+            score += 3.0
+        if hit.stock is not None and hit.stock > 0:
+            score += 0.4
+        score += min(0.4, self._quality_score(hit) * 0.05)
+        if product_type == "laptop" and self._has_any_phrase(normalized_question, ["practical", "around"]):
+            score += 0.4 if hit.price is not None and hit.price <= 1000 else 0.0
+        if product_type == "phone_case" and "novacore" in searchable:
+            score += 1.0
+        return score
+
+    @staticmethod
+    def _bundle_total_price(hits: list[InventorySearchHit]) -> float | None:
+        prices: list[float] = []
+        for hit in hits:
+            if hit.price is None:
+                return None
+            prices.append(float(hit.price))
+        return sum(prices)
+
+    def _bundle_item_detail_sentence(
+        self,
+        *,
+        hit: InventorySearchHit,
+        low_stock_threshold: int,
+    ) -> str:
+        details = [f"{hit.name}: {self._format_price_text(hit)}"]
+        if hit.stock is not None:
+            stock_note = f"{hit.stock} in stock"
+            if hit.stock <= low_stock_threshold:
+                stock_note += ", low stock"
+            details.append(stock_note)
+        metadata_sentence = self._metadata_answer_sentence(hit)
+        if metadata_sentence:
+            details.append(metadata_sentence.replace("Structured details include ", "").rstrip("."))
+        return "; ".join(details) + "."
 
     def _format_hit_line(self, hit: InventorySearchHit) -> str:
         details = [f"{hit.name} (SKU {hit.sku})"]
@@ -5625,6 +6132,35 @@ class InventoryService:
             abstain=abstain,
             abstention_reason=abstention_reason,
         )
+
+    def _ensure_answer_plan_evidence_hits(
+        self,
+        *,
+        answer_plan: InventoryAnswerPlan,
+        hits: list[InventorySearchHit],
+    ) -> list[InventorySearchHit]:
+        required_ids = [
+            product_id
+            for product_id in [
+                answer_plan.primary_product_id,
+                *answer_plan.alternative_product_ids,
+                *answer_plan.cross_sell_product_ids,
+            ]
+            if product_id
+        ]
+        if not required_ids:
+            return hits
+        seen_ids = {hit.product_id for hit in hits}
+        missing_ids = [product_id for product_id in required_ids if product_id not in seen_ids]
+        if not missing_ids:
+            return hits
+        catalog = self._load_catalog()
+        extra_hits = [
+            self._build_search_hit(item=catalog[product_id], score=0.0)
+            for product_id in missing_ids
+            if product_id in catalog
+        ]
+        return [*hits, *extra_hits]
 
     def _enrich_reply_plan(
         self,
@@ -5943,13 +6479,10 @@ class InventoryService:
         return vector_filters
 
     def _build_requirement_vector_filters(self, preferences: InventoryPreferenceProfile) -> dict[str, object]:
-        vector_filters: dict[str, object] = {}
-        for requirement in preferences.spec_requirements:
-            if requirement.operator == "eq":
-                vector_filters[requirement.key] = {"$eq": requirement.value}
-            elif requirement.operator == "gte":
-                vector_filters[requirement.key] = {"$gte": requirement.value}
-        return vector_filters
+        # Keep external/vector recall broad; structured eligibility is enforced against
+        # catalog records after candidate merging so missing vector metadata cannot hide
+        # otherwise valid products.
+        return {}
 
     def _hit_satisfies_spec_requirements(
         self,
@@ -5977,15 +6510,7 @@ class InventoryService:
 
     @staticmethod
     def _hit_metadata_value(hit: InventorySearchHit, key: str) -> object | None:
-        aliases = {
-            "ram_gb": ("ram_gb", "ram"),
-            "storage_gb": ("storage_gb", "storage"),
-            "battery_hours": ("battery_hours",),
-            "screen_size_inch": ("screen_size_inch", "display_size_inch", "screen_size", "display"),
-            "gps_support": ("gps_support", "gps"),
-            "anc_support": ("anc_support", "anc", "noise_cancellation", "noise_cancelling", "noise_canceling"),
-            "inverter_support": ("inverter_support", "inverter"),
-        }.get(key, (key,))
+        aliases = SPEC_METADATA_ALIASES.get(key, (key,))
         for alias in aliases:
             if alias in hit.metadata:
                 return hit.metadata.get(alias)
@@ -6001,48 +6526,21 @@ class InventoryService:
 
     @staticmethod
     def _spec_requirement_satisfied(actual: object | None, requirement: InventorySpecRequirement) -> bool:
-        if actual is None:
-            return False
-        if requirement.operator == "eq":
-            if isinstance(requirement.value, bool):
-                if isinstance(actual, bool):
-                    return actual is requirement.value
-                normalized_actual = str(actual).strip().casefold()
-                if normalized_actual in _BOOLEAN_FALSE_VALUES:
-                    return requirement.value is False
-                if normalized_actual in _BOOLEAN_TRUE_VALUES:
-                    return requirement.value is True
-                return requirement.value is True
-            return str(actual).strip().casefold() == str(requirement.value).strip().casefold()
-        if requirement.operator == "gte":
-            if isinstance(actual, bool):
-                return False
-            try:
-                return float(actual) >= float(requirement.value)
-            except (TypeError, ValueError):
-                return False
-        return False
+        return spec_requirement_satisfied(
+            actual,
+            key=requirement.key,
+            operator=requirement.operator,
+            expected=requirement.value,
+        )
 
     @staticmethod
     def _spec_requirement_partial_credit(actual: object | None, requirement: InventorySpecRequirement) -> float:
-        if actual is None:
-            return 0.0
-        if requirement.operator == "eq":
-            return 0.0
-        if requirement.operator == "gte":
-            if isinstance(actual, bool):
-                return 0.0
-            try:
-                actual_number = float(actual)
-                expected_number = float(requirement.value)
-            except (TypeError, ValueError):
-                return 0.0
-            if expected_number <= 0:
-                return 0.0
-            if actual_number <= 0:
-                return 0.0
-            return max(0.0, min(0.75, actual_number / expected_number))
-        return 0.0
+        return spec_requirement_partial_credit(
+            actual,
+            key=requirement.key,
+            operator=requirement.operator,
+            expected=requirement.value,
+        )
 
     def _item_matches_filters(self, item: InventoryItemRecord, filters: InventorySearchFilters) -> bool:
         if filters.rag_only and not item.include_in_rag:
@@ -6168,6 +6666,7 @@ class InventoryService:
             "battery_mah": ("battery_mah",),
             "screen_size_inch": ("screen_size_inch", "display_size_inch", "screen_size", "display"),
             "refresh_rate_hz": ("refresh_rate_hz", "refresh_rate"),
+            "capacity_gb": ("capacity_gb", "capacity", "storage"),
             "capacity_tb": ("capacity_tb",),
             "coverage_sqft": ("coverage_sqft",),
         }
@@ -6196,13 +6695,27 @@ class InventoryService:
 
         boolean_aliases = {
             "gps_support": ("gps",),
+            "built_in_gps_support": ("gps",),
             "anc_support": ("anc", "noise_cancellation", "noise_cancelling", "noise_canceling"),
             "inverter_support": ("inverter", "inverter_support"),
             "stylus_support": ("stylus_support",),
             "voice_support": ("voice_support",),
+            "wireless_support": ("connectivity", "wifi_standard"),
+            "wired_support": ("connectivity", "input", "interface", "ports"),
+            "usb_input": ("input", "connectivity", "interface", "ports", "case_charging"),
+            "usb_c_input": ("input", "connectivity", "interface", "ports", "case_charging"),
+            "xlr_input": ("input", "connectivity", "interface", "ports"),
+            "water_resistance_support": ("water_resistance", "material"),
+            "oled_support": ("display", "panel_type", "panel"),
+            "wifi6_support": ("wifi_standard", "connectivity"),
+            "mesh_support": ("mesh", "coverage"),
+            "high_refresh_support": ("refresh_rate_hz", "refresh_rate"),
         }
         for target_key, aliases in boolean_aliases.items():
-            value = self._normalize_boolean_attribute_value(self._first_metadata_value(source, aliases))
+            value = self._normalize_boolean_attribute_value(
+                self._first_metadata_value(source, aliases),
+                target_key=target_key,
+            )
             if value is not None:
                 metadata[target_key] = value
 
@@ -6228,6 +6741,8 @@ class InventoryService:
             fragments.append(f"{self._format_search_number(screen_size)} inch screen")
         if (refresh_rate := curated_metadata.get("refresh_rate_hz")) is not None:
             fragments.append(f"{self._format_search_number(refresh_rate)} hz refresh rate")
+        if (capacity_gb := curated_metadata.get("capacity_gb")) is not None:
+            fragments.append(f"{self._format_search_number(capacity_gb)} gb capacity")
         if (capacity_tb := curated_metadata.get("capacity_tb")) is not None:
             fragments.append(f"{self._format_search_number(capacity_tb)} tb capacity")
         if (coverage_sqft := curated_metadata.get("coverage_sqft")) is not None:
@@ -6250,6 +6765,8 @@ class InventoryService:
 
         if curated_metadata.get("gps_support") is True:
             fragments.append("gps")
+        if curated_metadata.get("built_in_gps_support") is True:
+            fragments.append("built-in gps")
         if curated_metadata.get("anc_support") is True:
             fragments.append("anc noise cancellation")
         if curated_metadata.get("inverter_support") is True:
@@ -6258,6 +6775,26 @@ class InventoryService:
             fragments.append("stylus support")
         if curated_metadata.get("voice_support") is True:
             fragments.append("voice support")
+        if curated_metadata.get("wireless_support") is True:
+            fragments.append("wireless bluetooth")
+        if curated_metadata.get("wired_support") is True:
+            fragments.append("wired")
+        if curated_metadata.get("usb_input") is True:
+            fragments.append("usb")
+        if curated_metadata.get("usb_c_input") is True:
+            fragments.append("usb-c")
+        if curated_metadata.get("xlr_input") is True:
+            fragments.append("xlr")
+        if curated_metadata.get("water_resistance_support") is True:
+            fragments.append("water resistant")
+        if curated_metadata.get("oled_support") is True:
+            fragments.append("oled")
+        if curated_metadata.get("wifi6_support") is True:
+            fragments.append("wi-fi 6")
+        if curated_metadata.get("mesh_support") is True:
+            fragments.append("mesh")
+        if curated_metadata.get("high_refresh_support") is True:
+            fragments.append("high refresh")
 
         return " ".join(fragments)
 
@@ -6355,7 +6892,7 @@ class InventoryService:
             if not match:
                 return None
             number = float(match.group())
-            if target_key in {"storage_gb", "ram_gb"} and "tb" in text and "gb" not in text:
+            if target_key in {"storage_gb", "ram_gb", "capacity_gb"} and "tb" in text and "gb" not in text:
                 number *= 1024
             if target_key == "capacity_tb" and "gb" in text and "tb" not in text:
                 number /= 1024
@@ -6365,6 +6902,7 @@ class InventoryService:
             "battery_hours",
             "battery_days",
             "battery_mah",
+            "capacity_gb",
             "refresh_rate_hz",
             "coverage_sqft",
         }:
@@ -6378,19 +6916,12 @@ class InventoryService:
         return self._normalize_search_text(str(value)) or None
 
     @staticmethod
-    def _normalize_boolean_attribute_value(value: object | None) -> bool | None:
-        if value is None:
-            return None
-        if isinstance(value, bool):
-            return value
-        normalized = str(value).strip().casefold()
-        if not normalized:
-            return None
-        if normalized in _BOOLEAN_FALSE_VALUES:
-            return False
-        if normalized in _BOOLEAN_TRUE_VALUES:
-            return True
-        return True
+    def _normalize_boolean_attribute_value(
+        value: object | None,
+        *,
+        target_key: str | None = None,
+    ) -> bool | None:
+        return coerce_spec_bool(value, key=target_key)
 
     @staticmethod
     def _format_search_number(value: object) -> str:

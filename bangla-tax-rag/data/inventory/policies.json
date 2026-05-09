@@ -1,0 +1,139 @@
+{
+  "version": "boutique-policy-v1",
+  "updated_at": "2026-05-09T00:00:00+06:00",
+  "shop_name": "Sonjoy Boutique",
+  "delivery": {
+    "inside_dhaka": {
+      "charge": 80,
+      "currency": "BDT",
+      "eta": "1-2 working days",
+      "areas": [
+        "Dhanmondi", "Gulshan", "Banani", "Uttara", "Mirpur", "Mohakhali",
+        "Rayer Bazar", "Azimpur", "Lalbagh", "Old Dhaka", "Motijheel",
+        "Tejgaon", "Bashundhara", "Baridhara", "Khilgaon", "Shyamoli",
+        "Mohammadpur", "Jatrabari", "Demra", "Rampura", "Badda",
+        "Pallabi", "Savar", "Gazipur"
+      ]
+    },
+    "outside_dhaka": {
+      "charge": 150,
+      "currency": "BDT",
+      "eta": "3-5 working days",
+      "note": "Available via Sundarban Courier, SA Paribahan, and Pathao Courier."
+    },
+    "express_dhaka": {
+      "charge": 150,
+      "currency": "BDT",
+      "eta": "Same day (order before 12pm)",
+      "available": true
+    },
+    "free_delivery_threshold": {
+      "amount": 5000,
+      "currency": "BDT",
+      "note": "Free delivery inside Dhaka on orders above BDT 5,000."
+    },
+    "notes": [
+      "Delivery time counts from order confirmation, not placement.",
+      "Holidays and Eid season may extend delivery by 1-2 days.",
+      "Fragile/expensive items are double-packed."
+    ]
+  },
+  "payment": {
+    "methods": ["COD", "bKash", "Nagad", "Rocket", "card", "bank_transfer"],
+    "cod": {
+      "available": true,
+      "limit_bdt": 10000,
+      "note": "COD available up to BDT 10,000. For higher amounts, advance payment required."
+    },
+    "bkash": {
+      "available": true,
+      "number": "01XXXXXXXXX",
+      "instruction": "Send payment to this bKash merchant number and share the TrxID with us."
+    },
+    "nagad": {
+      "available": true,
+      "number": "01XXXXXXXXX",
+      "instruction": "Send payment to this Nagad merchant number and share the TrxID."
+    },
+    "rocket": {
+      "available": true,
+      "number": "01XXXXXXXXX"
+    },
+    "card": {
+      "available": true,
+      "types": ["Visa", "Mastercard"],
+      "note": "Card payment available via SSL Commerz on website checkout."
+    },
+    "advance_required": {
+      "threshold_bdt": 10000,
+      "note": "Orders above BDT 10,000 require at least 50% advance payment."
+    }
+  },
+  "refund": {
+    "allowed": false,
+    "exceptions": [
+      "Wrong product delivered",
+      "Defective/damaged product on arrival",
+      "Size delivered does not match order"
+    ],
+    "process": [
+      "Contact us within 48 hours of delivery with photo/video proof.",
+      "Our team will verify the claim within 1-2 working days.",
+      "If approved, refund is issued within 3-5 working days via original payment method.",
+      "COD refunds are made via bKash or Nagad."
+    ],
+    "not_eligible": [
+      "Customer changed mind",
+      "Minor color variation due to photography/screen",
+      "Used or washed products",
+      "Products without original tags"
+    ],
+    "message": "Refund is only available for damaged, defective, or wrong products after verification within 48 hours of delivery."
+  },
+  "exchange": {
+    "allowed": true,
+    "allowed_days": 3,
+    "conditions": [
+      "Product must be unused",
+      "Original tags must be attached",
+      "Original receipt or order ID required",
+      "Item must be in original packaging"
+    ],
+    "eligible_reasons": [
+      "Wrong size delivered",
+      "Wrong color delivered",
+      "Customer wants different size (first exchange free)"
+    ],
+    "not_eligible": [
+      "Sarees with blouse stitched",
+      "Customized or altered products",
+      "Cosmetics and beauty products once opened",
+      "Perfumes once used"
+    ],
+    "process": [
+      "Contact us within 3 days of delivery.",
+      "Courier the item back (customer bears courier cost for size exchange).",
+      "New item dispatched within 1-2 working days after receiving return."
+    ]
+  },
+  "alteration": {
+    "available": true,
+    "products": ["blouse", "panjabi", "salwar_kameez"],
+    "lead_time": "3-5 working days additional",
+    "cost": "Free for size adjustment within 2 inches. Extra charge for major alterations.",
+    "note": "Alteration orders cannot be exchanged or refunded after stitching."
+  },
+  "damaged_product": {
+    "policy": "If the product arrives damaged, contact us within 24 hours with photo proof. We will replace or refund as applicable.",
+    "contact_hours": 24
+  },
+  "privacy": {
+    "customer_data": "We only store customer name, phone, and delivery address for order fulfillment. We do not share data with third parties."
+  },
+  "contact": {
+    "phone": "01XXXXXXXXX",
+    "whatsapp": "01XXXXXXXXX",
+    "email": "support@sonjoyboutique.com",
+    "hours": "10am - 8pm, Saturday to Thursday"
+  }
+}

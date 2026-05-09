@@ -42,3 +42,101 @@ The expected answer does not need to match word-for-word. It must preserve the f
 - Do not use another size SKU as if it satisfied the requested exact size.
 - Same-design follow-ups must use focused product context.
 - If an item exists but stock is zero, say it exists but is out of stock and offer available alternatives.
+
+---
+
+## Extended QA Set v2 (2026-05-09)
+
+### Image Matching Questions
+
+```text
+এই ছবির মতো লাল জামদানি আছে?
+ei bag er moto same color clutch ache?
+Find a similar gold accessory for this saree image.
+এই জামদানির মতো শাড়ি আছে?
+ei picture er moto same design ache?
+```
+
+Expected: Similar product results with "similar design match" disclaimer. Never claim exact visual match without SKU proof.
+
+### Policy QA Questions
+
+```text
+Dhaka delivery charge koto?
+Outside Dhaka delivery koto din lage?
+ভুল প্রোডাক্ট গেলে কী হবে?
+refund possible?
+exchange er condition ki?
+bKash payment hobe?
+COD maximum koto taka?
+alteration service ache?
+```
+
+Expected: All answers grounded exclusively in data/inventory/policies.json.
+
+### Order Placement Questions
+
+```text
+eta cart e add korun
+2 ta nibo
+COD hobe?
+order confirm korun
+amar order status ki?
+cancel korte chai
+```
+
+Expected: Full order workflow with order ID on confirmation. COD limit enforced.
+
+### Customer Memory Questions
+
+```text
+amar size 42 remember kore rakho
+amar budget normally 3000 er moddhe
+amar oily skin
+amar saved preference ki?
+amar memory delete kore dao
+```
+
+Expected: Preferences stored per session, shown on request, cleared on delete.
+
+### Multi-Brand Ambiguity Questions
+
+```text
+Aarong er red saree ache?
+আড়ং এর সাড়ি দেখাও
+arong er jamdani?
+same SKU er blue variant ache?
+Jamdani and Katan er moddhe wedding er jonno konta better?
+Mirpur branch e stock ache?
+```
+
+Expected: Brand transliteration handled. Multi-fabric ambiguity → clarification question. Branch stock → honest abstention.
+
+### Styling Advice Questions
+
+```text
+eid er jonno 5000 er moddhe elegant look chai
+office e regular porar jonno halka saree suggest korun
+navy katan er sathe gold na silver jewelry better?
+নেভি কাতান শাড়ির সাথে বিয়ের জন্য কী কী নিলে ভালো হবে?
+red saree er sathe kon color bag manabe?
+```
+
+Expected: All styling advice grounded in catalog metadata + COLOR_PAIRING_RULES. No fabricated suggestions.
+
+### 5-Turn Deep Conversation
+
+```text
+Turn 1: ekta navy katan dekhan
+Turn 2: same design maroon ache?
+Turn 3: tar sathe kon bag manabe?
+Turn 4: total price koto?
+Turn 5: order korte chai
+```
+
+Expected:
+- Turn 1: Return navy katan saree(s) with price/stock.
+- Turn 2: Resolve "same design" from context. Look for maroon variant.
+- Turn 3: Recommend matching bag(s) with price/stock.
+- Turn 4: Sum saree + bag price. Show delivery info.
+- Turn 5: Start order draft. Ask for name, phone, delivery area, payment.

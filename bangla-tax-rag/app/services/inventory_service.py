@@ -938,6 +938,36 @@ class InventoryService:
             )
             return response
 
+        policy_reply = self._try_policy_qa(request.question)
+        if policy_reply is not None:
+            response = InventoryAskResponse(
+                status="success",
+                question=request.question,
+                answer=policy_reply,
+                assistant_mode=request.assistant_mode,
+                reply_style=request.reply_style,
+                answer_engine="deterministic",
+                confidence_score=0.9,
+                trace_id=trace_id,
+                abstained=False,
+                total_hits=0,
+                applied_filters=request.filters.model_copy(deep=True),
+                hits=[],
+                recommended_product_ids=[],
+                cross_sell_product_ids=[],
+                memory_resolution=memory_resolution,
+            )
+            self._save_inventory_chat_trace(
+                trace_id=trace_id,
+                response=response,
+                execution_path="policy_qa",
+                started_at=started_at,
+                requested_answer_engine=request.answer_engine,
+                retrieved_hits=[],
+                reranked_hits=[],
+            )
+            return response
+
         resolved_memory = self.memory_resolver.resolve(
             question=request.question,
             filters=request.filters.model_copy(deep=True),
@@ -7284,6 +7314,9 @@ class InventoryService:
     def _catalog_path(self) -> Path:
         return Path(self.config.catalog_path)
 
+    def load_catalog(self) -> dict[str, InventoryItemRecord]:
+        return self.mirror_store.load_catalog()
+
     def _load_catalog(self) -> dict[str, InventoryItemRecord]:
         return self.mirror_store.load_catalog()
 
@@ -7304,6 +7337,14 @@ class InventoryService:
     @staticmethod
     def _is_out_of_stock(hit: InventorySearchHit) -> bool:
         return hit.stock is None or hit.stock <= 0
+
+    @staticmethod
+    def _try_policy_qa(question: str) -> str | None:
+        from app.inventory.policy_qa import PolicyQAEngine, is_policy_question
+        if not is_policy_question(question):
+            return None
+        engine = PolicyQAEngine()
+        return engine.answer(question)
 
     @staticmethod
     def _price_sort_key(hit: InventorySearchHit, *, reverse: bool = False) -> float:

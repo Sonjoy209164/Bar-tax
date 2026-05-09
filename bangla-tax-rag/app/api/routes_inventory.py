@@ -5,6 +5,10 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.core.schemas import (
+    CustomerProfileResponse,
+    ImageSearchRequest,
+    ImageSearchResponse,
+    ImageSearchHit,
     InventoryAgenticRequest,
     InventoryAgenticResponse,
     InventoryAgenticStatusResponse,
@@ -34,8 +38,17 @@ from app.core.schemas import (
     InventorySyncValidateResponse,
     InventoryUpsertRequest,
     InventoryUpsertResponse,
+    POSSyncImportRequest,
+    POSSyncResponse,
+    POSSyncStatusResponse,
+    POSSyncWebhookRequest,
+    PolicyQARequest,
+    PolicyQAResponse,
 )
+from app.inventory.image_matcher import ImageMatcher
 from app.inventory.policy import inventory_policy_contract
+from app.inventory.policy_qa import PolicyQAEngine
+from app.inventory.pos_sync import POSSyncEngine
 from app.services.inventory_service import get_inventory_service
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -350,3 +363,93 @@ async def ask_inventory_stream(request: InventoryAskRequest) -> StreamingRespons
         media_type="text/event-stream",
         headers=_STREAMING_HEADERS,
     )
+
+
+@router.post("/image-search", response_model=ImageSearchResponse)
+async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
+    catalog = get_inventory_service().load_catalog()
+    matcher = ImageMatcher(catalog)
+    results = matcher.search(
+        query_text=request.query_text,
+        image_b64=request.image_b64,
+        category_hint=request.category_hint,
+        color_hint=request.color_hint,
+        budget_max=request.budget_max,
+        top_k=request.top_k,
+    )
+    answer = matcher.build_answer(results, request.query_text)
+    hits = [
+        ImageSearchHit(
+            product_id=r.product_id,
+            name=r.name,
+            score=r.score,
+            match_type=r.match_type,
+            reasons=list(r.reasons),
+            price=r.price,
+            currency=r.currency,
+            stock=r.stock,
+            image_url=r.image_url,
+        )
+        for r in results
+    ]
+    return ImageSearchResponse(status="success", answer=answer, hits=hits, total=len(hits))
+
+
+@router.post("/sync/import", response_model=POSSyncResponse)
+async def pos_sync_csv_import(request: POSSyncImportRequest) -> POSSyncResponse:
+    engine = POSSyncEngine()
+    result = engine.import_from_csv(request.csv_text)
+    return POSSyncResponse(
+        status="success" if not result.errors else "partial",
+        inserted=result.inserted,
+        updated=result.updated,
+        stock_changed=result.stock_changed,
+        deactivated=result.deactivated,
+        skipped=result.skipped,
+        errors=result.errors[:10],
+        summary=result.summary(),
+        timestamp=result.timestamp,
+    )
+
+
+@router.post("/sync/webhook", response_model=POSSyncResponse)
+async def pos_sync_webhook(request: POSSyncWebhookRequest) -> POSSyncResponse:
+    engine = POSSyncEngine()
+    result = engine.import_from_webhook({"source": request.source, "event": request.event, "items": request.items})
+    return POSSyncResponse(
+        status="success" if not result.errors else "partial",
+        inserted=result.inserted,
+        updated=result.updated,
+        stock_changed=result.stock_changed,
+        deactivated=result.deactivated,
+        skipped=result.skipped,
+        errors=result.errors[:10],
+        summary=result.summary(),
+        timestamp=result.timestamp,
+    )
+
+
+@router.get("/sync/status", response_model=POSSyncStatusResponse)
+async def pos_sync_status() -> POSSyncStatusResponse:
+    engine = POSSyncEngine()
+    data = engine.get_sync_status()
+    return POSSyncStatusResponse(
+        status="success",
+        total_products=data["total_products"],
+        active_products=data["active_products"],
+        out_of_stock=data["out_of_stock"],
+        last_sync=data["last_sync"],
+    )
+
+
+@router.post("/policy-qa", response_model=PolicyQAResponse)
+async def policy_qa(request: PolicyQARequest) -> PolicyQAResponse:
+    engine = PolicyQAEngine()
+    answer = engine.answer(request.question)
+    if answer is None:
+        return PolicyQAResponse(
+            status="not_found",
+            answer="I don't have a specific policy answer for that question. Please contact us directly.",
+            source="policies.json",
+        )
+    return PolicyQAResponse(status="success", answer=answer, source="policies.json")

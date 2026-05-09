@@ -562,6 +562,16 @@ class FashionRetailAssistant:
         if not self.should_handle(question=question, slots=slots, fashion_items=fashion_items):
             return None
 
+        if slots.intent == "fashion_styling_advice":
+            outcome = self._answer_styling_advice(question=question, items=fashion_items, slots=slots, top_k=top_k)
+            if outcome is not None:
+                return outcome
+
+        if slots.intent == "fashion_multi_brand_clarification":
+            outcome = self._answer_multi_brand_clarification(question=question, items=fashion_items, slots=slots, top_k=top_k)
+            if outcome is not None:
+                return outcome
+
         if slots.intent == "fashion_variant_color":
             outcome = self._answer_variant_color(question=question, items=fashion_items, slots=slots, top_k=top_k)
             if outcome is not None:
@@ -1083,6 +1093,42 @@ class FashionRetailAssistant:
             reasons.append("lexical")
         return score, reasons
 
+    STYLING_ADVICE_PHRASES = (
+        "styling advice",
+        "style suggestion",
+        "what should i wear",
+        "what goes with",
+        "ki nile bhalo hobe",
+        "ki nile valo hobe",
+        "sathe ki manabe",
+        "sathe ki nilam",
+        "complete look",
+        "outfit idea",
+        "combination suggest",
+        "look complete",
+        "ki ki nebo",
+        "ki ki nibo",
+        "konta valo",
+        "konta better",
+        "better option",
+        "ভালো হবে",
+        "কী নিলে",
+        "কী মানাবে",
+        "কম্বিনেশন",
+        "স্টাইল",
+        "outfit",
+    )
+    BRAND_ALIASES: dict[str, tuple[str, ...]] = {
+        "aarong": ("aarong", "arong", "arang", "আড়ং", "আড়োং"),
+        "artisan": ("artisan", "artisan collection"),
+        "richman": ("richman", "rich man"),
+        "dorjibari": ("dorjibari", "dorji bari", "দর্জিবাড়ি"),
+        "rang": ("rang", "rang bangladesh", "রং"),
+        "yellow": ("yellow", "yellow fashion"),
+        "ecstasy": ("ecstasy",),
+        "sailor": ("sailor",),
+    }
+
     def _classify_intent(
         self,
         *,
@@ -1092,6 +1138,8 @@ class FashionRetailAssistant:
         size: str | None,
         design_id: str | None,
     ) -> str:
+        if any(self._contains_phrase(text, phrase) for phrase in self.STYLING_ADVICE_PHRASES):
+            return "fashion_styling_advice"
         if size and any(self._contains_phrase(text, phrase) for phrase in self.AVAILABILITY_PHRASES):
             return "fashion_size_availability"
         if any(self._contains_phrase(text, phrase) for phrase in self.ACCESSORY_MATCH_PHRASES):
@@ -1627,3 +1675,172 @@ class FashionRetailAssistant:
         if len(cleaned) == 2:
             return f"{cleaned[0]} and {cleaned[1]}"
         return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
+
+    # -------------------------------------------------------------------------
+    # Styling advice engine (rules-based from product metadata)
+    # -------------------------------------------------------------------------
+
+    _COLOR_PAIRING_RULES: dict[str, list[str]] = {
+        "red": ["gold", "black", "white", "silver", "nude"],
+        "maroon": ["gold", "antique gold", "cream", "black", "beige"],
+        "navy": ["gold", "silver", "white", "cream", "rose gold"],
+        "navy blue": ["gold", "silver", "white", "cream", "rose gold"],
+        "blue": ["gold", "silver", "white"],
+        "royal blue": ["gold", "silver", "white"],
+        "green": ["gold", "antique gold", "cream", "white"],
+        "bottle green": ["gold", "antique gold", "cream", "rose gold"],
+        "black": ["gold", "silver", "white", "red"],
+        "white": ["gold", "silver", "blue", "red", "pink"],
+        "yellow": ["white", "black", "green"],
+        "pink": ["gold", "silver", "white", "rose gold"],
+        "purple": ["gold", "silver", "white"],
+        "orange": ["gold", "cream", "white"],
+        "mustard": ["black", "maroon", "green"],
+    }
+
+    _OCCASION_WEIGHT: dict[str, list[str]] = {
+        "wedding": ["heavy", "zari", "meena", "katan", "silk", "bridal", "embroidered"],
+        "party": ["embroidered", "printed", "buti", "floral", "silk"],
+        "office": ["plain", "cotton", "simple", "lightweight", "formal"],
+        "casual": ["cotton", "linen", "plain", "lightweight"],
+        "eid": ["heavy", "zari", "meena", "katan", "embroidered", "buti"],
+        "puja": ["cotton", "silk", "linen", "traditional"],
+        "daily wear": ["cotton", "plain", "lightweight"],
+    }
+
+    def _answer_styling_advice(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        top_k: int,
+    ) -> FashionRetailOutcome | None:
+        color = slots.color or slots.color_family
+        occasion = slots.occasion
+        budget_max = slots.budget_max
+
+        complementary_colors = self._COLOR_PAIRING_RULES.get(
+            (color or "").casefold(), ["gold", "silver", "white"]
+        ) if color else ["gold", "silver", "white", "black"]
+
+        accessory_keys = ("bag", "jewelry", "shoes", "dupatta", "shawl", "watch")
+        suggestions: list[InventoryItemRecord] = []
+
+        for key in accessory_keys:
+            matches = [
+                item
+                for item in items
+                if self._item_category_matches(item, key)
+                and item.stock > 0
+                and (budget_max is None or (item.price or 0) <= budget_max)
+                and any(
+                    (item.attributes.get("color_family") or "").casefold() == cc
+                    or (item.attributes.get("color") or "").casefold() == cc
+                    for cc in complementary_colors
+                )
+            ]
+            if not matches:
+                matches = [
+                    item
+                    for item in items
+                    if self._item_category_matches(item, key) and item.stock > 0
+                    and (budget_max is None or (item.price or 0) <= budget_max)
+                ]
+            if matches:
+                matches.sort(key=lambda x: -x.stock)
+                suggestions.append(matches[0])
+
+        if not suggestions:
+            return None
+
+        color_label = color or "your saree"
+        occasion_label = f" for {occasion}" if occasion else ""
+        complement_str = ", ".join(complementary_colors[:3])
+        lines: list[str] = [
+            f"{color_label.title()} color pairs well with {complement_str} tones{occasion_label}.\n"
+        ]
+        for item in suggestions[:top_k]:
+            lines.append(f"- **{item.name}** — BDT {(item.price or 0):,.0f}, Stock: {item.stock}")
+            item_color = item.attributes.get("color") or item.attributes.get("color_family") or ""
+            item_occasion = item.attributes.get("occasion") or ""
+            if item_color:
+                lines.append(f"  Color: {item_color}")
+            if item_occasion and occasion and occasion.casefold() in item_occasion.casefold():
+                lines.append(f"  Great for: {occasion}")
+
+        if occasion in self._OCCASION_WEIGHT:
+            weight_hints = self._OCCASION_WEIGHT[occasion]
+            lines.append(
+                f"\nFor {occasion}, prefer {', '.join(weight_hints[:3])} fabric/work for the best look."
+            )
+
+        return self._outcome(
+            answer="\n".join(lines),
+            intent="fashion_styling_advice",
+            product_ids=tuple(item.product_id for item in suggestions[:top_k]),
+            total_matches=len(suggestions),
+            confidence=0.82,
+            slots=slots,
+            reasoning_steps=(
+                f"Applied color pairing rules for {color_label}.",
+                f"Filtered accessories by complementary colors: {complement_str}.",
+                "Only returned in-stock items within budget.",
+            ),
+        )
+
+    # -------------------------------------------------------------------------
+    # Multi-brand ambiguity clarification
+    # -------------------------------------------------------------------------
+
+    def _answer_multi_brand_clarification(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        top_k: int,
+    ) -> FashionRetailOutcome | None:
+        brand = self._detect_brand(normalize_fashion_text(question))
+        if not brand or not slots.category_key:
+            return None
+
+        brand_items = [
+            item
+            for item in items
+            if self._item_category_matches(item, slots.category_key)
+            and (item.brand or "").casefold() == brand.casefold()
+        ]
+        if not brand_items:
+            return None
+
+        fabrics_available = sorted({
+            (item.attributes.get("fabric") or "").title()
+            for item in brand_items
+            if item.attributes.get("fabric")
+        })
+
+        if len(fabrics_available) > 1:
+            fabric_list = ", ".join(fabrics_available)
+            return self._outcome(
+                answer=(
+                    f"I found multiple {brand} {slots.category_label or slots.category_key}s. "
+                    f"Available fabric types: {fabric_list}. "
+                    f"Which fabric do you prefer?"
+                ),
+                intent="fashion_multi_brand_clarification",
+                product_ids=tuple(item.product_id for item in brand_items[:top_k]),
+                total_matches=len(brand_items),
+                confidence=0.75,
+                slots=slots,
+                follow_up_question=f"Which {brand} {slots.category_key} fabric do you prefer? {fabric_list}?",
+                reasoning_steps=(f"Found {len(brand_items)} {brand} products with multiple fabric options.",),
+            )
+        return None
+
+    def _detect_brand(self, text: str) -> str | None:
+        for brand, aliases in self.BRAND_ALIASES.items():
+            if any(self._contains_phrase(text, alias) for alias in aliases):
+                return brand.title()
+        return None
+

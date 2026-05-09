@@ -1339,3 +1339,157 @@ class InventoryChatTraceResponse(BaseModel):
     missing_facts: list[str] = Field(default_factory=list)
     retrieval_steps: list[InventoryAgenticStep] = Field(default_factory=list)
     final_answer: str
+
+
+# ---------------------------------------------------------------------------
+# Order workflow schemas
+# ---------------------------------------------------------------------------
+
+class OrderItemSchema(BaseModel):
+    product_id: str
+    sku: str
+    name: str
+    quantity: int = Field(default=1, ge=1)
+    unit_price: float
+    currency: str = "BDT"
+    line_total: float = 0.0
+
+
+class OrderDraftRequest(BaseModel):
+    session_id: str
+    product_id: str
+    sku: str
+    name: str
+    unit_price: float
+    quantity: int = Field(default=1, ge=1)
+    currency: str = "BDT"
+
+
+class OrderUpdateRequest(BaseModel):
+    session_id: str
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    delivery_area: str | None = None
+    payment_method: str | None = None
+    notes: str | None = None
+
+
+class OrderConfirmRequest(BaseModel):
+    session_id: str
+    order_id: str
+
+
+class OrderResponse(BaseModel):
+    status: str
+    order_id: str | None = None
+    message: str
+    items: list[OrderItemSchema] = Field(default_factory=list)
+    subtotal: float = 0.0
+    delivery_charge: float = 0.0
+    grand_total: float = 0.0
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    delivery_area: str | None = None
+    payment_method: str | None = None
+    order_status: str | None = None
+    missing_fields: list[str] = Field(default_factory=list)
+    ready_to_confirm: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Image search schemas
+# ---------------------------------------------------------------------------
+
+class ImageSearchRequest(BaseModel):
+    query_text: str = ""
+    image_b64: str | None = None
+    category_hint: str | None = None
+    color_hint: str | None = None
+    budget_max: float | None = None
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class ImageSearchHit(BaseModel):
+    product_id: str
+    name: str
+    score: float
+    match_type: str
+    reasons: list[str] = Field(default_factory=list)
+    price: float | None = None
+    currency: str = "BDT"
+    stock: int = 0
+    image_url: str | None = None
+
+
+class ImageSearchResponse(BaseModel):
+    status: str
+    answer: str
+    hits: list[ImageSearchHit] = Field(default_factory=list)
+    total: int = 0
+
+
+# ---------------------------------------------------------------------------
+# POS sync schemas
+# ---------------------------------------------------------------------------
+
+class POSSyncImportRequest(BaseModel):
+    csv_text: str = Field(..., description="Raw CSV content as text.")
+    source: str = "manual_upload"
+
+
+class POSSyncWebhookRequest(BaseModel):
+    source: str = "pos"
+    event: str = "stock_updated"
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class POSSyncResponse(BaseModel):
+    status: str
+    inserted: int = 0
+    updated: int = 0
+    stock_changed: int = 0
+    deactivated: int = 0
+    skipped: int = 0
+    errors: list[str] = Field(default_factory=list)
+    summary: str = ""
+    timestamp: str = ""
+
+
+class POSSyncStatusResponse(BaseModel):
+    status: str
+    total_products: int = 0
+    active_products: int = 0
+    out_of_stock: int = 0
+    last_sync: str = "never"
+
+
+# ---------------------------------------------------------------------------
+# Customer profile schemas
+# ---------------------------------------------------------------------------
+
+class CustomerProfileResponse(BaseModel):
+    status: str
+    session_id: str
+    profile_summary: str
+    preferred_language: str | None = None
+    sizes: dict[str, str] = Field(default_factory=dict)
+    favorite_colors: list[str] = Field(default_factory=list)
+    budget_min: float | None = None
+    budget_max: float | None = None
+    preferred_categories: list[str] = Field(default_factory=list)
+    skin_type: str | None = None
+    delivery_area: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Policy QA schemas
+# ---------------------------------------------------------------------------
+
+class PolicyQARequest(BaseModel):
+    question: str
+
+
+class PolicyQAResponse(BaseModel):
+    status: str
+    answer: str
+    source: str = "policies.json"

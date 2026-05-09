@@ -29,6 +29,15 @@ Do not hard-code around today’s sample questions. Build generalized retail inf
 Implementation method:
 Work in a build-test-modify-test loop until the system is stable. After each major feature, add tests and run the relevant suite. Keep an audit markdown under results/ describing what changed, what passed, what failed, and what still needs production data.
 
+Machine/runtime expectation:
+You may be running on a fresh machine. Do not assume Ollama models are already pulled, Elasticsearch is already running, or local indexes already exist. Keep the same full system design, including optional Ollama/natural-answer support, but make the project self-bootstrap safely:
+- First build and verify the deterministic/local mode so tests and core chatbot behavior work without any external model.
+- If Ollama is installed, check whether the configured model exists. If not, document and run the required pull command, for example `ollama pull qwen3:8b`, before enabling natural answers.
+- If Ollama is not installed or the pull fails, do not block the build. Keep `INVENTORY_NATURAL_ANSWERS_ENABLED=false` for local verification and clearly document the optional Ollama setup command.
+- If Elasticsearch is not running, keep `VECTOR_DB=local` for verification. Keep Elasticsearch support available as an optional production backend.
+- Create missing local folders/index files/sample data automatically where safe.
+- Never require a pre-existing hidden local setup to pass tests.
+
 Build all checklist sections below. Do not stop after a plan. Implement code, tests, sample data, docs, and UI wiring where needed.
 ```
 
@@ -61,6 +70,86 @@ flowchart TD
     R --> E
     R --> G
 ```
+
+## Clean-Machine Bootstrap Rules
+
+The build must work on another machine even if that machine has only Python, the repo, and the `.venv`.
+
+### Required Default Runtime
+
+Default verification must use deterministic/local mode:
+
+```bash
+APP_PORT=4849 \
+UI_BACKEND_BASE_URL=http://127.0.0.1:4849 \
+VECTOR_DB=local \
+LOCAL_VECTOR_STORE_PATH=data/agentic_store/local_vectors.jsonl \
+EMBEDDING_PROVIDER=deterministic \
+EMBEDDING_MODEL_NAME=deterministic-live \
+EMBEDDING_DIMENSIONS=256 \
+RERANKER_PROVIDER=deterministic \
+INVENTORY_NATURAL_ANSWERS_ENABLED=false \
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 4849
+```
+
+This is the non-negotiable fallback path. It lets the full system boot and pass tests without Ollama, OpenAI, Elasticsearch, or downloaded embedding models.
+
+### Optional Ollama Runtime
+
+Keep Ollama support. Do not remove it. But make it explicit and self-checking.
+
+Before enabling natural answers, run:
+
+```bash
+ollama list
+```
+
+If the configured model is missing, run:
+
+```bash
+ollama pull qwen3:8b
+```
+
+Then start with natural answers:
+
+```bash
+APP_PORT=4849 \
+UI_BACKEND_BASE_URL=http://127.0.0.1:4849 \
+VECTOR_DB=local \
+LOCAL_VECTOR_STORE_PATH=data/agentic_store/local_vectors.jsonl \
+EMBEDDING_PROVIDER=deterministic \
+EMBEDDING_MODEL_NAME=deterministic-live \
+EMBEDDING_DIMENSIONS=256 \
+RERANKER_PROVIDER=deterministic \
+GENERATOR_PROVIDER=openai_compatible \
+GENERATOR_MODEL_NAME=qwen3:8b \
+GENERATOR_BASE_URL=http://127.0.0.1:11434/v1 \
+INVENTORY_NATURAL_ANSWERS_ENABLED=true \
+INVENTORY_NATURAL_ANSWER_MODEL_NAME=qwen3:8b \
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 4849
+```
+
+If Ollama is unavailable, the system must still run in deterministic mode and expose the same API/UI. Natural answer writing is an enhancement, not a hard dependency.
+
+### Optional Elasticsearch Runtime
+
+Keep Elasticsearch support, but do not make it mandatory for local build success.
+
+Use local vectors by default:
+
+```bash
+VECTOR_DB=local
+```
+
+Use Elasticsearch only when an ES service is actually running:
+
+```bash
+VECTOR_DB=elasticsearch \
+ELASTICSEARCH_URL=http://127.0.0.1:9200 \
+ELASTICSEARCH_INDEX_NAME=inventory-rag
+```
+
+If Elasticsearch is down, the build should fall back to local vector mode for tests and document that production search can be switched later.
 
 ## Feature Checklist
 
@@ -540,6 +629,8 @@ Run:
 
 Then start:
 
+Deterministic/local mode, always expected to work:
+
 ```bash
 APP_PORT=4849 \
 UI_BACKEND_BASE_URL=http://127.0.0.1:4849 \
@@ -550,6 +641,25 @@ EMBEDDING_MODEL_NAME=deterministic-live \
 EMBEDDING_DIMENSIONS=256 \
 RERANKER_PROVIDER=deterministic \
 INVENTORY_NATURAL_ANSWERS_ENABLED=false \
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 4849
+```
+
+Optional Ollama natural-answer mode, only after `ollama pull qwen3:8b` succeeds:
+
+```bash
+APP_PORT=4849 \
+UI_BACKEND_BASE_URL=http://127.0.0.1:4849 \
+VECTOR_DB=local \
+LOCAL_VECTOR_STORE_PATH=data/agentic_store/local_vectors.jsonl \
+EMBEDDING_PROVIDER=deterministic \
+EMBEDDING_MODEL_NAME=deterministic-live \
+EMBEDDING_DIMENSIONS=256 \
+RERANKER_PROVIDER=deterministic \
+GENERATOR_PROVIDER=openai_compatible \
+GENERATOR_MODEL_NAME=qwen3:8b \
+GENERATOR_BASE_URL=http://127.0.0.1:11434/v1 \
+INVENTORY_NATURAL_ANSWERS_ENABLED=true \
+INVENTORY_NATURAL_ANSWER_MODEL_NAME=qwen3:8b \
 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 4849
 ```
 

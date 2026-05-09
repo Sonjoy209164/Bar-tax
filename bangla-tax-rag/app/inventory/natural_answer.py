@@ -3,7 +3,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
+
 logger = logging.getLogger(__name__)
+
+_OLLAMA_URL = "http://localhost:11434"
+_OLLAMA_MODEL = "qwen3:8b"
+_OLLAMA_TIMEOUT = 12.0  # seconds — fast enough to not block the user
 
 _SYSTEM_PROMPT = """\
 You are a warm, helpful assistant for Sonjoy Boutique — a Bangladeshi fashion boutique.
@@ -95,6 +101,39 @@ def build_natural_answer_prompt(
         ]
     messages.append({"role": "user", "content": user_content})
     return messages
+
+
+def generate_ollama_answer(
+    question: str,
+    product_snippets: list[dict[str, Any]],
+    language_hint: str = "auto",
+    ollama_url: str = _OLLAMA_URL,
+    model: str = _OLLAMA_MODEL,
+    timeout: float = _OLLAMA_TIMEOUT,
+    fallback: str = "",
+) -> str | None:
+    """
+    Call Ollama chat to generate a warm, grounded natural-language answer.
+    Returns the cleaned answer string, or None on any failure (caller uses template).
+    Never raises — all errors are caught and logged at DEBUG level.
+    """
+    messages = build_natural_answer_prompt(question, product_snippets, language_hint)
+    try:
+        resp = httpx.post(
+            f"{ollama_url}/api/chat",
+            json={"model": model, "messages": messages, "stream": False,
+                  "options": {"temperature": 0.25, "num_predict": 400}},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "").strip()
+        if not raw:
+            return None
+        result = parse_natural_answer(raw, fallback=fallback)
+        return result if len(result) > 20 else None
+    except Exception as exc:
+        logger.debug("Ollama natural answer failed (using template): %s", exc)
+        return None
 
 
 def parse_natural_answer(raw: str, fallback: str) -> str:

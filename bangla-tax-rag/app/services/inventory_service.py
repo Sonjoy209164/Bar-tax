@@ -77,6 +77,7 @@ from app.inventory.spec_utils import (
     spec_requirement_satisfied,
 )
 from app.inventory.fashion_retail import FashionRetailAssistant, FashionRetailOutcome
+from app.inventory.natural_answer import generate_ollama_answer
 from app.inventory.proactive import build_proactive_message
 from app.inventory.policy import (
     INVENTORY_POLICY_VERSION,
@@ -988,6 +989,7 @@ class InventoryService:
             started_at=started_at,
             effective_filters=effective_filters,
             memory_resolution=memory_resolution,
+            session_id=getattr(request, "session_id", None),
         )
         if fashion_response is not None:
             return fashion_response
@@ -1111,6 +1113,132 @@ class InventoryService:
         )
         return response
 
+    @staticmethod
+    def _build_profile_context_turn(session_id: str | None) -> tuple[str, str] | None:
+        """
+        Load the customer's saved profile from the identity store and build a
+        system-style context turn so slot extraction inherits known preferences
+        (budget, favourite colours, sizes) even on the first question.
+        Returns None when no useful profile data exists.
+        """
+        if not session_id:
+            return None
+        try:
+            from app.inventory.identity_store import IdentityStore
+            profile = IdentityStore().get_or_create_profile(session_id)
+            parts: list[str] = []
+            if profile.get("budget_max"):
+                parts.append(f"budget up to BDT {profile['budget_max']:,.0f}")
+            if profile.get("favorite_colors"):
+                parts.append(f"favourite colours: {', '.join(profile['favorite_colors'][:3])}")
+            if profile.get("sizes"):
+                size_str = ", ".join(f"{k} {v}" for k, v in list(profile["sizes"].items())[:3])
+                parts.append(f"saved sizes: {size_str}")
+            if profile.get("preferred_categories"):
+                parts.append(f"preferred categories: {', '.join(profile['preferred_categories'][:3])}")
+            if not parts:
+                return None
+            return ("user", f"[My saved preferences: {'; '.join(parts)}]")
+        except Exception:
+            return None
+
+    def _build_planner_clarification_response(
+        self,
+        *,
+        request: InventoryAskRequest,
+        trace_id: str,
+        started_at: float,
+        memory_resolution: InventoryMemoryResolution,
+        question_to_ask: str,
+        plan: Any,
+    ) -> InventoryAskResponse:
+        """
+        Build the response when the top-level planner decided to ask back
+        before any retrieval. The pipeline is bypassed entirely — we just
+        return the planner's question so the customer can clarify.
+        """
+        plan_steps = []
+        if plan.reasoning:
+            plan_steps.append(f"Planner reasoning: {plan.reasoning}")
+        if plan.customer_situation:
+            plan_steps.append(f"Inferred situation: {plan.customer_situation}")
+        plan_steps.append("Planner asked the customer to clarify before retrieving.")
+
+        answer_plan = InventoryAnswerPlan(
+            intent="fashion_clarification",
+            detected_intent=plan.intent,
+            intent_confidence=plan.confidence,
+            intent_reasons=["Top-level planner requested clarification before retrieval."],
+            strategy="planner_clarification",
+            preferences=dict(plan.key_constraints) if plan.key_constraints else {},
+            next_best_question=question_to_ask,
+            reasoning_steps=plan_steps,
+            confidence_breakdown={
+                "planner_confidence": plan.confidence,
+                "pipeline_hints": plan.pipeline_hints,
+            },
+            abstain=False,
+            abstention_reason=None,
+        )
+        verification = InventoryAnswerVerification(
+            passed=True,
+            issues=[],
+            checked_final_answer=False,
+            final_answer_issues=[],
+        )
+        response = InventoryAskResponse(
+            status="success",
+            question=request.question,
+            answer=question_to_ask,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+            answer_engine="planner",
+            confidence_score=plan.confidence,
+            trace_id=trace_id,
+            abstained=False,
+            abstention_reason=None,
+            total_hits=0,
+            applied_filters=InventorySearchFilters(),
+            hits=[],
+            recommended_product_ids=[],
+            cross_sell_product_ids=[],
+            follow_up_question=question_to_ask,
+            answer_plan=answer_plan,
+            verification=verification,
+            memory_resolution=memory_resolution,
+        )
+        # Persist this turn into conversation state so the next turn knows
+        # we asked a clarifying question.
+        try:
+            from app.inventory.conversation_state import get_state_store
+            session_id = getattr(request, "session_id", None)
+            if session_id:
+                get_state_store().record_turn(
+                    session_id=session_id,
+                    question=request.question,
+                    intent="fashion_clarification",
+                    slots=dict(plan.key_constraints) if plan.key_constraints else {},
+                    product_ids=[],
+                    primary_product_id=None,
+                    confidence=plan.confidence,
+                    abstained=False,
+                    clarification_pending="planner",
+                )
+        except Exception as exc:
+            logger.debug("Planner-clarification state save failed: %s", exc)
+        self._save_inventory_chat_trace(
+            trace_id=trace_id,
+            response=response,
+            execution_path="inventory_planner_clarification",
+            started_at=started_at,
+            requested_answer_engine=request.answer_engine,
+            retrieved_hits=[],
+            reranked_hits=[],
+            retrieval_stage_counts={"planner_clarifications": 1},
+            reasoning_summary=plan_steps,
+        )
+        return response
+
     def _try_fashion_retail_ask(
         self,
         *,
@@ -1119,23 +1247,165 @@ class InventoryService:
         started_at: float,
         effective_filters: InventorySearchFilters,
         memory_resolution: InventoryMemoryResolution,
+        session_id: str | None = None,
     ) -> InventoryAskResponse | None:
         catalog = self._load_catalog()
         last_primary_product_id = request.last_answer_plan.primary_product_id if request.last_answer_plan else None
         conversation_history = [
             (turn.role, turn.content) for turn in (request.conversation_history or [])
         ]
+        # Prepend saved profile as context turn so slot extraction inherits preferences
+        profile_turn = self._build_profile_context_turn(session_id)
+        if profile_turn:
+            conversation_history = [profile_turn] + conversation_history
+
+        # Load structured conversation state so we can resolve pronouns
+        # ("এটা", "first one", "same design") against products we showed earlier.
+        conv_state = None
+        focused_product_ids = tuple(request.focused_product_ids)
+        if session_id:
+            try:
+                from app.inventory.conversation_state import get_state_store
+                from app.inventory.coreference_resolver import resolve_coreference
+                conv_state = get_state_store().get(session_id)
+                if conv_state.last_shown_product_ids and not focused_product_ids:
+                    coref = resolve_coreference(
+                        question=request.question,
+                        last_shown_product_ids=conv_state.last_shown_product_ids,
+                        last_primary_product_id=conv_state.last_primary_product_id,
+                    )
+                    if coref.resolved_product_id:
+                        last_primary_product_id = coref.resolved_product_id
+                        focused_product_ids = (coref.resolved_product_id,)
+            except Exception as exc:
+                logger.debug("Conversation state load failed: %s", exc)
+
+        # Top-of-pipeline thinking layer. The planner reads the whole
+        # conversation, the customer's profile, and recent state — and
+        # writes a structured plan that downstream layers can lean on.
+        intent_plan = None
+        try:
+            from app.inventory.intent_planner import (
+                plan as plan_intent,
+                render_profile_summary,
+                render_state_summary,
+                should_invoke_planner,
+            )
+            from app.inventory.llm_slot_extractor import is_ollama_available
+
+            consec_failures = (
+                conv_state.consecutive_failures if conv_state is not None else 0
+            )
+            if (
+                is_ollama_available()
+                and should_invoke_planner(
+                    question=request.question,
+                    conversation_history=conversation_history,
+                    consecutive_failures=consec_failures,
+                )
+            ):
+                profile_summary = ""
+                if session_id:
+                    try:
+                        from app.inventory.identity_store import IdentityStore
+                        store = IdentityStore()
+                        phone = store.get_phone_for_session(session_id)
+                        if phone:
+                            profile_summary = render_profile_summary(
+                                store.get_profile(phone)
+                            )
+                    except Exception:
+                        pass
+                intent_plan = plan_intent(
+                    question=request.question,
+                    conversation_history=conversation_history,
+                    state_summary=render_state_summary(conv_state),
+                    profile_summary=profile_summary,
+                )
+        except Exception as exc:
+            logger.debug("IntentPlanner failed (continuing without plan): %s", exc)
+
+        # If the planner — having read the whole conversation — still says
+        # it needs to clarify, return that question now and skip the
+        # pipeline entirely. This is a deeper "ask back" than the per-turn
+        # clarification gate downstream.
+        if intent_plan is not None and intent_plan.should_clarify and intent_plan.clarifying_question:
+            return self._build_planner_clarification_response(
+                request=request,
+                trace_id=trace_id,
+                started_at=started_at,
+                memory_resolution=memory_resolution,
+                question_to_ask=intent_plan.clarifying_question,
+                plan=intent_plan,
+            )
+
         outcome = self.fashion_retail_assistant.answer(
             question=request.question,
             catalog=catalog,
             filters=effective_filters,
-            focused_product_ids=tuple(request.focused_product_ids),
+            focused_product_ids=focused_product_ids,
             last_primary_product_id=last_primary_product_id,
             top_k=request.top_k,
             conversation_history=conversation_history,
         )
         if outcome is None:
             return None
+
+        # Generalized reasoner — for open-ended fashion_search, let the LLM
+        # re-rank the candidates and explain its pick. Specific intents
+        # (variant_color, size_availability, compare, etc.) keep their
+        # deterministic logic because they have hard correctness rules.
+        reasoning_note: str | None = None
+        if (
+            outcome.intent == "fashion_search"
+            and not outcome.abstained
+            and len(outcome.product_ids) > 1
+        ):
+            try:
+                from app.inventory.llm_reasoner import reason_over_candidates
+                from app.inventory.llm_slot_extractor import is_ollama_available
+                if is_ollama_available():
+                    candidates = [
+                        catalog[pid] for pid in outcome.product_ids[:8] if pid in catalog
+                    ]
+                    if candidates:
+                        ctx_parts: list[str] = []
+                        # Planner's narrative is the strongest context signal —
+                        # put it first so the reasoner reads it as the lede.
+                        if intent_plan is not None and intent_plan.customer_situation:
+                            ctx_parts.append(f"Situation: {intent_plan.customer_situation}")
+                        if intent_plan is not None and intent_plan.key_constraints.get("rejected_attributes"):
+                            rej = intent_plan.key_constraints["rejected_attributes"]
+                            ctx_parts.append(f"Customer already rejected: {', '.join(rej)}.")
+                        if conv_state and conv_state.color_counts:
+                            top_color = max(conv_state.color_counts, key=conv_state.color_counts.get)
+                            if conv_state.color_counts[top_color] >= 2:
+                                ctx_parts.append(f"Customer often asks about {top_color}.")
+                        if conv_state and conv_state.budget_observations:
+                            avg_budget = sum(conv_state.budget_observations) / len(conv_state.budget_observations)
+                            ctx_parts.append(f"Customer's typical budget around BDT {avg_budget:,.0f}.")
+                        customer_context = " ".join(ctx_parts) if ctx_parts else None
+
+                        selection = reason_over_candidates(
+                            question=request.question,
+                            candidates=candidates,
+                            customer_context=customer_context,
+                        )
+                        if selection and selection.selected_product_ids and not selection.none_fit:
+                            # Reorder outcome.product_ids so the LLM's picks are first
+                            picks = list(selection.selected_product_ids)
+                            remaining = [p for p in outcome.product_ids if p not in picks]
+                            from dataclasses import replace
+                            outcome = replace(
+                                outcome,
+                                product_ids=tuple(picks + remaining),
+                                reasoning_steps=outcome.reasoning_steps + (
+                                    f"LLM reasoner picked {len(picks)} of {len(candidates)} candidates: {selection.reasoning}",
+                                ),
+                            )
+                            reasoning_note = selection.reasoning
+            except Exception as exc:
+                logger.debug("LLM reasoner step failed (continuing with deterministic order): %s", exc)
 
         response_hits = self._fashion_retail_hits(outcome=outcome, catalog=catalog)
         primary = response_hits[0] if response_hits else None
@@ -1192,21 +1462,114 @@ class InventoryService:
             filters=effective_filters,
             outcome=outcome,
         )
+        # Build product snippets for the natural answer generator
+        product_snippets = [
+            {
+                "name": catalog[pid].name,
+                "price": catalog[pid].price,
+                "stock": catalog[pid].stock,
+                "attributes": dict(catalog[pid].attributes),
+            }
+            for pid in recommended_ids[:5]
+            if pid in catalog
+        ]
+        # Try Ollama natural answer; fall back to template on failure
+        from app.inventory.llm_slot_extractor import is_ollama_available
+        natural = None
+        critique_passed = True
+        critique_issues: list[str] = []
+        if is_ollama_available() and not outcome.abstained and product_snippets:
+            natural = generate_ollama_answer(
+                question=request.question,
+                product_snippets=product_snippets,
+                language_hint=outcome.slots.language,
+                fallback=outcome.answer,
+            )
+            # Self-critique loop: catch hallucinations, ignored constraints, etc.
+            # If the critic fails the answer, regenerate ONCE with the fix hint.
+            if natural:
+                try:
+                    from app.inventory.answer_critic import critique_answer
+                    critique = critique_answer(
+                        question=request.question,
+                        answer=natural,
+                        product_snippets=product_snippets,
+                    )
+                    if not critique.passes and critique.severity == "major":
+                        critique_passed = False
+                        critique_issues = list(critique.issues)
+                        # One regenerate cycle, telling the model what went wrong
+                        fix_hint = (
+                            f"\n\nIMPORTANT: previous draft had issues: "
+                            f"{'; '.join(critique.issues) or 'wrong claim'}. "
+                            f"{critique.suggested_fix}"
+                        )
+                        retry = generate_ollama_answer(
+                            question=request.question + fix_hint,
+                            product_snippets=product_snippets,
+                            language_hint=outcome.slots.language,
+                            fallback=outcome.answer,
+                        )
+                        if retry:
+                            natural = retry
+                except Exception as exc:
+                    logger.debug("Answer critic step failed: %s", exc)
+        base_answer = natural if natural else outcome.answer
+
         enriched_answer = build_proactive_message(
-            answer=outcome.answer,
+            answer=base_answer,
             catalog={pid: item for pid, item in catalog.items()},
             recommended_ids=recommended_ids,
             primary_category=outcome.slots.category_key,
             color_hint=outcome.slots.color,
             budget_max=outcome.slots.budget_max,
         )
+
+        # Escalation gate: if we've failed this customer multiple turns in a
+        # row OR they explicitly asked for a human, replace the answer with a
+        # handoff message and notify the owner queue. Once escalated we skip
+        # all downstream decoration (soft-confirm) — the handoff text is
+        # final and must not be mutated.
+        escalation_active = False
+        if session_id and conv_state is not None:
+            try:
+                from app.inventory.escalation import (
+                    decide_escalation,
+                    emit_escalation_notification,
+                )
+                escalation = decide_escalation(state=conv_state, question=request.question)
+                if escalation.should_escalate and escalation.message:
+                    emit_escalation_notification(
+                        state=conv_state,
+                        decision=escalation,
+                        last_question=request.question,
+                    )
+                    enriched_answer = escalation.message
+                    escalation_active = True
+            except Exception as exc:
+                logger.debug("Escalation check failed: %s", exc)
+
+        # Soft-confirm: in the medium-confidence band, append a short
+        # confirmation tail so the customer can correct course. Skipped
+        # entirely when an escalation message is in flight.
+        if not escalation_active:
+            try:
+                from app.inventory.soft_confirm import decorate_with_soft_confirm
+                enriched_answer = decorate_with_soft_confirm(
+                    enriched_answer,
+                    confidence=outcome.confidence,
+                    intent=outcome.intent,
+                    language=outcome.slots.language,
+                )
+            except Exception as exc:
+                logger.debug("Soft-confirm decoration failed: %s", exc)
         response = InventoryAskResponse(
             status="success",
             question=request.question,
             answer=enriched_answer,
             assistant_mode=request.assistant_mode,
             reply_style=request.reply_style,
-            answer_engine="deterministic",
+            answer_engine="natural" if natural else "deterministic",
             confidence_score=outcome.confidence,
             trace_id=trace_id,
             abstained=outcome.abstained,
@@ -1236,6 +1599,72 @@ class InventoryService:
             },
             reasoning_summary=list(outcome.reasoning_steps),
         )
+        # Conversion funnel telemetry — best-effort
+        try:
+            from app.inventory.conversion_tracker import record_abstain, record_shown
+            if session_id:
+                if outcome.abstained:
+                    record_abstain(
+                        session_id=session_id,
+                        question=request.question,
+                        intent=outcome.intent,
+                        reason=outcome.abstention_reason,
+                    )
+                elif recommended_ids:
+                    record_shown(
+                        session_id=session_id,
+                        question=request.question,
+                        product_ids=recommended_ids,
+                        intent=outcome.intent,
+                        confidence=outcome.confidence,
+                    )
+        except Exception as exc:
+            logger.debug("Conversion tracking failed: %s", exc)
+
+        # Persist conversation state and trigger implicit preference learning.
+        # All best-effort — failures must not break the response.
+        if session_id:
+            try:
+                from app.inventory.conversation_state import get_state_store
+                slots_dict = {
+                    "category_key": outcome.slots.category_key,
+                    "color_family": outcome.slots.color_family,
+                    "color": outcome.slots.color,
+                    "fabric": outcome.slots.fabric,
+                    "occasion": outcome.slots.occasion,
+                    "budget_max": outcome.slots.budget_max,
+                    "size": outcome.slots.size,
+                }
+                clarification_pending = (
+                    "yes" if outcome.intent == "fashion_clarification" else None
+                )
+                new_state = get_state_store().record_turn(
+                    session_id=session_id,
+                    question=request.question,
+                    intent=outcome.intent,
+                    slots=slots_dict,
+                    product_ids=recommended_ids,
+                    primary_product_id=primary.product_id if primary else None,
+                    confidence=outcome.confidence,
+                    abstained=outcome.abstained,
+                    clarification_pending=clarification_pending,
+                )
+                # Trigger preference learning if a phone is linked
+                try:
+                    from app.inventory.identity_store import IdentityStore
+                    from app.inventory.preference_learner import apply_preferences_to_profile
+                    store = IdentityStore()
+                    phone = store.get_phone_for_session(session_id)
+                    if phone:
+                        apply_preferences_to_profile(
+                            state=new_state,
+                            identity_store=store,
+                            phone=phone,
+                        )
+                except Exception as exc:
+                    logger.debug("Preference learning failed: %s", exc)
+            except Exception as exc:
+                logger.debug("Conversation state persistence failed: %s", exc)
         return response
 
     def _fashion_retail_hits(

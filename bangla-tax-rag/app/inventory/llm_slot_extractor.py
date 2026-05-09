@@ -114,10 +114,31 @@ def merge_llm_slots_into_fashion_slots(
     )
 
 
+# In-process cache for the availability probe — same request typically
+# checks 3+ times (intent classifier, reasoner, answer gen, critic).
+# Without caching that's 3+ HTTP probes per request even though the
+# answer can't change in milliseconds. Cache for 30s so we re-check
+# often enough to recover from a flapping Ollama server.
+_OLLAMA_PROBE_CACHE: dict[str, tuple[float, bool]] = {}
+_OLLAMA_PROBE_TTL_SECONDS = 30.0
+
+
 def is_ollama_available(url: str = "http://localhost:11434", timeout: float = 1.5) -> bool:
+    import time
+    now = time.monotonic()
+    cached = _OLLAMA_PROBE_CACHE.get(url)
+    if cached is not None and (now - cached[0]) < _OLLAMA_PROBE_TTL_SECONDS:
+        return cached[1]
     try:
         import httpx
         resp = httpx.get(f"{url}/api/tags", timeout=timeout)
-        return resp.status_code == 200
+        result = resp.status_code == 200
     except Exception:
-        return False
+        result = False
+    _OLLAMA_PROBE_CACHE[url] = (now, result)
+    return result
+
+
+def reset_ollama_probe_cache() -> None:
+    """Test/admin helper — clears the availability cache."""
+    _OLLAMA_PROBE_CACHE.clear()

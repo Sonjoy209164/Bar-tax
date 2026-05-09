@@ -40,7 +40,7 @@ _SESSION_ENGINES: dict[str, OrderWorkflowEngine] = {}
 
 def _get_engine(session_id: str) -> OrderWorkflowEngine:
     if session_id not in _SESSION_ENGINES:
-        _SESSION_ENGINES[session_id] = OrderWorkflowEngine()
+        _SESSION_ENGINES[session_id] = OrderWorkflowEngine(session_id=session_id)
     return _SESSION_ENGINES[session_id]
 
 

@@ -7,6 +7,11 @@ from typing import Any
 
 from app.core.schemas import InventoryItemRecord, InventorySearchFilters
 from app.inventory.banglish_normalizer import augment_with_bangla
+from app.inventory.fuzzy_corrector import augment_with_corrections
+from app.inventory.llm_intent_classifier import (
+    ClassifiedIntent,
+    classify_intent_llm,
+)
 from app.inventory.llm_slot_extractor import (
     extract_slots_via_llm,
     is_ollama_available,
@@ -44,6 +49,8 @@ class FashionRetailSlots:
     intent: str = "fashion_search"
     language: str = "english"
     evidence: tuple[str, ...] = ()
+    confidence: float = 1.0
+    ambiguity_reason: str | None = None
 
     def to_plan_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -572,6 +579,13 @@ class FashionRetailAssistant:
         if not self.should_handle(question=question, slots=slots, fashion_items=fashion_items):
             return None
 
+        # Clarification gate — runs once, before dispatching to intent handlers.
+        # If the bot is uncertain or the query is too broad, ask one focused
+        # question instead of dumping a wide product list.
+        clarification = self._maybe_clarify(slots=slots, items=fashion_items)
+        if clarification is not None:
+            return clarification
+
         if slots.intent == "fashion_compare":
             outcome = self._answer_fashion_compare(question=question, items=fashion_items, slots=slots, top_k=top_k)
             if outcome is not None:
@@ -652,8 +666,9 @@ class FashionRetailAssistant:
         focused_product_ids: tuple[str, ...] = (),
         last_primary_product_id: str | None = None,
     ) -> FashionRetailSlots:
-        # Augment question with Bangla equivalents for Banglish input
+        # Banglish augmentation + fuzzy typo correction, then normalize
         augmented_question = augment_with_bangla(question)
+        augmented_question = augment_with_corrections(augmented_question)
         text = normalize_fashion_text(augmented_question)
         evidence: list[str] = []
         language = self._detect_language(question)
@@ -729,12 +744,24 @@ class FashionRetailAssistant:
             intent=intent,
             language=language,
             evidence=tuple(evidence),
+            confidence=self._estimate_regex_confidence(
+                category_key=category_key,
+                color_family=color_family,
+                fabric=fabric,
+                size=size,
+                occasion=occasion,
+                budget_max=budget_max,
+            ),
         )
-        # Optionally enrich via LLM (non-blocking — falls back to regex on any failure)
+        # LLM-first path: classify intent + slots + confidence in one call.
+        # Regex result acts as a safety net for fields the LLM left null.
         if is_ollama_available():
-            llm_slots = extract_slots_via_llm(question)
-            if llm_slots:
-                return merge_llm_slots_into_fashion_slots(llm_slots, regex_slots)
+            classified = classify_intent_llm(question)
+            if classified is not None:
+                return self._merge_classified_with_regex(
+                    classified=classified,
+                    regex_slots=regex_slots,
+                )
         return regex_slots
 
     @staticmethod
@@ -754,6 +781,195 @@ class FashionRetailAssistant:
         user_turns = [content for role, content in history if role == "user"]
         prior = " | ".join(user_turns[-max_turns:])
         return f"{prior} | {question}"
+
+    @staticmethod
+    def _estimate_regex_confidence(
+        *,
+        category_key: str | None,
+        color_family: str | None,
+        fabric: str | None,
+        size: str | None,
+        occasion: str | None,
+        budget_max: float | None,
+    ) -> float:
+        """
+        When LLM is unavailable, derive a confidence proxy from how many
+        concrete slots regex managed to extract. Used to decide between
+        answering and asking a clarifying question downstream.
+        """
+        slots_present = sum(
+            1 for v in (category_key, color_family, fabric, size, occasion, budget_max)
+            if v is not None
+        )
+        if slots_present >= 3:
+            return 0.92
+        if slots_present == 2:
+            return 0.82
+        if slots_present == 1:
+            return 0.68
+        return 0.42
+
+    def _merge_classified_with_regex(
+        self,
+        *,
+        classified: ClassifiedIntent,
+        regex_slots: FashionRetailSlots,
+    ) -> FashionRetailSlots:
+        """
+        Combine LLM classification (which provides intent + confidence + most slots)
+        with regex extraction (more reliable for color_family normalization,
+        category_key canonicalisation, design_id resolution, evidence trail).
+
+        Strategy:
+          - Intent: prefer LLM unless LLM said "unknown" or confidence is very low.
+          - Slots: regex wins when set (it understands the canonical aliases),
+            LLM fills gaps.
+          - Confidence: take LLM's score, but never below regex-implied confidence.
+          - Evidence: regex evidence + LLM marker.
+        """
+        # Map LLM category to regex canonical key when regex missed it
+        llm_category_key = classified.category if classified.category in self.CATEGORY_LABELS else None
+        category_key = regex_slots.category_key or llm_category_key
+        category_label = (
+            self.CATEGORY_LABELS.get(category_key) if category_key else regex_slots.category_label
+        )
+
+        # Color: regex computes color_family + canonical color; only adopt LLM color
+        # when regex got nothing.
+        color = regex_slots.color or classified.color
+        color_family = regex_slots.color_family
+        if not color_family and classified.color:
+            color_family = self._color_family_for(classified.color)
+
+        # Intent selection — only adopt LLM intent if it's a fashion-domain or
+        # known boutique intent and the model was reasonably confident.
+        intent = regex_slots.intent
+        if classified.intent not in {"unknown", "smalltalk"} and classified.confidence >= 0.55:
+            intent = classified.intent
+
+        # Confidence: trust the LLM's semantic score. The regex proxy is a
+        # fallback for when the LLM isn't available — combining them via max
+        # would suppress the LLM's "I'm uncertain" signal whenever regex finds
+        # any slot, defeating the clarification gate.
+        confidence = classified.confidence
+
+        evidence = regex_slots.evidence + (
+            f"llm_intent:{classified.intent}",
+            f"llm_confidence:{classified.confidence:.2f}",
+        )
+
+        return FashionRetailSlots(
+            category_key=category_key,
+            category_label=category_label,
+            color=color,
+            color_family=color_family,
+            size=regex_slots.size or classified.size,
+            budget_min=regex_slots.budget_min if regex_slots.budget_min is not None else classified.budget_min,
+            budget_max=regex_slots.budget_max if regex_slots.budget_max is not None else classified.budget_max,
+            fabric=regex_slots.fabric or classified.fabric,
+            work_type=regex_slots.work_type or classified.work_type,
+            occasion=regex_slots.occasion or classified.occasion,
+            style=regex_slots.style,
+            design_id=regex_slots.design_id,
+            wants_in_stock=regex_slots.wants_in_stock or classified.wants_in_stock,
+            intent=intent,
+            language=regex_slots.language if regex_slots.language != "english" else classified.language,
+            evidence=evidence,
+            confidence=confidence,
+            ambiguity_reason=classified.ambiguity_reason,
+        )
+
+    def _maybe_clarify(
+        self,
+        *,
+        slots: FashionRetailSlots,
+        items: list[InventoryItemRecord],
+    ) -> FashionRetailOutcome | None:
+        """
+        Run the clarification policy. Return a clarification outcome to short
+        circuit the answer flow, or None to proceed with the normal handler.
+
+        Skip clarification when:
+          - the customer already pinned a specific design (design_id)
+          - the intent is variant/size/accessory/compare/styling — those are
+            already focused, asking again would be annoying
+          - the intent is policy or order — those have dedicated handlers
+        """
+        from app.inventory.clarification import decide_clarification
+
+        if slots.design_id:
+            return None
+        if slots.intent in {
+            "fashion_variant_color",
+            "fashion_size_availability",
+            "fashion_accessory_match",
+            "fashion_compare",
+            "fashion_styling_advice",
+            "fashion_multi_brand_clarification",
+        }:
+            return None
+
+        # Estimate match count cheaply using category + color filter
+        match_count = self._estimate_match_count(slots=slots, items=items)
+        decision = decide_clarification(slots=slots, total_matches=match_count)
+        if not decision.should_clarify:
+            return None
+
+        return FashionRetailOutcome(
+            answer=decision.question or "",
+            intent="fashion_clarification",
+            product_ids=(),
+            cross_sell_product_ids=(),
+            total_matches=match_count,
+            confidence=slots.confidence,
+            slots=slots,
+            follow_up_question=decision.question,
+            abstained=False,
+            abstention_reason=None,
+            reasoning_steps=(
+                f"Clarification triggered: {decision.reason}",
+                f"Missing slot: {decision.missing_slot}",
+            ),
+        )
+
+    def _estimate_match_count(
+        self,
+        *,
+        slots: FashionRetailSlots,
+        items: list[InventoryItemRecord],
+    ) -> int:
+        """
+        Cheap pre-flight count: how many items the current slots would match.
+        Used only by the clarification gate — not the answer ranker.
+        """
+        count = 0
+        for item in items:
+            if slots.category_key and not self._item_category_matches(item, slots.category_key):
+                continue
+            if slots.color_family:
+                item_color = normalize_fashion_text(
+                    item.attributes.get("color_family") or item.attributes.get("color") or ""
+                )
+                if item_color and slots.color_family not in item_color:
+                    continue
+            if slots.fabric:
+                item_fabric = normalize_fashion_text(item.attributes.get("fabric", ""))
+                if item_fabric and slots.fabric not in item_fabric:
+                    continue
+            count += 1
+        return count
+
+    def _color_family_for(self, color: str | None) -> str | None:
+        """Lookup canonical color family for an LLM-supplied color name."""
+        if not color:
+            return None
+        token = normalize_fashion_text(color)
+        for canonical_key, (_canonical, family, aliases) in self.COLOR_ALIASES.items():
+            if token == normalize_fashion_text(canonical_key):
+                return family
+            if any(token == normalize_fashion_text(a) for a in aliases):
+                return family
+        return None
 
     def is_fashion_item(self, item: InventoryItemRecord) -> bool:
         category_text = normalize_fashion_text(item.category)
@@ -1014,6 +1230,34 @@ class FashionRetailAssistant:
         top_k: int,
     ) -> FashionRetailOutcome:
         scored = self._rank_search_items(question=question, items=items, slots=slots, top_k=max(top_k, 5))
+
+        # Semantic fallback: when slot filtering finds nothing, ask the
+        # embedding matcher. Catches novel vocabulary the regex layer
+        # couldn't parse ("haldi", "ay-er ma", "matha gorom kora rong"...).
+        semantic_used = False
+        if not scored:
+            try:
+                from app.inventory.semantic_matcher import get_semantic_matcher
+                catalog_dict = {item.product_id: item for item in items}
+                matcher = get_semantic_matcher()
+                semantic_results = matcher.retrieve(
+                    question=question, catalog=catalog_dict, top_k=max(top_k, 5),
+                )
+                if semantic_results:
+                    item_by_id = {it.product_id: it for it in items}
+                    for sm in semantic_results:
+                        item = item_by_id.get(sm.product_id)
+                        if item is None:
+                            continue
+                        scored.append(_ScoredItem(
+                            item=item,
+                            score=sm.score,
+                            reasons=("semantic_match",),
+                        ))
+                    semantic_used = bool(scored)
+            except Exception:
+                pass
+
         if not scored:
             category = slots.category_label.lower() if slots.category_label else "fashion product"
             answer = f"I do not see an in-catalog {category} matching those exact details yet."
@@ -1035,15 +1279,20 @@ class FashionRetailAssistant:
             answer = f"Yes, the closest match is {self._format_option(selected[0])}."
         else:
             answer = f"I found {len(scored)} matching option(s): {self._natural_join(self._format_option(item) for item in selected[:3])}."
+        reasoning_step = (
+            "Semantic fallback retrieved candidates after slot filter found nothing."
+            if semantic_used
+            else "Extracted fashion slots and ranked matching catalog items with stock and exact attributes ahead of fuzzy text."
+        )
         return self._outcome(
             answer=answer,
             intent=slots.intent,
             product_ids=tuple(item.product_id for item in selected),
             total_matches=len(scored),
-            confidence=0.86 if selected[0].stock > 0 else 0.76,
+            confidence=(0.74 if semantic_used else 0.86) if selected[0].stock > 0 else (0.62 if semantic_used else 0.76),
             slots=slots,
             follow_up_question="Should I narrow this by color, size, fabric, budget, or occasion?",
-            reasoning_steps=("Extracted fashion slots and ranked matching catalog items with stock and exact attributes ahead of fuzzy text.",),
+            reasoning_steps=(reasoning_step,),
         )
 
     def _rank_search_items(

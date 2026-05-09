@@ -1,3 +1,5 @@
+import pytest
+
 from app.retrieval import (
     ElasticsearchVectorStore,
     LocalVectorStore,
@@ -8,6 +10,13 @@ from app.retrieval import (
     VectorStoreProvider,
     build_vector_store,
 )
+
+_HAS_ELASTICSEARCH = False
+try:
+    import elasticsearch  # noqa: F401
+    _HAS_ELASTICSEARCH = True
+except ImportError:
+    pass
 from app.retrieval.elasticsearch_store import _elasticsearch_similarity
 from app.retrieval import vector_store_base
 from app.retrieval.milvus_store import _build_milvus_filter_expression
@@ -441,6 +450,7 @@ def test_elasticsearch_store_deletes_by_query_without_namespace() -> None:
     }
 
 
+@pytest.mark.skipif(not _HAS_ELASTICSEARCH, reason="elasticsearch package not installed")
 def test_elasticsearch_store_requires_url() -> None:
     store = ElasticsearchVectorStore(
         VectorStoreConfig(

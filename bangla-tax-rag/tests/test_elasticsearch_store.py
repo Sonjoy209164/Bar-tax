@@ -3,6 +3,16 @@ import pytest
 from app.retrieval.elasticsearch_store import ElasticsearchVectorStore
 from app.retrieval.vector_store_base import VectorRecord, VectorStoreConfig, VectorStoreProvider
 
+# Tests that exercise validation logic AFTER the elasticsearch import probe
+# need the dependency installed. When it isn't, _client() raises RuntimeError
+# before the real validation runs, so we skip the affected test.
+_HAS_ELASTICSEARCH = False
+try:
+    import elasticsearch  # noqa: F401
+    _HAS_ELASTICSEARCH = True
+except ImportError:
+    pass
+
 
 def test_elasticsearch_client_uses_api_key_auth(monkeypatch) -> None:
     captured: dict[str, object] = {}
@@ -55,6 +65,7 @@ def test_elasticsearch_client_uses_basic_auth(monkeypatch) -> None:
     }
 
 
+@pytest.mark.skipif(not _HAS_ELASTICSEARCH, reason="elasticsearch package not installed")
 def test_elasticsearch_client_requires_complete_basic_auth() -> None:
     store = ElasticsearchVectorStore(
         VectorStoreConfig(

@@ -906,6 +906,10 @@ class InventoryAskRequest(BaseModel):
         default=None,
         description="Previous answer plan from the main backend. Used for safe reference resolution only.",
     )
+    session_id: str | None = Field(
+        default=None,
+        description="Optional browser/client session ID. Used to load saved customer preferences (budget, colours, sizes) as context.",
+    )
 
     @field_validator("question")
     @classmethod

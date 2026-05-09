@@ -14,6 +14,7 @@ from app.api.routes_health import router as health_router
 from app.api.routes_ingest import router as ingest_router
 from app.api.routes_inventory import router as inventory_router
 from app.api.routes_orders import router as orders_router
+from app.api.routes_owner import router as owner_router
 from app.api.routes_query import router as query_router
 from app.core.logging import configure_logging, get_logger
 from app.core.security import (
@@ -101,6 +102,7 @@ app.include_router(ingest_router, dependencies=[Depends(require_api_key)])
 app.include_router(inventory_router, dependencies=[Depends(require_api_key)])
 app.include_router(orders_router, dependencies=[Depends(require_api_key)])
 app.include_router(feedback_router, dependencies=[Depends(require_api_key)])
+app.include_router(owner_router, dependencies=[Depends(require_api_key)])
 app.include_router(query_router, dependencies=[Depends(require_api_key)])
 app.include_router(eval_router, dependencies=[Depends(require_api_key)])
 app.include_router(agentic_router, dependencies=[Depends(require_api_key)])

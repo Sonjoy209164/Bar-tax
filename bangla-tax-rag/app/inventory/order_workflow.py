@@ -203,9 +203,17 @@ class OrderDraft:
 class OrderWorkflowEngine:
     """Session-scoped order workflow engine. One instance per chat session."""
 
-    def __init__(self) -> None:
+    def __init__(self, session_id: str | None = None) -> None:
         self._draft: OrderDraft | None = None
         self._awaiting_confirmation: bool = False
+        self._session_id: str | None = session_id
+
+    @property
+    def session_id(self) -> str | None:
+        return self._session_id
+
+    def bind_session(self, session_id: str) -> None:
+        self._session_id = session_id
 
     @property
     def has_active_draft(self) -> bool:
@@ -346,6 +354,18 @@ class OrderWorkflowEngine:
         confirmed = self._draft
         self._draft = None
         self._awaiting_confirmation = False
+        # Conversion funnel: record this order against the session for funnel attribution
+        try:
+            from app.inventory.conversion_tracker import record_ordered
+            if self._session_id:
+                record_ordered(
+                    session_id=self._session_id,
+                    order_id=confirmed.order_id,
+                    product_ids=[item.product_id for item in confirmed.items],
+                    total_amount=confirmed.grand_total(),
+                )
+        except Exception:
+            pass
         return (
             f"Order confirmed! Your order ID is **{confirmed.order_id}**.\n"
             f"Grand Total: BDT {confirmed.grand_total():,.0f}.\n"

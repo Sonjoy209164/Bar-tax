@@ -117,6 +117,45 @@ class FashionRetailAssistant:
         "dupatta": ("dupatta", "orna", "orhna", "scarf", "দুপাট্টা", "ওড়না", "ওড়না", "স্কার্ফ"),
         "shawl": ("shawl", "stole", "শাল", "স্টোল"),
         "bag": ("bag", "bags", "handbag", "tote", "clutch", "purse", "wallet", "ব্যাগ", "হ্যান্ডব্যাগ", "ক্লাচ", "পার্স", "ওয়ালেট", "ওয়ালেট"),
+        "shoes": ("shoe", "shoes", "sandal", "sandals", "heel", "heels", "flat", "loafer", "loafers", "sneaker", "sneakers", "জুতা", "জুতো", "স্যান্ডেল", "হিল"),
+        "shirt": ("shirt", "shirts", "formal shirt", "casual shirt", "শার্ট"),
+        "pant": ("pant", "pants", "trouser", "trousers", "chino", "chinos", "প্যান্ট", "ট্রাউজার"),
+        "watch": ("watch", "watches", "ঘড়ি", "ঘড়ি", "ওয়াচ", "ওয়াচ"),
+        "perfume": ("perfume", "perfumes", "attar", "body spray", "fragrance", "পারফিউম", "আতর", "বডি স্প্রে", "সুগন্ধি"),
+        "cosmetics": (
+            "cosmetic",
+            "cosmetics",
+            "makeup",
+            "lipstick",
+            "kajal",
+            "eyeliner",
+            "foundation",
+            "compact",
+            "মেকআপ",
+            "লিপস্টিক",
+            "কাজল",
+            "ফাউন্ডেশন",
+            "কমপ্যাক্ট",
+        ),
+        "beauty": (
+            "beauty",
+            "beauty product",
+            "beauty products",
+            "skincare",
+            "skin care",
+            "sunscreen",
+            "sun screen",
+            "face wash",
+            "facewash",
+            "cream",
+            "serum",
+            "বিউটি",
+            "স্কিনকেয়ার",
+            "স্কিন কেয়ার",
+            "সানস্ক্রিন",
+            "ফেস ওয়াশ",
+            "ফেসওয়াশ",
+        ),
         "jewelry": (
             "jewelry",
             "jewellery",
@@ -155,6 +194,13 @@ class FashionRetailAssistant:
         "dupatta": "Dupatta",
         "shawl": "Shawl",
         "bag": "Bags",
+        "shoes": "Shoes",
+        "shirt": "Shirt",
+        "pant": "Pant",
+        "watch": "Watch",
+        "perfume": "Perfume",
+        "cosmetics": "Cosmetics",
+        "beauty": "Beauty",
         "jewelry": "Jewelry",
         "accessories": "Accessories",
     }
@@ -178,11 +224,43 @@ class FashionRetailAssistant:
         "clutch",
         "handbag",
         "bag",
+        "shoes",
+        "shoe",
+        "sandal",
+        "heel",
+        "loafer",
+        "sneaker",
+        "shirt",
+        "pant",
+        "trouser",
+        "watch",
+        "perfume",
+        "fragrance",
+        "attar",
+        "cosmetic",
+        "cosmetics",
+        "makeup",
+        "lipstick",
+        "kajal",
+        "sunscreen",
+        "skincare",
+        "face wash",
+        "foundation",
         "ব্যাগ",
         "শাড়ি",
         "শাড়ি",
         "ব্লাউজ",
         "পাঞ্জাবি",
+        "জুতা",
+        "জুতো",
+        "শার্ট",
+        "প্যান্ট",
+        "ঘড়ি",
+        "ঘড়ি",
+        "পারফিউম",
+        "লিপস্টিক",
+        "কাজল",
+        "সানস্ক্রিন",
         "গয়না",
         "গয়না",
         "চুড়ি",
@@ -217,8 +295,10 @@ class FashionRetailAssistant:
         "blue": ("blue", "blue", ("blue", "nil", "neel", "নীল", "ব্লু")),
         "green": ("green", "green", ("green", "sobuj", "সবুজ", "গ্রিন")),
         "gold": ("gold", "gold", ("gold", "golden", "sonali", "সোনালি", "গোল্ড", "সোনালী")),
+        "rose gold": ("rose gold", "gold", ("rose gold", "রোজ গোল্ড")),
         "black": ("black", "black", ("black", "kalo", "কালো", "ব্ল্যাক")),
         "white": ("white", "white", ("white", "shada", "সাদা", "শাদা", "হোয়াইট", "হোয়াইট")),
+        "nude": ("nude", "beige", ("nude", "nyud", "নুড")),
         "mustard": ("mustard", "yellow", ("mustard",)),
         "yellow": ("yellow", "yellow", ("yellow", "holud", "হলুদ", "ইয়েলো", "ইয়েলো")),
         "peach": ("peach", "peach", ("peach",)),
@@ -229,6 +309,7 @@ class FashionRetailAssistant:
         "cream": ("cream", "cream", ("cream", "ক্রিম")),
         "beige": ("beige", "beige", ("beige",)),
         "brown": ("brown", "brown", ("brown", "বাদামি", "ব্রাউন")),
+        "gray": ("gray", "gray", ("gray", "grey", "ধূসর", "গ্রে")),
         "orange": ("orange", "orange", ("orange", "কমলা", "অরেঞ্জ")),
         "indigo": ("indigo", "blue", ("indigo",)),
     }
@@ -238,8 +319,11 @@ class FashionRetailAssistant:
         "silk": ("silk", "half silk", "half-silk", "soft silk", "সিল্ক", "হাফ সিল্ক"),
         "muslin": ("muslin", "soft muslin", "মসলিন", "মসলিনের"),
         "cotton": ("cotton", "suti", "সুতি", "কটন"),
+        "cotton blend": ("cotton blend", "কটন ব্লেন্ড"),
         "linen": ("linen", "লিনেন"),
         "georgette": ("georgette",),
+        "leather": ("leather", "লেদার"),
+        "synthetic leather": ("synthetic leather", "faux leather", "rexine"),
         "chiffon": ("chiffon",),
         "organza": ("organza",),
         "khadi": ("khadi",),
@@ -267,17 +351,24 @@ class FashionRetailAssistant:
         "puja": ("puja", "পূজা"),
         "pohela boishakh": ("pohela boishakh", "boishakh", "পহেলা বৈশাখ", "বৈশাখ"),
         "gift": ("gift", "gifting", "উপহার", "গিফট"),
+        "formal": ("formal", "ফরমাল"),
         "summer": ("summer", "lightweight", "light weight", "হালকা", "গরমে", "সামার"),
     }
     STYLE_ALIASES: dict[str, tuple[str, ...]] = {
         "lightweight": ("lightweight", "light weight", "soft", "comfortable", "halka", "হালকা", "আরামদায়ক", "আরামদায়ক"),
         "heavy": ("heavy", "heavily worked", "ভারি", "ভারী"),
         "simple": ("simple", "minimal", "plain", "সিম্পল", "সাধারণ"),
+        "formal": ("formal", "ফরমাল"),
+        "casual": ("casual", "ক্যাজুয়াল", "ক্যাজুয়াল"),
+        "comfortable": ("comfortable", "comfort", "আরামদায়ক", "আরামদায়ক"),
     }
     STYLE_ITEM_ALIASES: dict[str, tuple[str, ...]] = {
         "lightweight": ("lightweight", "light weight", "soft", "comfortable", "muslin"),
         "heavy": ("heavy", "bridal", "zari", "meena", "katan"),
         "simple": ("simple", "minimal", "plain", "office", "daily"),
+        "formal": ("formal", "office", "interview"),
+        "casual": ("casual", "daily", "college"),
+        "comfortable": ("comfortable", "comfort", "flat", "sneaker"),
     }
     VARIANT_PHRASES = (
         "same design",
@@ -327,12 +418,6 @@ class FashionRetailAssistant:
         "sathe ki",
         "accessory",
         "accessories",
-        "jewelry",
-        "jewellery",
-        "bangle",
-        "bangles",
-        "necklace",
-        "clutch",
         "ম্যাচ",
         "ম্যাচিং",
         "মানাবে",
@@ -340,12 +425,6 @@ class FashionRetailAssistant:
         "সাথে",
         "সঙ্গে",
         "যাবে",
-        "গয়না",
-        "গয়না",
-        "চুড়ি",
-        "চুড়ি",
-        "নেকলেস",
-        "ক্লাচ",
     )
     AVAILABILITY_PHRASES = (
         "do you have",
@@ -430,16 +509,25 @@ class FashionRetailAssistant:
         "রঙ",
         "কালার",
         "ডিজাইন",
+        "juta",
+        "juto",
+        "ghori",
+        "shart",
+        "shirt",
+        "pant",
+        "perfume",
+        "lipstick",
+        "sunscreen",
     }
     SIZE_PATTERN = re.compile(
-        r"(?:size|sz|measurement|chest|সাইজ|মাপ|চেস্ট)\s*[:#-]?\s*([a-z]{1,3}|\d{1,2}(?:\.\d)?)\b",
+        r"(?:size|sz|measurement|chest|waist|shoe size|সাইজ|মাপ|চেস্ট|কোমর)\s*[:#-]?\s*([a-z]{1,3}|\d{1,2}(?:\.\d)?|100ml|50ml)\b",
         re.IGNORECASE,
     )
     REVERSE_SIZE_PATTERN = re.compile(
-        r"\b([a-z]{1,3}|\d{1,2}(?:\.\d)?)\s*(?:size|sz|সাইজ|মাপ)\b",
+        r"\b([a-z]{1,3}|\d{1,2}(?:\.\d)?|100ml|50ml)\s*(?:size|sz|waist|ml|সাইজ|মাপ|কোমর)\b",
         re.IGNORECASE,
     )
-    BARE_SIZE_PATTERN = re.compile(r"\b([2-5]\d|2\.[2468]|3\.[02468]|xs|s|m|l|xl|xxl|xxxl)\b", re.IGNORECASE)
+    BARE_SIZE_PATTERN = re.compile(r"\b([2-5]\d|2\.[2468]|3\.[02468]|xs|s|m|l|xl|xxl|xxxl|100ml|50ml)\b", re.IGNORECASE)
     MAX_PRICE_PATTERN = re.compile(
         r"(?:under|below|less than|within|up to|max|maximum|budget|around|about|কম|নিচে|মধ্যে|বাজেট)\s*(?:bdt|tk|taka|টাকা|টাকার|৳)?\s*(\d+(?:\.\d+)?)|(?:bdt|tk|taka|টাকা|টাকার|৳)?\s*(\d+(?:\.\d+)?)\s*(?:taka|tk|bdt|টাকা|টাকার)?\s*(?:er modhe|er moddhe|modhe|moddhe|within|এর মধ্যে|মধ্যে|ভিতরে)",
         re.IGNORECASE,
@@ -499,7 +587,7 @@ class FashionRetailAssistant:
         fashion_items: list[InventoryItemRecord],
     ) -> bool:
         text = normalize_fashion_text(question)
-        if slots.category_key and slots.category_key in {"saree", "blouse", "panjabi", "kurti", "salwar_kameez", "dupatta", "shawl", "jewelry"}:
+        if slots.category_key and slots.category_key in self.CATEGORY_LABELS:
             return True
         if slots.intent in {"fashion_variant_color", "fashion_size_availability", "fashion_accessory_match"}:
             return True
@@ -509,7 +597,24 @@ class FashionRetailAssistant:
             if self._has_tech_context_without_fashion_context(text):
                 return False
             return True
-        if slots.color_family and any(self._contains_phrase(text, term) for term in ("saree", "blouse", "panjabi", "jewelry", "clutch")):
+        if slots.color_family and any(
+            self._contains_phrase(text, term)
+            for term in (
+                "saree",
+                "blouse",
+                "panjabi",
+                "three piece",
+                "jewelry",
+                "clutch",
+                "bag",
+                "shoe",
+                "watch",
+                "shirt",
+                "pant",
+                "perfume",
+                "lipstick",
+            )
+        ):
             return True
         return False
 
@@ -567,6 +672,10 @@ class FashionRetailAssistant:
             focused_product_ids=focused_product_ids,
             last_primary_product_id=last_primary_product_id,
         )
+        if design_id and category_key:
+            variants = self._same_design_items(catalog, design_id)
+            if variants and not any(self._item_category_matches(item, category_key) for item in variants):
+                design_id = None
         if design_id:
             evidence.append(f"design_id:{design_id}")
         intent = self._classify_intent(
@@ -601,10 +710,24 @@ class FashionRetailAssistant:
         if any(self._contains_phrase(category_text, term) for term in self.ITEM_FASHION_CATEGORY_TERMS):
             return True
         source = normalize_fashion_text(item.metadata.get("source"))
-        if "saree" in source or "fashion" in source or "aarong" in source:
+        if "saree" in source or "fashion" in source or "boutique" in source or "aarong" in source:
+            return True
+        if self._canonical_category_key(item.attributes.get("category_key")):
             return True
         if item.attributes.get("design_id") and any(
-            key in item.attributes for key in ("fabric", "work_type", "color", "size", "compatible_design_ids", "accessory_type")
+            key in item.attributes
+            for key in (
+                "fabric",
+                "work_type",
+                "color",
+                "size",
+                "compatible_design_ids",
+                "accessory_type",
+                "skin_type",
+                "fragrance_family",
+                "shoe_type",
+                "watch_type",
+            )
         ):
             return True
         if item.attributes.get("accessory_type") or item.attributes.get("compatible_design_ids"):
@@ -782,11 +905,14 @@ class FashionRetailAssistant:
         anchor = self._resolve_anchor_item(question=question, items=items, slots=slots)
         if anchor and not design_id:
             design_id = self._item_design_id(anchor)
+        requested_accessory_keys = self._extract_requested_accessory_keys(normalize_fashion_text(question))
         scored: list[_ScoredItem] = []
         for item in items:
             if anchor and item.product_id == anchor.product_id:
                 continue
             if not self._is_accessory_item(item):
+                continue
+            if requested_accessory_keys and not any(self._item_category_matches(item, key) for key in requested_accessory_keys):
                 continue
             score = 0.0
             reasons: list[str] = []
@@ -810,7 +936,12 @@ class FashionRetailAssistant:
         selected = scored[:top_k]
         if selected:
             anchor_phrase = f" for {anchor.name}" if anchor else ""
-            answer = f"Good matches{anchor_phrase}: {self._natural_join(self._format_option(match.item) for match in selected[:3])}."
+            requested_label = (
+                f"{self._accessory_match_label(requested_accessory_keys[0])} "
+                if len(requested_accessory_keys) == 1 and requested_accessory_keys[0] in self.CATEGORY_LABELS
+                else ""
+            )
+            answer = f"Good {requested_label}matches{anchor_phrase}: {self._natural_join(self._format_option(match.item) for match in selected[:3])}."
             return self._outcome(
                 answer=answer,
                 intent=slots.intent,
@@ -983,6 +1114,21 @@ class FashionRetailAssistant:
                 return key
         return None
 
+    def _extract_requested_accessory_keys(self, text: str) -> tuple[str, ...]:
+        requested: list[str] = []
+        for key in ("bag", "jewelry", "perfume", "watch", "shoes", "dupatta", "shawl"):
+            if any(self._contains_phrase(text, alias) for alias in self.CATEGORY_ALIASES[key]):
+                requested.append(key)
+        return tuple(dict.fromkeys(requested))
+
+    @staticmethod
+    def _accessory_match_label(category_key: str) -> str:
+        return {
+            "bag": "bag",
+            "jewelry": "jewelry",
+            "shoes": "shoe",
+        }.get(category_key, category_key.replace("_", " "))
+
     def _canonical_category_key(self, value: str | None) -> str | None:
         text = normalize_fashion_text(value)
         if not text:
@@ -1006,7 +1152,7 @@ class FashionRetailAssistant:
             match = pattern.search(text)
             if match:
                 return self._normalize_size(match.group(1))
-        if category_key in {"blouse", "panjabi", "jewelry"}:
+        if category_key in {"blouse", "panjabi", "salwar_kameez", "shoes", "shirt", "pant", "watch", "perfume", "jewelry"}:
             bare = self.BARE_SIZE_PATTERN.search(text)
             if bare and not self._contains_phrase(text, "under"):
                 return self._normalize_size(bare.group(1))
@@ -1137,13 +1283,15 @@ class FashionRetailAssistant:
                     item.category or "",
                     " ".join(item.tags),
                     str(item.attributes.get("category", "")),
+                    str(item.attributes.get("category_key", "")),
+                    str(item.attributes.get("product_type", "")),
                 ]
             )
         )
-        item_category_key = self._canonical_category_key(item.category)
+        item_category_key = self._canonical_category_key(item.attributes.get("category_key")) or self._canonical_category_key(item.category)
         if item_category_key == category_key:
             return True
-        if category_key in {"accessories", "jewelry", "bag"}:
+        if category_key in {"accessories", "jewelry", "bag", "perfume", "watch", "shoes"}:
             return self._is_accessory_item(item) and (
                 category_key == "accessories" or any(self._contains_phrase(item_text, alias) for alias in self.CATEGORY_ALIASES[category_key])
             )
@@ -1151,14 +1299,18 @@ class FashionRetailAssistant:
 
     def _is_accessory_item(self, item: InventoryItemRecord) -> bool:
         item_text = self._item_text(item)
-        category_key = self._canonical_category_key(item.category)
-        if category_key in {"saree", "blouse", "panjabi", "kurti", "salwar_kameez"}:
+        category_key = self._canonical_category_key(item.attributes.get("category_key")) or self._canonical_category_key(item.category)
+        if category_key in {"saree", "blouse", "panjabi", "kurti", "salwar_kameez", "shirt", "pant", "cosmetics", "beauty"}:
             return False
-        if category_key in {"bag", "jewelry", "accessories"}:
+        if category_key in {"bag", "jewelry", "accessories", "perfume", "watch", "shoes"}:
             return True
         if item.attributes.get("accessory_type") or item.attributes.get("compatible_design_ids"):
             return True
-        return any(self._contains_phrase(item_text, alias) for key in ("bag", "jewelry", "accessories") for alias in self.CATEGORY_ALIASES[key])
+        return any(
+            self._contains_phrase(item_text, alias)
+            for key in ("bag", "jewelry", "accessories", "perfume", "watch", "shoes")
+            for alias in self.CATEGORY_ALIASES[key]
+        )
 
     def _item_color_matches(self, item: InventoryItemRecord, color_family: str | None, color: str | None) -> bool:
         if not color_family and not color:
@@ -1398,6 +1550,7 @@ class FashionRetailAssistant:
             localized = localized.replace(" is available in size ", " সাইজ ")
             replacements = (
                 ("Yes.", "জি,"),
+                ("Yes,", "জি,"),
                 ("I found", "আমি পেয়েছি"),
                 ("I do not see", "আমি ক্যাটালগে পাচ্ছি না"),
                 ("We have", "আমাদের কাছে আছে"),
@@ -1409,6 +1562,9 @@ class FashionRetailAssistant:
                 ("Other in-stock colors in the same design", "একই ডিজাইনে অন্য স্টকে থাকা রঙ"),
                 ("In-stock colors in the same design", "একই ডিজাইনে স্টকে থাকা রঙ"),
                 ("Closest available option", "নিকটতম স্টকে থাকা অপশন"),
+                ("Good bag matches", "ভালো ব্যাগ ম্যাচিং অপশন"),
+                ("Good jewelry matches", "ভালো গয়না ম্যাচিং অপশন"),
+                ("Good shoe matches", "ভালো জুতা ম্যাচিং অপশন"),
                 ("Good matches", "ভালো ম্যাচিং অপশন"),
                 ("matching option(s)", "ম্যাচিং অপশন"),
             )
@@ -1423,6 +1579,7 @@ class FashionRetailAssistant:
             localized = re.sub(r"(?<=, )(\d+)\s+স্টকে আছে", r"\1টি স্টকে আছে", localized)
             localized = re.sub(r"(?<=\()(\d+)\s+স্টকে আছে", r"\1টি স্টকে আছে", localized)
             localized = re.sub(r"\b(\d+)\s+ম্যাচিং অপশন", r"\1টি ম্যাচিং অপশন", localized)
+            localized = re.sub(r"ভালো ([^:]+) ম্যাচিং অপশন এর জন্য ([^:]+):", r"\2 এর জন্য ভালো \1 ম্যাচিং অপশন:", localized)
             localized = re.sub(r"ভালো ম্যাচিং অপশন এর জন্য ([^:]+):", r"\1 এর জন্য ভালো ম্যাচিং অপশন:", localized)
             return localized
         if slots.language == "banglish":
@@ -1430,6 +1587,7 @@ class FashionRetailAssistant:
             localized = localized.replace(" is available in size ", " size ")
             replacements = (
                 ("Yes.", "Ji,"),
+                ("Yes,", "Ji,"),
                 ("I found", "Ami peyechi"),
                 ("I do not see", "Ami catalog e pacchi na"),
                 ("We have", "Amader kache ache"),

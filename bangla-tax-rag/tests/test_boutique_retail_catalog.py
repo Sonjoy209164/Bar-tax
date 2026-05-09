@@ -1,0 +1,118 @@
+from pathlib import Path
+
+from app.core.schemas import InventoryItemRecord, InventorySearchFilters
+from app.inventory.fashion_retail import FashionRetailAssistant
+
+
+def _active_catalog() -> dict[str, InventoryItemRecord]:
+    items: dict[str, InventoryItemRecord] = {}
+    for line in Path("data/inventory/catalog.jsonl").read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        item = InventoryItemRecord.model_validate_json(line)
+        items[item.product_id] = item
+    return items
+
+
+def test_active_catalog_is_clean_boutique_inventory() -> None:
+    catalog = _active_catalog()
+
+    assert len(catalog) == 47
+    assert {item.currency for item in catalog.values()} == {"BDT"}
+    assert not any(item.category in {"Audio", "Computing", "Office"} for item in catalog.values())
+
+
+def test_boutique_bot_answers_oily_skin_sunscreen_budget_query() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="Do you have oily skin sunscreen under 1000?",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_search"
+    assert outcome.product_ids[0] == "beauty-sunscreen-oily-spf50"
+    assert "BDT 950" in outcome.answer
+
+
+def test_boutique_bot_answers_banglish_mens_shoe_size() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="men er brown loafer size 42 ache?",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_size_availability"
+    assert outcome.product_ids[0] == "shoe-men-loafer-brown-42"
+    assert "3 stock e ache" in outcome.answer
+
+
+def test_boutique_bot_does_not_overmatch_other_size_variants() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="white panjabi L available?",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_size_availability"
+    assert outcome.product_ids[0] == "panjabi-cotton-white-l"
+    assert "Size L" in outcome.answer
+    assert "Size M is available in size L" not in outcome.answer
+
+
+def test_boutique_bot_answers_direct_watch_query_as_search_not_matching() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="ladies rose gold watch ache?",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_search"
+    assert outcome.product_ids[0] == "watch-ladies-rose-gold"
+    assert not outcome.cross_sell_product_ids
+
+
+def test_boutique_bot_reports_out_of_stock_three_piece_variant() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="blue floral three piece M available?",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_size_availability"
+    assert outcome.product_ids[0] == "threepiece-floral-georgette-blue-m"
+    assert "out of stock" in outcome.answer.casefold()
+    assert "threepiece-floral-georgette-pink-m" in outcome.product_ids
+
+
+def test_boutique_bot_answers_bangla_matching_bag_for_saree() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="নেভি কাতান শাড়ির সাথে কোন ব্যাগ মানাবে?",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_accessory_match"
+    assert outcome.slots.language == "bangla"
+    assert "bag-potli-gold-beaded" in outcome.cross_sell_product_ids
+    assert "bag-clutch-antique-gold" in outcome.cross_sell_product_ids
+    assert not any(product_id.startswith("jewelry-") for product_id in outcome.cross_sell_product_ids)
+
+
+def test_boutique_bot_keeps_same_design_context_for_followup() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="ei same design ta green color e ache?",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+        focused_product_ids=("saree-jmd-lotus-red",),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_variant_color"
+    assert outcome.product_ids[0] == "saree-jmd-lotus-green"
+    assert "stock e nei" in outcome.answer.casefold()

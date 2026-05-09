@@ -24,7 +24,7 @@ async function init() {
   bindEvents();
   addMessage(
     "assistant",
-    "Ready. Ask about color variants, size availability, budget, stock, or matching accessories."
+    "Ready. Ask in Bangla, Banglish, or English about sarees, cosmetics, beauty products, bags, watches, shoes, panjabi, shirts, pants, perfumes, stock, size, budget, color variants, or matching items."
   );
   await checkHealth();
 }

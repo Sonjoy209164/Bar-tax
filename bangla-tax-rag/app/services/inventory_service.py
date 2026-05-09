@@ -6893,6 +6893,36 @@ class InventoryService:
             if value is not None:
                 metadata[target_key] = value
 
+        text_evidence = self._normalize_search_text(
+            " ".join(
+                value
+                for value in (
+                    item.name,
+                    item.category,
+                    item.brand,
+                    item.short_description,
+                    item.full_description,
+                    " ".join(item.tags),
+                )
+                if isinstance(value, str) and value.strip()
+            )
+        )
+        if "wireless_support" not in metadata and self._has_any_phrase(
+            text_evidence,
+            ["wireless", "bluetooth", "wi-fi", "wifi"],
+        ):
+            metadata["wireless_support"] = True
+        if "usb_input" not in metadata and self._has_any_phrase(
+            text_evidence,
+            ["usb", "usb-c", "usb c", "type c"],
+        ):
+            metadata["usb_input"] = True
+        if "usb_c_input" not in metadata and self._has_any_phrase(
+            text_evidence,
+            ["usb-c", "usb c", "type c"],
+        ):
+            metadata["usb_c_input"] = True
+
         gps_value = self._normalize_text_attribute_value(self._first_metadata_value(source, ("gps",)))
         if gps_value and gps_value not in {"none", "no"}:
             metadata["gps_mode"] = gps_value

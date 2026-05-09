@@ -182,7 +182,7 @@ class InventoryFinalAnswerVerifier:
             passed=not deduped,
             issues=deduped,
             hard_constraint_issues=deduped,
-            requires_abstention=bool(deduped_primary),
+            requires_abstention=bool(deduped_primary or deduped),
         )
 
     def _check_excluded_products(

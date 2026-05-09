@@ -1,0 +1,1471 @@
+from __future__ import annotations
+
+import re
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Any
+
+from app.core.schemas import InventoryItemRecord, InventorySearchFilters
+
+
+BANGLA_DIGIT_TRANS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+BANGLA_TEXT_PATTERN = re.compile(r"[\u0980-\u09ff]")
+
+
+def normalize_fashion_text(text: object | None) -> str:
+    if text is None:
+        return ""
+    normalized = str(text).casefold().translate(BANGLA_DIGIT_TRANS).replace("&", " and ")
+    normalized = re.sub(r"[^a-z0-9\u0980-\u09ff.\s+-]", " ", normalized)
+    return " ".join(normalized.split())
+
+
+@dataclass(frozen=True)
+class FashionRetailSlots:
+    category_key: str | None = None
+    category_label: str | None = None
+    color: str | None = None
+    color_family: str | None = None
+    size: str | None = None
+    budget_min: float | None = None
+    budget_max: float | None = None
+    fabric: str | None = None
+    work_type: str | None = None
+    occasion: str | None = None
+    style: str | None = None
+    design_id: str | None = None
+    wants_in_stock: bool = False
+    intent: str = "fashion_search"
+    language: str = "english"
+    evidence: tuple[str, ...] = ()
+
+    def to_plan_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "retail_domain": "fashion",
+            "intent": self.intent,
+        }
+        for key in (
+            "category_key",
+            "category_label",
+            "color",
+            "color_family",
+            "size",
+            "budget_min",
+            "budget_max",
+            "fabric",
+            "work_type",
+            "occasion",
+            "style",
+            "design_id",
+            "wants_in_stock",
+            "language",
+        ):
+            value = getattr(self, key)
+            if value is None:
+                continue
+            if isinstance(value, bool) and not value:
+                continue
+            payload[key] = value
+        if self.evidence:
+            payload["evidence"] = list(self.evidence)
+        return payload
+
+
+@dataclass(frozen=True)
+class FashionRetailOutcome:
+    answer: str
+    intent: str
+    product_ids: tuple[str, ...] = ()
+    cross_sell_product_ids: tuple[str, ...] = ()
+    total_matches: int = 0
+    confidence: float = 0.0
+    slots: FashionRetailSlots = field(default_factory=FashionRetailSlots)
+    follow_up_question: str | None = None
+    abstained: bool = False
+    abstention_reason: str | None = None
+    reasoning_steps: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _ScoredItem:
+    item: InventoryItemRecord
+    score: float
+    reasons: tuple[str, ...] = ()
+
+
+class FashionRetailAssistant:
+    """Deterministic customer-support layer for variant-heavy fashion retail catalogs."""
+
+    CATEGORY_ALIASES: dict[str, tuple[str, ...]] = {
+        "saree": ("saree", "sarees", "sari", "saris", "sharee", "shari", "শাড়ি", "শাড়ি", "সারি"),
+        "blouse": ("blouse", "blouses", "ready blouse", "stitched blouse", "ব্লাউজ", "রেডি ব্লাউজ"),
+        "panjabi": ("panjabi", "punjabi", "kurta", "kurta pajama", "পাঞ্জাবি", "পাঞ্জাবী", "কুর্তা"),
+        "kurti": ("kurti", "kameez", "tops", "কুর্তি", "কামিজ", "টপ"),
+        "salwar_kameez": (
+            "salwar kameez",
+            "three piece",
+            "3 piece",
+            "three-piece",
+            "dress",
+            "salwar",
+            "সালোয়ার কামিজ",
+            "সালওয়ার কামিজ",
+            "থ্রি পিস",
+            "৩ পিস",
+            "ড্রেস",
+        ),
+        "dupatta": ("dupatta", "orna", "orhna", "scarf", "দুপাট্টা", "ওড়না", "ওড়না", "স্কার্ফ"),
+        "shawl": ("shawl", "stole", "শাল", "স্টোল"),
+        "bag": ("bag", "bags", "handbag", "tote", "clutch", "purse", "wallet", "ব্যাগ", "হ্যান্ডব্যাগ", "ক্লাচ", "পার্স", "ওয়ালেট", "ওয়ালেট"),
+        "jewelry": (
+            "jewelry",
+            "jewellery",
+            "ornament",
+            "ornaments",
+            "necklace",
+            "bangle",
+            "bangles",
+            "churi",
+            "earring",
+            "earrings",
+            "jhumka",
+            "goyna",
+            "goyena",
+            "churi",
+            "গয়না",
+            "গয়না",
+            "জুয়েলারি",
+            "জুয়েলারি",
+            "চুড়ি",
+            "চুড়ি",
+            "বালা",
+            "নেকলেস",
+            "হার",
+            "কানের দুল",
+            "ঝুমকা",
+        ),
+        "accessories": ("accessory", "accessories", "matching item", "matching items", "এক্সেসরিজ", "অ্যাক্সেসরিজ", "ম্যাচিং আইটেম"),
+    }
+    CATEGORY_LABELS: dict[str, str] = {
+        "saree": "Saree",
+        "blouse": "Blouse",
+        "panjabi": "Panjabi",
+        "kurti": "Kurti",
+        "salwar_kameez": "Salwar Kameez",
+        "dupatta": "Dupatta",
+        "shawl": "Shawl",
+        "bag": "Bags",
+        "jewelry": "Jewelry",
+        "accessories": "Accessories",
+    }
+    ITEM_FASHION_CATEGORY_TERMS = {
+        "saree",
+        "sari",
+        "blouse",
+        "panjabi",
+        "punjabi",
+        "kurta",
+        "kurti",
+        "salwar",
+        "kameez",
+        "dupatta",
+        "shawl",
+        "jewelry",
+        "jewellery",
+        "bangles",
+        "necklace",
+        "earrings",
+        "clutch",
+        "handbag",
+        "bag",
+        "ব্যাগ",
+        "শাড়ি",
+        "শাড়ি",
+        "ব্লাউজ",
+        "পাঞ্জাবি",
+        "গয়না",
+        "গয়না",
+        "চুড়ি",
+        "চুড়ি",
+    }
+    TECH_CONTEXT_TERMS = {
+        "laptop",
+        "phone",
+        "tablet",
+        "charger",
+        "power bank",
+        "ssd",
+        "keyboard",
+        "mouse",
+        "monitor",
+        "webcam",
+        "headphone",
+        "headphones",
+        "earbuds",
+        "router",
+        "usb",
+        "camera",
+    }
+    COLOR_ALIASES: dict[str, tuple[str, str, tuple[str, ...]]] = {
+        "royal blue": ("royal blue", "blue", ("royal blue", "royal nil", "রয়েল ব্লু", "রয়েল ব্লু", "রয়েল নীল", "রয়েল নীল")),
+        "navy blue": ("navy blue", "blue", ("navy", "navy blue", "নেভি", "নেভি ব্লু", "নেভি নীল")),
+        "bottle green": ("bottle green", "green", ("bottle green", "বোতল সবুজ", "বটল গ্রিন")),
+        "mint green": ("mint green", "green", ("mint", "mint green", "মিন্ট", "মিন্ট গ্রিন", "মিন্ট সবুজ")),
+        "antique gold": ("antique gold", "gold", ("antique gold", "এন্টিক গোল্ড", "অ্যান্টিক গোল্ড", "এন্টিক সোনালি")),
+        "red": ("red", "red", ("red", "lal", "লাল")),
+        "maroon": ("maroon", "red", ("maroon", "মেরুন")),
+        "blue": ("blue", "blue", ("blue", "nil", "neel", "নীল", "ব্লু")),
+        "green": ("green", "green", ("green", "sobuj", "সবুজ", "গ্রিন")),
+        "gold": ("gold", "gold", ("gold", "golden", "sonali", "সোনালি", "গোল্ড", "সোনালী")),
+        "black": ("black", "black", ("black", "kalo", "কালো", "ব্ল্যাক")),
+        "white": ("white", "white", ("white", "shada", "সাদা", "শাদা", "হোয়াইট", "হোয়াইট")),
+        "mustard": ("mustard", "yellow", ("mustard",)),
+        "yellow": ("yellow", "yellow", ("yellow", "holud", "হলুদ", "ইয়েলো", "ইয়েলো")),
+        "peach": ("peach", "peach", ("peach",)),
+        "lavender": ("lavender", "purple", ("lavender",)),
+        "purple": ("purple", "purple", ("purple", "পার্পল", "বেগুনি")),
+        "pink": ("pink", "pink", ("pink", "golapi", "গোলাপি", "পিংক")),
+        "silver": ("silver", "silver", ("silver", "রুপালি", "রূপালি", "সিলভার")),
+        "cream": ("cream", "cream", ("cream", "ক্রিম")),
+        "beige": ("beige", "beige", ("beige",)),
+        "brown": ("brown", "brown", ("brown", "বাদামি", "ব্রাউন")),
+        "orange": ("orange", "orange", ("orange", "কমলা", "অরেঞ্জ")),
+        "indigo": ("indigo", "blue", ("indigo",)),
+    }
+    FABRIC_ALIASES: dict[str, tuple[str, ...]] = {
+        "jamdani": ("jamdani", "dhakai jamdani", "জামদানি", "ঢাকাই জামদানি"),
+        "katan": ("katan", "silk katan", "কাতান", "সিল্ক কাতান"),
+        "silk": ("silk", "half silk", "half-silk", "soft silk", "সিল্ক", "হাফ সিল্ক"),
+        "muslin": ("muslin", "soft muslin", "মসলিন", "মসলিনের"),
+        "cotton": ("cotton", "suti", "সুতি", "কটন"),
+        "linen": ("linen", "লিনেন"),
+        "georgette": ("georgette",),
+        "chiffon": ("chiffon",),
+        "organza": ("organza",),
+        "khadi": ("khadi",),
+        "handloom": ("handloom",),
+    }
+    WORK_ALIASES: dict[str, tuple[str, ...]] = {
+        "zari": ("zari", "জরি", "জারী"),
+        "meena": ("meena", "meena work", "মিনা", "মীনা", "মীনা কাজ"),
+        "embroidery": ("embroidery", "embroidered", "এম্ব্রয়ডারি", "এম্ব্রয়ডারি", "সূচিকর্ম"),
+        "block print": ("block print", "block-print", "ব্লক প্রিন্ট"),
+        "buti": ("buti", "বুটি"),
+        "floral": ("floral", "flower", "ফ্লোরাল", "ফুল"),
+        "plain": ("plain", "সিম্পল", "প্লেইন"),
+        "mirror work": ("mirror work",),
+    }
+    OCCASION_ALIASES: dict[str, tuple[str, ...]] = {
+        "bridal": ("bridal", "bride", "কনে", "ব্রাইডাল"),
+        "wedding": ("wedding", "biye", "biya", "marriage", "বিয়ে", "বিয়ে", "বিয়ের", "বিয়ের"),
+        "reception": ("reception",),
+        "party": ("party", "program", "পার্টি", "প্রোগ্রাম"),
+        "office": ("office", "work", "office e", "অফিস", "কাজে"),
+        "casual": ("casual", "ক্যাজুয়াল", "ক্যাজুয়াল"),
+        "daily wear": ("daily wear", "everyday", "regular", "প্রতিদিন", "রেগুলার", "দৈনন্দিন"),
+        "eid": ("eid", "ঈদ"),
+        "puja": ("puja", "পূজা"),
+        "pohela boishakh": ("pohela boishakh", "boishakh", "পহেলা বৈশাখ", "বৈশাখ"),
+        "gift": ("gift", "gifting", "উপহার", "গিফট"),
+        "summer": ("summer", "lightweight", "light weight", "হালকা", "গরমে", "সামার"),
+    }
+    STYLE_ALIASES: dict[str, tuple[str, ...]] = {
+        "lightweight": ("lightweight", "light weight", "soft", "comfortable", "halka", "হালকা", "আরামদায়ক", "আরামদায়ক"),
+        "heavy": ("heavy", "heavily worked", "ভারি", "ভারী"),
+        "simple": ("simple", "minimal", "plain", "সিম্পল", "সাধারণ"),
+    }
+    STYLE_ITEM_ALIASES: dict[str, tuple[str, ...]] = {
+        "lightweight": ("lightweight", "light weight", "soft", "comfortable", "muslin"),
+        "heavy": ("heavy", "bridal", "zari", "meena", "katan"),
+        "simple": ("simple", "minimal", "plain", "office", "daily"),
+    }
+    VARIANT_PHRASES = (
+        "same design",
+        "same pattern",
+        "same model",
+        "same one",
+        "same design ta",
+        "same design e",
+        "ekoi design",
+        "ek design",
+        "same colour e",
+        "same color e",
+        "another color",
+        "other color",
+        "onno color",
+        "onnno color",
+        "ar ek color",
+        "arek color",
+        "different color",
+        "different colour",
+        "other colour",
+        "same design in",
+        "same item in",
+        "একই ডিজাইন",
+        "এক ডিজাইন",
+        "এই ডিজাইন",
+        "একই প্যাটার্ন",
+        "অন্য রঙ",
+        "অন্য কালার",
+        "আরেক কালার",
+        "আরেক রঙ",
+        "ভিন্ন রঙ",
+    )
+    ACCESSORY_MATCH_PHRASES = (
+        "match",
+        "matches",
+        "matching",
+        "go with",
+        "goes with",
+        "pair with",
+        "pair korbo",
+        "pair korle",
+        "manabe",
+        "manay",
+        "sathe",
+        "shathe",
+        "sathe ki",
+        "accessory",
+        "accessories",
+        "jewelry",
+        "jewellery",
+        "bangle",
+        "bangles",
+        "necklace",
+        "clutch",
+        "ম্যাচ",
+        "ম্যাচিং",
+        "মানাবে",
+        "মানায়",
+        "সাথে",
+        "সঙ্গে",
+        "যাবে",
+        "গয়না",
+        "গয়না",
+        "চুড়ি",
+        "চুড়ি",
+        "নেকলেস",
+        "ক্লাচ",
+    )
+    AVAILABILITY_PHRASES = (
+        "do you have",
+        "have",
+        "available",
+        "in stock",
+        "stock ache",
+        "stock ase",
+        "stock e ache",
+        "ache",
+        "ase",
+        "available ache",
+        "pawa jabe",
+        "is there",
+        "আছে",
+        "স্টকে আছে",
+        "স্টক আছে",
+        "পাওয়া যাবে",
+        "পাওয়া যাবে",
+        "এভেইলেবল",
+        "অ্যাভেইলেবল",
+        "হবে",
+    )
+    STOPWORDS = {
+        "a",
+        "an",
+        "and",
+        "are",
+        "available",
+        "can",
+        "color",
+        "colour",
+        "design",
+        "different",
+        "do",
+        "for",
+        "have",
+        "i",
+        "in",
+        "is",
+        "it",
+        "me",
+        "my",
+        "of",
+        "other",
+        "same",
+        "show",
+        "size",
+        "the",
+        "this",
+        "to",
+        "under",
+        "want",
+        "with",
+        "you",
+        "amar",
+        "ami",
+        "ache",
+        "ase",
+        "eta",
+        "ei",
+        "ki",
+        "kintu",
+        "lagbe",
+        "jonno",
+        "দেখান",
+        "দেখান",
+        "দেখাও",
+        "আছে",
+        "কি",
+        "কী",
+        "আমার",
+        "আমি",
+        "এই",
+        "ওই",
+        "টা",
+        "টি",
+        "এর",
+        "জন্য",
+        "মধ্যে",
+        "টাকার",
+        "রঙ",
+        "কালার",
+        "ডিজাইন",
+    }
+    SIZE_PATTERN = re.compile(
+        r"(?:size|sz|measurement|chest|সাইজ|মাপ|চেস্ট)\s*[:#-]?\s*([a-z]{1,3}|\d{1,2}(?:\.\d)?)\b",
+        re.IGNORECASE,
+    )
+    REVERSE_SIZE_PATTERN = re.compile(
+        r"\b([a-z]{1,3}|\d{1,2}(?:\.\d)?)\s*(?:size|sz|সাইজ|মাপ)\b",
+        re.IGNORECASE,
+    )
+    BARE_SIZE_PATTERN = re.compile(r"\b([2-5]\d|2\.[2468]|3\.[02468]|xs|s|m|l|xl|xxl|xxxl)\b", re.IGNORECASE)
+    MAX_PRICE_PATTERN = re.compile(
+        r"(?:under|below|less than|within|up to|max|maximum|budget|around|about|কম|নিচে|মধ্যে|বাজেট)\s*(?:bdt|tk|taka|টাকা|টাকার|৳)?\s*(\d+(?:\.\d+)?)|(?:bdt|tk|taka|টাকা|টাকার|৳)?\s*(\d+(?:\.\d+)?)\s*(?:taka|tk|bdt|টাকা|টাকার)?\s*(?:er modhe|er moddhe|modhe|moddhe|within|এর মধ্যে|মধ্যে|ভিতরে)",
+        re.IGNORECASE,
+    )
+    MIN_PRICE_PATTERN = re.compile(
+        r"(?:over|above|more than|at least|min|minimum)\s*(?:bdt|tk|taka|৳)?\s*(\d+(?:\.\d+)?)",
+        re.IGNORECASE,
+    )
+
+    def answer(
+        self,
+        *,
+        question: str,
+        catalog: dict[str, InventoryItemRecord],
+        filters: InventorySearchFilters | None = None,
+        focused_product_ids: tuple[str, ...] = (),
+        last_primary_product_id: str | None = None,
+        top_k: int = 5,
+    ) -> FashionRetailOutcome | None:
+        filters = filters or InventorySearchFilters()
+        fashion_items = [item for item in catalog.values() if self.is_fashion_item(item)]
+        if not fashion_items:
+            return None
+
+        slots = self.extract_slots(
+            question=question,
+            filters=filters,
+            catalog=fashion_items,
+            focused_product_ids=focused_product_ids,
+            last_primary_product_id=last_primary_product_id,
+        )
+        if not self.should_handle(question=question, slots=slots, fashion_items=fashion_items):
+            return None
+
+        if slots.intent == "fashion_variant_color":
+            outcome = self._answer_variant_color(question=question, items=fashion_items, slots=slots, top_k=top_k)
+            if outcome is not None:
+                return outcome
+
+        if slots.intent == "fashion_size_availability":
+            outcome = self._answer_size_availability(question=question, items=fashion_items, slots=slots, top_k=top_k)
+            if outcome is not None:
+                return outcome
+
+        if slots.intent == "fashion_accessory_match":
+            outcome = self._answer_accessory_match(question=question, items=fashion_items, slots=slots, top_k=top_k)
+            if outcome is not None:
+                return outcome
+
+        return self._answer_fashion_search(question=question, items=fashion_items, slots=slots, top_k=top_k)
+
+    def should_handle(
+        self,
+        *,
+        question: str,
+        slots: FashionRetailSlots,
+        fashion_items: list[InventoryItemRecord],
+    ) -> bool:
+        text = normalize_fashion_text(question)
+        if slots.category_key and slots.category_key in {"saree", "blouse", "panjabi", "kurti", "salwar_kameez", "dupatta", "shawl", "jewelry"}:
+            return True
+        if slots.intent in {"fashion_variant_color", "fashion_size_availability", "fashion_accessory_match"}:
+            return True
+        if slots.fabric or slots.work_type:
+            return True
+        if any(self._contains_phrase(text, alias) for aliases in self.CATEGORY_ALIASES.values() for alias in aliases):
+            if self._has_tech_context_without_fashion_context(text):
+                return False
+            return True
+        if slots.color_family and any(self._contains_phrase(text, term) for term in ("saree", "blouse", "panjabi", "jewelry", "clutch")):
+            return True
+        return False
+
+    def extract_slots(
+        self,
+        *,
+        question: str,
+        filters: InventorySearchFilters,
+        catalog: list[InventoryItemRecord],
+        focused_product_ids: tuple[str, ...] = (),
+        last_primary_product_id: str | None = None,
+    ) -> FashionRetailSlots:
+        text = normalize_fashion_text(question)
+        evidence: list[str] = []
+        language = self._detect_language(question)
+        if language != "english":
+            evidence.append(f"language:{language}")
+        category_key = self._extract_category_key(text=text, filters=filters)
+        if category_key:
+            evidence.append(f"category:{category_key}")
+        color, color_family = self._extract_color(text)
+        if color_family:
+            evidence.append(f"color:{color or color_family}")
+        size = self._extract_size(text=text, category_key=category_key)
+        if size:
+            evidence.append(f"size:{size}")
+        budget_min, budget_max = self._extract_budget(question)
+        if filters.min_price is not None:
+            budget_min = filters.min_price
+        if filters.max_price is not None:
+            budget_max = filters.max_price
+        if budget_min is not None:
+            evidence.append(f"budget_min:{budget_min}")
+        if budget_max is not None:
+            evidence.append(f"budget_max:{budget_max}")
+        fabric = self._extract_alias(text, self.FABRIC_ALIASES)
+        if fabric:
+            evidence.append(f"fabric:{fabric}")
+        work_type = self._extract_alias(text, self.WORK_ALIASES)
+        if work_type:
+            evidence.append(f"work_type:{work_type}")
+        occasion = self._extract_alias(text, self.OCCASION_ALIASES)
+        if occasion:
+            evidence.append(f"occasion:{occasion}")
+        style = self._extract_alias(text, self.STYLE_ALIASES)
+        if style:
+            evidence.append(f"style:{style}")
+        wants_in_stock = bool(filters.min_stock and filters.min_stock > 0) or any(
+            self._contains_phrase(text, phrase) for phrase in self.AVAILABILITY_PHRASES
+        )
+
+        design_id = self._resolve_design_id(
+            question=question,
+            items=catalog,
+            focused_product_ids=focused_product_ids,
+            last_primary_product_id=last_primary_product_id,
+        )
+        if design_id:
+            evidence.append(f"design_id:{design_id}")
+        intent = self._classify_intent(
+            text=text,
+            category_key=category_key,
+            color_family=color_family,
+            size=size,
+            design_id=design_id,
+        )
+        return FashionRetailSlots(
+            category_key=category_key,
+            category_label=self.CATEGORY_LABELS.get(category_key) if category_key else None,
+            color=color,
+            color_family=color_family,
+            size=size,
+            budget_min=budget_min,
+            budget_max=budget_max,
+            fabric=fabric,
+            work_type=work_type,
+            occasion=occasion,
+            style=style,
+            design_id=design_id,
+            wants_in_stock=wants_in_stock,
+            intent=intent,
+            language=language,
+            evidence=tuple(evidence),
+        )
+
+    def is_fashion_item(self, item: InventoryItemRecord) -> bool:
+        category_text = normalize_fashion_text(item.category)
+        item_text = self._item_text(item)
+        if any(self._contains_phrase(category_text, term) for term in self.ITEM_FASHION_CATEGORY_TERMS):
+            return True
+        source = normalize_fashion_text(item.metadata.get("source"))
+        if "saree" in source or "fashion" in source or "aarong" in source:
+            return True
+        if item.attributes.get("design_id") and any(
+            key in item.attributes for key in ("fabric", "work_type", "color", "size", "compatible_design_ids", "accessory_type")
+        ):
+            return True
+        if item.attributes.get("accessory_type") or item.attributes.get("compatible_design_ids"):
+            return True
+        if category_text == "accessories":
+            return any(self._contains_phrase(item_text, term) for term in self.ITEM_FASHION_CATEGORY_TERMS - {"bag"})
+        return False
+
+    def _answer_variant_color(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        top_k: int,
+    ) -> FashionRetailOutcome | None:
+        if not slots.design_id:
+            return None
+        variants = self._same_design_items(items, slots.design_id)
+        if not variants:
+            return None
+        if not slots.color_family:
+            in_stock = [item for item in variants if item.stock > 0]
+            if not in_stock:
+                return self._outcome(
+                    answer="I found that design family, but all listed color variants are currently out of stock.",
+                    intent=slots.intent,
+                    product_ids=tuple(item.product_id for item in variants[:top_k]),
+                    total_matches=len(variants),
+                    confidence=0.78,
+                    slots=slots,
+                    abstained=False,
+                    reasoning_steps=("Resolved the design family, then checked stock across color variants.",),
+                )
+            answer = f"Yes. In that same design, available colors are {self._color_stock_list(in_stock)}."
+            out_stock = [item for item in variants if item.stock <= 0]
+            if out_stock:
+                answer += f" Out-of-stock colors: {self._color_stock_list(out_stock, include_stock=False)}."
+            return self._outcome(
+                answer=answer,
+                intent=slots.intent,
+                product_ids=tuple(item.product_id for item in in_stock[:top_k]),
+                total_matches=len(variants),
+                confidence=0.88,
+                slots=slots,
+                reasoning_steps=("Resolved the design family, then listed available color variants.",),
+            )
+
+        exact_color = [item for item in variants if self._item_color_matches(item, slots.color_family, slots.color)]
+        if exact_color:
+            exact_color = sorted(exact_color, key=lambda item: (-item.stock, self._item_price_value(item), item.name.casefold()))
+            best = exact_color[0]
+            alternatives = [item for item in variants if item.product_id != best.product_id and item.stock > 0]
+            if best.stock > 0:
+                answer = f"Yes. {best.name} is available: {self._format_price(best)}, {best.stock} in stock."
+                if alternatives:
+                    answer += f" Other in-stock colors in the same design: {self._color_stock_list(alternatives)}."
+                return self._outcome(
+                    answer=answer,
+                    intent=slots.intent,
+                    product_ids=tuple(item.product_id for item in [best, *alternatives[: top_k - 1]]),
+                    total_matches=len(variants),
+                    confidence=0.95,
+                    slots=slots,
+                    reasoning_steps=("Matched requested color inside the same design_id and checked stock.",),
+                )
+            in_stock = [item for item in variants if item.stock > 0]
+            answer = f"We have {best.name} in that same design, but it is currently out of stock."
+            if in_stock:
+                answer += f" In-stock colors in the same design: {self._color_stock_list(in_stock)}."
+            else:
+                answer += " No other colors in this design are in stock right now."
+            return self._outcome(
+                answer=answer,
+                intent=slots.intent,
+                product_ids=tuple(item.product_id for item in [best, *in_stock[: top_k - 1]]),
+                total_matches=len(variants),
+                confidence=0.93,
+                slots=slots,
+                reasoning_steps=("Matched requested color inside the same design_id and found stock is zero.",),
+            )
+
+        in_stock = [item for item in variants if item.stock > 0]
+        requested = slots.color or slots.color_family or "that color"
+        answer = f"I do not see {requested} in that exact design."
+        if in_stock:
+            answer += f" In-stock colors in the same design are {self._color_stock_list(in_stock)}."
+        return self._outcome(
+            answer=answer,
+            intent=slots.intent,
+            product_ids=tuple(item.product_id for item in in_stock[:top_k]),
+            total_matches=len(variants),
+            confidence=0.86,
+            slots=slots,
+            reasoning_steps=("Resolved the design family but found no variant matching the requested color.",),
+        )
+
+    def _answer_size_availability(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        top_k: int,
+    ) -> FashionRetailOutcome | None:
+        if not slots.size:
+            return None
+        candidates = [
+            item
+            for item in items
+            if self._item_matches_search_slots(item, slots, strict_size=True, strict_color=bool(slots.color_family))
+        ]
+        exact = [item for item in candidates if self._item_size_matches(item, slots.size)]
+        if not exact:
+            exact = [
+                item
+                for item in items
+                if self._item_size_matches(item, slots.size)
+                and (not slots.category_key or self._item_category_matches(item, slots.category_key))
+                and (not slots.color_family or self._item_color_matches(item, slots.color_family, slots.color))
+            ]
+        exact = sorted(exact, key=lambda item: (-item.stock, self._item_price_value(item), item.name.casefold()))
+        if exact:
+            best = exact[0]
+            if best.stock > 0:
+                answer = f"Yes. {best.name} is available in size {slots.size}: {self._format_price(best)}, {best.stock} in stock."
+                return self._outcome(
+                    answer=answer,
+                    intent=slots.intent,
+                    product_ids=tuple(item.product_id for item in exact[:top_k]),
+                    total_matches=len(exact),
+                    confidence=0.95,
+                    slots=slots,
+                    reasoning_steps=("Matched the requested size as a structured attribute before semantic ranking.",),
+                )
+            alternatives = self._same_design_or_category_alternatives(best, items, slots)
+            answer = f"Size {slots.size} for {best.name} is currently out of stock."
+            if alternatives:
+                answer += f" Closest available option: {self._format_option(alternatives[0])}."
+            return self._outcome(
+                answer=answer,
+                intent=slots.intent,
+                product_ids=tuple(item.product_id for item in [best, *alternatives[: top_k - 1]]),
+                total_matches=len(exact),
+                confidence=0.94,
+                slots=slots,
+                reasoning_steps=("Matched the requested size exactly and found stock is zero.",),
+            )
+
+        search_matches = self._rank_search_items(question=question, items=items, slots=slots, top_k=top_k)
+        answer = f"I do not see size {slots.size} in the current catalog for that request."
+        if search_matches:
+            available_sizes = self._available_size_list([match.item for match in search_matches])
+            if available_sizes:
+                answer += f" Available nearby sizes I can see: {available_sizes}."
+        return self._outcome(
+            answer=answer,
+            intent=slots.intent,
+            product_ids=tuple(match.item.product_id for match in search_matches),
+            total_matches=len(search_matches),
+            confidence=0.82,
+            slots=slots,
+            reasoning_steps=("Checked structured size fields and did not find the requested size.",),
+        )
+
+    def _answer_accessory_match(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        top_k: int,
+    ) -> FashionRetailOutcome | None:
+        design_id = slots.design_id
+        anchor = self._resolve_anchor_item(question=question, items=items, slots=slots)
+        if anchor and not design_id:
+            design_id = self._item_design_id(anchor)
+        scored: list[_ScoredItem] = []
+        for item in items:
+            if anchor and item.product_id == anchor.product_id:
+                continue
+            if not self._is_accessory_item(item):
+                continue
+            score = 0.0
+            reasons: list[str] = []
+            compatible_design_ids = self._split_multi_value(item.attributes.get("compatible_design_ids"))
+            compatible_design_ids.extend(self._split_multi_value(item.metadata.get("compatible_design_ids")))
+            if design_id and design_id in compatible_design_ids:
+                score += 5.0
+                reasons.append("compatible_design_id")
+            if anchor is not None:
+                anchor_color_family = self._item_color_family(anchor)
+                compatible_colors = self._split_multi_value(item.attributes.get("compatible_colors"))
+                if anchor_color_family and any(self._color_value_matches(value, anchor_color_family, None) for value in compatible_colors):
+                    score += 1.5
+                    reasons.append("compatible_color")
+            if item.stock > 0:
+                score += 0.7
+            score += min(self._lexical_overlap_score(question, self._item_text(item)), 2.0)
+            if score > 0.75:
+                scored.append(_ScoredItem(item=item, score=score, reasons=tuple(reasons)))
+        scored = sorted(scored, key=lambda match: (-match.score, -match.item.stock, self._item_price_value(match.item), match.item.name.casefold()))
+        selected = scored[:top_k]
+        if selected:
+            anchor_phrase = f" for {anchor.name}" if anchor else ""
+            answer = f"Good matches{anchor_phrase}: {self._natural_join(self._format_option(match.item) for match in selected[:3])}."
+            return self._outcome(
+                answer=answer,
+                intent=slots.intent,
+                product_ids=tuple(match.item.product_id for match in selected),
+                cross_sell_product_ids=tuple(match.item.product_id for match in selected),
+                total_matches=len(scored),
+                confidence=0.9 if any("compatible_design_id" in match.reasons for match in selected) else 0.78,
+                slots=slots,
+                reasoning_steps=("Resolved product/design context and ranked accessories by compatibility metadata first.",),
+            )
+        return None
+
+    def _answer_fashion_search(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        top_k: int,
+    ) -> FashionRetailOutcome:
+        scored = self._rank_search_items(question=question, items=items, slots=slots, top_k=max(top_k, 5))
+        if not scored:
+            category = slots.category_label.lower() if slots.category_label else "fashion product"
+            answer = f"I do not see an in-catalog {category} matching those exact details yet."
+            follow_up = "Tell me the category, color, size, budget, or occasion and I will narrow it down."
+            return self._outcome(
+                answer=answer,
+                intent=slots.intent,
+                product_ids=(),
+                total_matches=0,
+                confidence=0.72,
+                slots=slots,
+                follow_up_question=follow_up,
+                abstained=True,
+                abstention_reason="No fashion catalog item matched the extracted structured slots.",
+                reasoning_steps=("Applied structured fashion filters before semantic fallback and found no eligible item.",),
+            )
+        selected = [match.item for match in scored[:top_k]]
+        if len(selected) == 1:
+            answer = f"Yes, the closest match is {self._format_option(selected[0])}."
+        else:
+            answer = f"I found {len(scored)} matching option(s): {self._natural_join(self._format_option(item) for item in selected[:3])}."
+        return self._outcome(
+            answer=answer,
+            intent=slots.intent,
+            product_ids=tuple(item.product_id for item in selected),
+            total_matches=len(scored),
+            confidence=0.86 if selected[0].stock > 0 else 0.76,
+            slots=slots,
+            follow_up_question="Should I narrow this by color, size, fabric, budget, or occasion?",
+            reasoning_steps=("Extracted fashion slots and ranked matching catalog items with stock and exact attributes ahead of fuzzy text.",),
+        )
+
+    def _rank_search_items(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        top_k: int,
+    ) -> list[_ScoredItem]:
+        scored: list[_ScoredItem] = []
+        for item in items:
+            if not self._item_matches_search_slots(item, slots):
+                continue
+            score, reasons = self._score_search_item(question=question, item=item, slots=slots)
+            if score > 0:
+                scored.append(_ScoredItem(item=item, score=score, reasons=tuple(reasons)))
+        return sorted(scored, key=lambda match: (-match.score, -match.item.stock, self._item_price_value(match.item), match.item.name.casefold()))[:top_k]
+
+    def _item_matches_search_slots(
+        self,
+        item: InventoryItemRecord,
+        slots: FashionRetailSlots,
+        *,
+        strict_size: bool = False,
+        strict_color: bool = False,
+    ) -> bool:
+        if slots.category_key and not self._item_category_matches(item, slots.category_key):
+            return False
+        if slots.color_family and (strict_color or slots.intent in {"fashion_search", "fashion_size_availability"}):
+            if not self._item_color_matches(item, slots.color_family, slots.color):
+                return False
+        if slots.size and strict_size and not self._item_size_matches(item, slots.size):
+            return False
+        if slots.budget_min is not None and (item.price is None or item.price < slots.budget_min):
+            return False
+        if slots.budget_max is not None and (item.price is None or item.price > slots.budget_max):
+            return False
+        if slots.fabric and not self._contains_phrase(self._item_text(item), slots.fabric):
+            return False
+        if slots.work_type and not self._contains_phrase(self._item_text(item), slots.work_type):
+            return False
+        if slots.occasion and not self._contains_phrase(self._item_text(item), slots.occasion):
+            return False
+        if slots.wants_in_stock and item.stock <= 0 and slots.intent != "fashion_variant_color":
+            return False
+        return True
+
+    def _score_search_item(
+        self,
+        *,
+        question: str,
+        item: InventoryItemRecord,
+        slots: FashionRetailSlots,
+    ) -> tuple[float, list[str]]:
+        score = 0.0
+        reasons: list[str] = []
+        if slots.category_key and self._item_category_matches(item, slots.category_key):
+            score += 3.0
+            reasons.append("category")
+        if slots.color_family and self._item_color_matches(item, slots.color_family, slots.color):
+            score += 3.0
+            reasons.append("color")
+        if slots.size and self._item_size_matches(item, slots.size):
+            score += 4.0
+            reasons.append("size")
+        if slots.fabric and self._contains_phrase(self._item_text(item), slots.fabric):
+            score += 2.0
+            reasons.append("fabric")
+        if slots.work_type and self._contains_phrase(self._item_text(item), slots.work_type):
+            score += 1.5
+            reasons.append("work_type")
+        if slots.occasion and self._contains_phrase(self._item_text(item), slots.occasion):
+            score += 1.5
+            reasons.append("occasion")
+        if slots.style and self._item_style_matches(item, slots.style):
+            score += 2.0
+            reasons.append("style")
+        if slots.budget_max is not None and item.price is not None and item.price <= slots.budget_max:
+            score += 1.2
+            reasons.append("budget")
+        if item.stock > 0:
+            score += 0.8
+            reasons.append("in_stock")
+        lexical = self._lexical_overlap_score(question, self._item_text(item))
+        score += lexical
+        if lexical > 0:
+            reasons.append("lexical")
+        return score, reasons
+
+    def _classify_intent(
+        self,
+        *,
+        text: str,
+        category_key: str | None,
+        color_family: str | None,
+        size: str | None,
+        design_id: str | None,
+    ) -> str:
+        if size and any(self._contains_phrase(text, phrase) for phrase in self.AVAILABILITY_PHRASES):
+            return "fashion_size_availability"
+        if any(self._contains_phrase(text, phrase) for phrase in self.ACCESSORY_MATCH_PHRASES):
+            return "fashion_accessory_match"
+        if color_family and (design_id or any(self._contains_phrase(text, phrase) for phrase in self.VARIANT_PHRASES)):
+            return "fashion_variant_color"
+        if any(self._contains_phrase(text, phrase) for phrase in self.VARIANT_PHRASES):
+            return "fashion_variant_color"
+        if size:
+            return "fashion_size_availability"
+        return "fashion_search"
+
+    def _extract_category_key(self, *, text: str, filters: InventorySearchFilters) -> str | None:
+        for category in filters.categories:
+            category_key = self._canonical_category_key(category)
+            if category_key:
+                return category_key
+        for key, aliases in self.CATEGORY_ALIASES.items():
+            if any(self._contains_phrase(text, alias) for alias in aliases):
+                return key
+        return None
+
+    def _canonical_category_key(self, value: str | None) -> str | None:
+        text = normalize_fashion_text(value)
+        if not text:
+            return None
+        for key, aliases in self.CATEGORY_ALIASES.items():
+            if text == key or any(text == normalize_fashion_text(alias) for alias in aliases):
+                return key
+        if text in {"accessory", "accessories"}:
+            return "accessories"
+        return None
+
+    def _extract_color(self, text: str) -> tuple[str | None, str | None]:
+        candidates = sorted(self.COLOR_ALIASES.values(), key=lambda item: max(len(alias) for alias in item[2]), reverse=True)
+        for canonical, family, aliases in candidates:
+            if any(self._contains_phrase(text, alias) for alias in aliases):
+                return canonical, family
+        return None, None
+
+    def _extract_size(self, *, text: str, category_key: str | None) -> str | None:
+        for pattern in (self.SIZE_PATTERN, self.REVERSE_SIZE_PATTERN):
+            match = pattern.search(text)
+            if match:
+                return self._normalize_size(match.group(1))
+        if category_key in {"blouse", "panjabi", "jewelry"}:
+            bare = self.BARE_SIZE_PATTERN.search(text)
+            if bare and not self._contains_phrase(text, "under"):
+                return self._normalize_size(bare.group(1))
+        return None
+
+    def _normalize_size(self, value: str) -> str:
+        normalized = normalize_fashion_text(value)
+        return normalized.upper() if normalized.isalpha() else normalized
+
+    def _extract_budget(self, question: str) -> tuple[float | None, float | None]:
+        budget_min: float | None = None
+        budget_max: float | None = None
+        max_match = self.MAX_PRICE_PATTERN.search(question)
+        if max_match:
+            value = max_match.group(1) or max_match.group(2)
+            if value:
+                budget_max = float(value)
+        min_match = self.MIN_PRICE_PATTERN.search(question)
+        if min_match:
+            budget_min = float(min_match.group(1))
+        return budget_min, budget_max
+
+    def _extract_alias(self, text: str, aliases_by_label: dict[str, tuple[str, ...]]) -> str | None:
+        for label, aliases in aliases_by_label.items():
+            if any(self._contains_phrase(text, alias) for alias in aliases):
+                return label
+        return None
+
+    def _resolve_design_id(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        focused_product_ids: tuple[str, ...],
+        last_primary_product_id: str | None,
+    ) -> str | None:
+        id_candidates = [*focused_product_ids]
+        if last_primary_product_id:
+            id_candidates.append(last_primary_product_id)
+        for product_id in id_candidates:
+            for item in items:
+                if item.product_id == product_id and self._item_design_id(item):
+                    return self._item_design_id(item)
+
+        text = normalize_fashion_text(question)
+        for item in items:
+            design_id = self._item_design_id(item)
+            if design_id and self._contains_phrase(text, normalize_fashion_text(design_id)):
+                return design_id
+            if self._contains_phrase(text, normalize_fashion_text(item.sku)):
+                return design_id
+
+        grouped: dict[str, list[InventoryItemRecord]] = defaultdict(list)
+        for item in items:
+            design_id = self._item_design_id(item)
+            if design_id:
+                grouped[design_id].append(item)
+        best_design_id: str | None = None
+        best_score = 0.0
+        for design_id, group_items in grouped.items():
+            group_text = " ".join(self._item_text(item) for item in group_items)
+            score = self._lexical_overlap_score(question, group_text)
+            variant_group_name = normalize_fashion_text(group_items[0].metadata.get("variant_group_name"))
+            if variant_group_name and self._contains_phrase(text, variant_group_name):
+                score += 5.0
+            if score > best_score:
+                best_score = score
+                best_design_id = design_id
+        if best_score >= 1.5:
+            return best_design_id
+        return None
+
+    def _resolve_anchor_item(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+    ) -> InventoryItemRecord | None:
+        if slots.design_id:
+            variants = self._same_design_items(items, slots.design_id)
+            if variants:
+                if slots.color_family:
+                    color_matches = [item for item in variants if self._item_color_matches(item, slots.color_family, slots.color)]
+                    if color_matches:
+                        return sorted(color_matches, key=lambda item: (-item.stock, self._item_price_value(item)))[0]
+                return sorted(variants, key=lambda item: (-item.stock, self._item_price_value(item)))[0]
+        ranked = self._rank_search_items(question=question, items=[item for item in items if not self._is_accessory_item(item)], slots=slots, top_k=1)
+        return ranked[0].item if ranked else None
+
+    def _same_design_items(self, items: list[InventoryItemRecord], design_id: str) -> list[InventoryItemRecord]:
+        return [item for item in items if self._item_design_id(item) == design_id]
+
+    def _same_design_or_category_alternatives(
+        self,
+        base: InventoryItemRecord,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+    ) -> list[InventoryItemRecord]:
+        design_id = self._item_design_id(base)
+        base_color_family = self._item_color_family(base)
+        alternatives = [
+            item
+            for item in items
+            if item.product_id != base.product_id
+            and item.stock > 0
+            and ((design_id and self._item_design_id(item) == design_id) or self._item_category_matches(item, slots.category_key or ""))
+        ]
+        return sorted(
+            alternatives,
+            key=lambda item: (
+                0 if design_id and self._item_design_id(item) == design_id else 1,
+                0 if base_color_family and self._item_color_matches(item, base_color_family, None) else 1,
+                -item.stock,
+                self._item_price_value(item),
+                item.name.casefold(),
+            ),
+        )
+
+    def _item_category_matches(self, item: InventoryItemRecord, category_key: str | None) -> bool:
+        if not category_key:
+            return True
+        item_text = self._item_text(item)
+        identity_text = normalize_fashion_text(
+            " ".join(
+                [
+                    item.name,
+                    item.category or "",
+                    " ".join(item.tags),
+                    str(item.attributes.get("category", "")),
+                ]
+            )
+        )
+        item_category_key = self._canonical_category_key(item.category)
+        if item_category_key == category_key:
+            return True
+        if category_key in {"accessories", "jewelry", "bag"}:
+            return self._is_accessory_item(item) and (
+                category_key == "accessories" or any(self._contains_phrase(item_text, alias) for alias in self.CATEGORY_ALIASES[category_key])
+            )
+        return any(self._contains_phrase(identity_text, alias) for alias in self.CATEGORY_ALIASES.get(category_key, ()))
+
+    def _is_accessory_item(self, item: InventoryItemRecord) -> bool:
+        item_text = self._item_text(item)
+        category_key = self._canonical_category_key(item.category)
+        if category_key in {"saree", "blouse", "panjabi", "kurti", "salwar_kameez"}:
+            return False
+        if category_key in {"bag", "jewelry", "accessories"}:
+            return True
+        if item.attributes.get("accessory_type") or item.attributes.get("compatible_design_ids"):
+            return True
+        return any(self._contains_phrase(item_text, alias) for key in ("bag", "jewelry", "accessories") for alias in self.CATEGORY_ALIASES[key])
+
+    def _item_color_matches(self, item: InventoryItemRecord, color_family: str | None, color: str | None) -> bool:
+        if not color_family and not color:
+            return True
+        values = [
+            item.attributes.get("color"),
+            item.attributes.get("color_family"),
+            item.metadata.get("color"),
+            item.metadata.get("color_family"),
+            item.name,
+            " ".join(item.tags),
+        ]
+        return any(self._color_value_matches(value, color_family, color) for value in values)
+
+    def _color_value_matches(self, value: object | None, color_family: str | None, color: str | None) -> bool:
+        text = normalize_fashion_text(value)
+        if not text:
+            return False
+        if color and self._contains_phrase(text, color):
+            return True
+        if color_family and self._contains_phrase(text, color_family):
+            return True
+        if color_family:
+            for canonical, family, aliases in self.COLOR_ALIASES.values():
+                if family == color_family and any(self._contains_phrase(text, alias) for alias in aliases + (canonical,)):
+                    return True
+        return False
+
+    def _item_color_family(self, item: InventoryItemRecord) -> str | None:
+        explicit = normalize_fashion_text(item.attributes.get("color_family") or item.metadata.get("color_family"))
+        if explicit:
+            return explicit
+        color_text = normalize_fashion_text(item.attributes.get("color") or item.name)
+        for canonical, family, aliases in self.COLOR_ALIASES.values():
+            if any(self._contains_phrase(color_text, alias) for alias in aliases + (canonical,)):
+                return family
+        return None
+
+    def _item_size_matches(self, item: InventoryItemRecord, size: str) -> bool:
+        requested = self._normalize_size(size)
+        values = [
+            item.attributes.get("size"),
+            item.attributes.get("available_sizes"),
+            item.metadata.get("size"),
+            item.name,
+            " ".join(item.tags),
+        ]
+        for value in values:
+            parts = self._split_multi_value(value)
+            if requested in {self._normalize_size(part) for part in parts}:
+                return True
+        return False
+
+    def _item_style_matches(self, item: InventoryItemRecord, style: str) -> bool:
+        item_text = self._item_text(item)
+        aliases = self.STYLE_ITEM_ALIASES.get(style, (style,))
+        return any(self._contains_phrase(item_text, alias) for alias in aliases)
+
+    def _item_design_id(self, item: InventoryItemRecord) -> str | None:
+        value = item.attributes.get("design_id") or item.metadata.get("design_id")
+        return str(value).strip() if value else None
+
+    def _item_text(self, item: InventoryItemRecord) -> str:
+        pieces: list[str] = [
+            item.product_id,
+            item.sku,
+            item.name,
+            item.category or "",
+            item.brand or "",
+            item.short_description or "",
+            item.full_description or "",
+            " ".join(item.tags),
+        ]
+        pieces.extend(f"{key} {value}" for key, value in sorted(item.attributes.items()))
+        pieces.extend(f"{key} {value}" for key, value in sorted(item.metadata.items()) if not isinstance(value, (dict, list)))
+        for value in item.metadata.values():
+            if isinstance(value, list):
+                pieces.extend(str(part) for part in value)
+        return normalize_fashion_text(" ".join(pieces))
+
+    def _lexical_overlap_score(self, question: str, candidate_text: str) -> float:
+        query_terms = self._query_terms(question)
+        if not query_terms:
+            return 0.0
+        score = 0.0
+        for term in query_terms:
+            if self._contains_phrase(candidate_text, term):
+                score += 1.0 if len(term) <= 4 else 1.25
+        return score
+
+    def _query_terms(self, question: str) -> list[str]:
+        text = normalize_fashion_text(question)
+        raw_terms = [term for term in re.split(r"\s+", text) if len(term) > 1]
+        excluded = set(self.STOPWORDS)
+        for aliases in self.CATEGORY_ALIASES.values():
+            excluded.update(alias for alias in aliases if " " not in alias)
+        terms: list[str] = []
+        seen: set[str] = set()
+        for term in raw_terms:
+            if term in excluded:
+                continue
+            if term.isdigit() and len(term) > 2:
+                continue
+            if term not in seen:
+                seen.add(term)
+                terms.append(term)
+        return terms
+
+    def _has_tech_context_without_fashion_context(self, text: str) -> bool:
+        has_tech = any(self._contains_phrase(text, term) for term in self.TECH_CONTEXT_TERMS)
+        has_strong_fashion = any(
+            self._contains_phrase(text, term)
+            for term in (
+                "saree",
+                "sari",
+                "blouse",
+                "panjabi",
+                "jewelry",
+                "necklace",
+                "bangle",
+                "bridal",
+                "wedding",
+                "katan",
+                "jamdani",
+            )
+        )
+        return has_tech and not has_strong_fashion
+
+    def _available_size_list(self, items: list[InventoryItemRecord]) -> str:
+        sizes: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            for value in (item.attributes.get("size"), item.attributes.get("available_sizes")):
+                for part in self._split_multi_value(value):
+                    size = self._normalize_size(part)
+                    if size and size not in seen and item.stock > 0:
+                        seen.add(size)
+                        sizes.append(size)
+        return self._natural_join(sizes[:6])
+
+    def _color_stock_list(self, items: list[InventoryItemRecord], *, include_stock: bool = True) -> str:
+        values: list[str] = []
+        seen: set[str] = set()
+        for item in sorted(items, key=lambda value: (self._item_color_sort_text(value), value.name.casefold())):
+            color = item.attributes.get("color") or self._item_color_sort_text(item)
+            color_text = str(color)
+            if color_text.casefold() in seen:
+                continue
+            seen.add(color_text.casefold())
+            values.append(f"{color_text} ({item.stock} in stock)" if include_stock else color_text)
+        return self._natural_join(values)
+
+    def _item_color_sort_text(self, item: InventoryItemRecord) -> str:
+        return normalize_fashion_text(item.attributes.get("color") or item.name)
+
+    def _format_option(self, item: InventoryItemRecord) -> str:
+        return f"{item.name} ({self._format_price(item)}, {item.stock} in stock)"
+
+    def _format_price(self, item: InventoryItemRecord) -> str:
+        if item.price is None:
+            return item.currency
+        amount = f"{item.price:,.0f}" if float(item.price).is_integer() else f"{item.price:,.2f}"
+        return f"{item.currency} {amount}"
+
+    def _item_price_value(self, item: InventoryItemRecord) -> float:
+        return item.price if item.price is not None else float("inf")
+
+    def _split_multi_value(self, value: object | None) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            parts = [str(part) for part in value]
+        else:
+            parts = re.split(r"[,/;|]+", str(value))
+        normalized = [part.strip() for part in parts if part and part.strip()]
+        return normalized
+
+    def _outcome(
+        self,
+        *,
+        answer: str,
+        intent: str,
+        product_ids: tuple[str, ...] = (),
+        cross_sell_product_ids: tuple[str, ...] = (),
+        total_matches: int = 0,
+        confidence: float,
+        slots: FashionRetailSlots,
+        follow_up_question: str | None = None,
+        abstained: bool = False,
+        abstention_reason: str | None = None,
+        reasoning_steps: tuple[str, ...] = (),
+    ) -> FashionRetailOutcome:
+        answer = self._localize_answer(answer=answer, slots=slots)
+        return FashionRetailOutcome(
+            answer=answer,
+            intent=intent,
+            product_ids=product_ids,
+            cross_sell_product_ids=cross_sell_product_ids,
+            total_matches=total_matches,
+            confidence=round(max(0.0, min(1.0, confidence)), 3),
+            slots=slots,
+            follow_up_question=follow_up_question,
+            abstained=abstained,
+            abstention_reason=abstention_reason,
+            reasoning_steps=reasoning_steps,
+        )
+
+    def _detect_language(self, question: str) -> str:
+        if BANGLA_TEXT_PATTERN.search(question):
+            return "bangla"
+        text = normalize_fashion_text(question)
+        banglish_markers = (
+            "ache",
+            "ase",
+            "nai",
+            "pawa",
+            "jabe",
+            "lagbe",
+            "dekh",
+            "dekhan",
+            "jonno",
+            "sathe",
+            "shathe",
+            "manabe",
+            "ekoi",
+            "onno",
+            "kom",
+            "dam",
+        )
+        if any(self._contains_phrase(text, marker) for marker in banglish_markers):
+            return "banglish"
+        return "english"
+
+    def _localize_answer(self, *, answer: str, slots: FashionRetailSlots) -> str:
+        if slots.language == "bangla":
+            localized = answer
+            localized = localized.replace(" is available in size ", " সাইজ ")
+            replacements = (
+                ("Yes.", "জি,"),
+                ("I found", "আমি পেয়েছি"),
+                ("I do not see", "আমি ক্যাটালগে পাচ্ছি না"),
+                ("We have", "আমাদের কাছে আছে"),
+                ("is available", "স্টকে আছে"),
+                ("available:", "স্টকে আছে:"),
+                ("currently out of stock", "এখন স্টকে নেই"),
+                ("out of stock", "স্টকে নেই"),
+                ("in stock", "স্টকে আছে"),
+                ("Other in-stock colors in the same design", "একই ডিজাইনে অন্য স্টকে থাকা রঙ"),
+                ("In-stock colors in the same design", "একই ডিজাইনে স্টকে থাকা রঙ"),
+                ("Closest available option", "নিকটতম স্টকে থাকা অপশন"),
+                ("Good matches", "ভালো ম্যাচিং অপশন"),
+                ("matching option(s)", "ম্যাচিং অপশন"),
+            )
+            for source, target in replacements:
+                localized = localized.replace(source, target)
+            localized = localized.replace(" in that same design, but it is ", " একই ডিজাইনে, কিন্তু এটি ")
+            localized = localized.replace(" in size ", " সাইজ ")
+            localized = localized.replace(" for ", " এর জন্য ")
+            localized = localized.replace(", and ", ", এবং ")
+            localized = localized.replace(" and ", " এবং ")
+            localized = re.sub(r"(Size\s+([a-z0-9.]+))\s+সাইজ\s+\2:", r"\1:", localized, flags=re.IGNORECASE)
+            localized = re.sub(r"(?<=, )(\d+)\s+স্টকে আছে", r"\1টি স্টকে আছে", localized)
+            localized = re.sub(r"(?<=\()(\d+)\s+স্টকে আছে", r"\1টি স্টকে আছে", localized)
+            localized = re.sub(r"\b(\d+)\s+ম্যাচিং অপশন", r"\1টি ম্যাচিং অপশন", localized)
+            localized = re.sub(r"ভালো ম্যাচিং অপশন এর জন্য ([^:]+):", r"\1 এর জন্য ভালো ম্যাচিং অপশন:", localized)
+            return localized
+        if slots.language == "banglish":
+            localized = answer
+            localized = localized.replace(" is available in size ", " size ")
+            replacements = (
+                ("Yes.", "Ji,"),
+                ("I found", "Ami peyechi"),
+                ("I do not see", "Ami catalog e pacchi na"),
+                ("We have", "Amader kache ache"),
+                ("is available", "available ache"),
+                ("available:", "available ache:"),
+                ("currently out of stock", "ekhon stock e nei"),
+                ("out of stock", "stock e nei"),
+                ("in stock", "stock e ache"),
+                ("Other in-stock colors in the same design", "Same design e onno stock e thaka color"),
+                ("In-stock colors in the same design", "Same design e stock e thaka color"),
+                ("Closest available option", "Closest available option"),
+                ("Good matches", "Bhalo matching option"),
+            )
+            for source, target in replacements:
+                localized = localized.replace(source, target)
+            localized = localized.replace(" in that same design, but it is ", " same design e, kintu eta ")
+            localized = localized.replace(" in size ", " size ")
+            localized = localized.replace(" for ", " er jonno ")
+            localized = re.sub(r"(Size\s+([a-z0-9.]+))\s+size\s+\2:", r"\1:", localized, flags=re.IGNORECASE)
+            return localized
+        return answer
+
+    @staticmethod
+    def _contains_phrase(text: str, phrase: str) -> bool:
+        normalized_phrase = normalize_fashion_text(phrase)
+        if not text or not normalized_phrase:
+            return False
+        return re.search(rf"(?<![a-z0-9]){re.escape(normalized_phrase)}(?![a-z0-9])", text) is not None
+
+    @staticmethod
+    def _natural_join(values: list[str] | tuple[str, ...]) -> str:
+        cleaned = [value for value in values if value]
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} and {cleaned[1]}"
+        return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"

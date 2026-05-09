@@ -27,6 +27,22 @@ Make the system reliable for human shopping and inventory conversations, not jus
 - [ ] Add UI smoke coverage for the same cases, especially bundles and top-N business questions.
 - [ ] Track pass/partial/fail over time in `results/inventory_eval/`.
 
+## Fashion Retail Generalization
+
+- [x] Stop designing around a fixed question list; use retail primitives instead: category, design family, color, size, price, stock, occasion, fabric, work type, and compatibility.
+- [x] Add a generalized fashion-retail structured layer before generic RAG.
+- [x] Support same-design color variant checks via `design_id`.
+- [x] Support exact size availability checks before semantic ranking.
+- [x] Support fashion search across sarees, blouses, panjabi/kurta, bags, jewelry, accessories, fabric, occasion, and budget.
+- [x] Support accessory matching through `compatible_design_ids` and `compatible_colors`.
+- [x] Keep non-fashion queries on the existing generic inventory pipeline.
+- [ ] Expand sample catalog with Aarong-style bags, jewelry, panjabi, kurti, three-piece, dupatta, and mixed-size products.
+- [x] Add Bangla/Banglish aliases beyond the current romanized terms.
+- [x] Preserve Bangla text during fashion query normalization instead of stripping it.
+- [x] Support Bangla numerals in size and budget questions.
+- [x] Localize deterministic fashion answers for Bangla/Banglish customer messages.
+- [ ] Add machine-readable fashion QA regression set and run it in CI.
+
 ## Current Failure Snapshot
 
 - `fail`: 29

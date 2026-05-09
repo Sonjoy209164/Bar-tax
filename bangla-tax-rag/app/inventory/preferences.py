@@ -84,11 +84,11 @@ class InventoryPreferenceExtractor:
         re.IGNORECASE,
     )
     MAX_PRICE_PATTERN = re.compile(
-        r"(?:under|below|less than|up to|within|max|maximum|around|about|roughly|near|stretch to|can stretch to)\s*\$?\s*(\d+(?:\.\d+)?)",
+        r"(?:under|below|less than|up to|within|max|maximum|around|about|roughly|near|stretch to|can stretch to)\s*(?:\$|tk|taka|bdt)?\s*(\d+(?:\.\d+)?)",
         re.IGNORECASE,
     )
     MIN_PRICE_PATTERN = re.compile(
-        r"(?:over|above|more than|at least|min|minimum)\s*\$?\s*(\d+(?:\.\d+)?)",
+        r"(?:over|above|more than|at least|min|minimum)\s*(?:\$|tk|taka|bdt)?\s*(\d+(?:\.\d+)?)",
         re.IGNORECASE,
     )
     FEATURE_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -114,6 +114,12 @@ class InventoryPreferenceExtractor:
         "mechanical": ("mechanical", "tactile", "switches"),
         "portable": ("portable", "travel"),
         "premium": ("premium", "flagship", "high end", "high-end"),
+        "lightweight": ("lightweight", "light weight", "soft", "comfortable"),
+        "zari": ("zari",),
+        "meena_work": ("meena", "meena work"),
+        "embroidery": ("embroidery", "embroidered"),
+        "block_print": ("block print", "block-print"),
+        "blouse_piece": ("blouse piece",),
     }
     USE_CASE_KEYWORDS: dict[str, tuple[str, ...]] = {
         "office_calls": ("office call", "office calls", "meeting", "meetings", "calls", "webinar"),
@@ -130,10 +136,17 @@ class InventoryPreferenceExtractor:
         "backup": ("backup", "archive", "archives"),
         "networking_coverage": ("coverage", "dead spot", "larger home", "small home", "internet"),
         "desk_setup": ("desk setup", "workstation", "desk planning", "office setup"),
+        "bridal": ("bridal", "bride"),
+        "wedding": ("wedding", "biye", "marriage"),
+        "reception": ("reception",),
+        "party": ("party", "program"),
+        "daily_wear": ("daily wear", "everyday", "regular"),
+        "gift": ("gift", "gifting"),
+        "summer": ("summer", "lightweight", "light weight"),
     }
     PREMIUM_HINTS = ("premium", "best", "top", "flagship", "high end", "high-end", "luxury", "pro")
     BUDGET_HINTS = ("budget", "affordable", "value", "cheap", "cheapest", "lower price", "low price")
-    AVAILABILITY_HINTS = ("in stock", "available now", "ready to sell", "available", "sellable now")
+    AVAILABILITY_HINTS = ("in stock", "available now", "ready to sell", "available", "sellable now", "stock ache", "stock ase")
     RAM_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*(tb|gb)\s*ram\b", re.IGNORECASE)
     STORAGE_PATTERN = re.compile(
         r"(\d+(?:\.\d+)?)\s*(tb|gb)\s*(?:ssd|hdd|storage|rom|capacity)\b",

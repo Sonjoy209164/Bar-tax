@@ -16,6 +16,15 @@ class ProductOntology:
     """Small deterministic ecommerce ontology used before ranking and generation."""
 
     PRODUCT_SYNONYMS: dict[str, tuple[str, ...]] = {
+        "saree": ("saree", "sarees", "sari", "saris", "sharee", "jamdani", "katan saree", "muslin saree"),
+        "blouse": ("blouse", "blouses", "ready blouse", "stitched blouse"),
+        "panjabi": ("panjabi", "punjabi", "kurta", "kurta pajama"),
+        "kurti": ("kurti", "kameez", "top"),
+        "salwar_kameez": ("salwar kameez", "three piece", "three-piece", "3 piece", "dress"),
+        "dupatta": ("dupatta", "orna", "scarf"),
+        "shawl": ("shawl", "stole"),
+        "jewelry": ("jewelry", "jewellery", "ornament", "necklace", "bangle", "bangles", "earring", "earrings", "jhumka"),
+        "clutch": ("clutch", "party clutch", "purse", "handbag"),
         "speakerphone": ("speakerphone", "speaker phone", "conference speakerphone", "meeting room speaker"),
         "headset": ("headset", "headsets", "office headset", "call headset", "support headset", "boom mic"),
         "headphones": ("headphone", "headphones", "over ear", "over-ear", "anc headphones", "monitor headphones"),
@@ -69,6 +78,15 @@ class ProductOntology:
     }
 
     PRODUCT_FAMILIES: dict[str, str] = {
+        "saree": "fashion_saree",
+        "blouse": "fashion_blouse",
+        "panjabi": "fashion_menswear",
+        "kurti": "fashion_womenswear",
+        "salwar_kameez": "fashion_womenswear",
+        "dupatta": "fashion_accessory",
+        "shawl": "fashion_accessory",
+        "jewelry": "fashion_accessory",
+        "clutch": "fashion_accessory",
         "speakerphone": "audio_conference",
         "headset": "audio_listening",
         "headphones": "audio_listening",
@@ -122,6 +140,15 @@ class ProductOntology:
     }
 
     DEFAULT_CATEGORY_BY_TYPE: dict[str, str] = {
+        "saree": "Saree",
+        "blouse": "Blouse",
+        "panjabi": "Panjabi",
+        "kurti": "Kurti",
+        "salwar_kameez": "Salwar Kameez",
+        "dupatta": "Accessories",
+        "shawl": "Accessories",
+        "jewelry": "Accessories",
+        "clutch": "Accessories",
         "speakerphone": "Audio",
         "headset": "Audio",
         "headphones": "Audio",
@@ -175,6 +202,13 @@ class ProductOntology:
     }
 
     CROSS_SELL_COMPATIBILITY: dict[str, set[str]] = {
+        "saree": {"blouse", "jewelry", "clutch", "bag", "dupatta"},
+        "blouse": {"saree", "jewelry", "clutch"},
+        "panjabi": {"shawl", "bag"},
+        "kurti": {"dupatta", "jewelry", "bag"},
+        "salwar_kameez": {"dupatta", "jewelry", "bag"},
+        "jewelry": {"saree", "blouse", "kurti", "salwar_kameez"},
+        "clutch": {"saree", "jewelry"},
         "laptop": {
             "charger",
             "cleaning_kit",

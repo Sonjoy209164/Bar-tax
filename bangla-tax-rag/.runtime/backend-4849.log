@@ -1,113 +1,400 @@
-INFO:     Started server process [455218]
+INFO:     Started server process [495050]
 INFO:     Waiting for application startup.
-2026-05-07 12:28:39,280 | INFO | app.main | FastAPI app started
+2026-05-07 17:36:56,434 | INFO | app.main | FastAPI app started
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:4849 (Press CTRL+C to quit)
-2026-05-07 12:28:40,586 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.003s]
-2026-05-07 12:28:40,588 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.003s]
-2026-05-07 12:28:40,596 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.007s]
-2026-05-07 12:28:40,618 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.003s]
-2026-05-07 12:28:40,792 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.174s]
-2026-05-07 12:28:40,867 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=18a9ad4b-1d63-401c-bdb4-56e2123aa90e execution_path=inventory_ask intent=restock answer_engine=deterministic total_hits=10 latency_ms=287.585 fallback_reason=None
-INFO:     127.0.0.1:48956 - "POST /inventory/ask HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36604 - "OPTIONS /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36610 - "OPTIONS /inventory/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36614 - "OPTIONS /inventory/sync/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36624 - "OPTIONS /inventory/business/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36638 - "OPTIONS /inventory/production/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36646 - "OPTIONS /inventory/agentic/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36604 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36638 - "GET /inventory/production/status HTTP/1.1" 403 Forbidden
-INFO:     127.0.0.1:36610 - "GET /inventory/status HTTP/1.1" 403 Forbidden
-INFO:     127.0.0.1:36646 - "GET /inventory/agentic/status HTTP/1.1" 403 Forbidden
-INFO:     127.0.0.1:36624 - "GET /inventory/business/status HTTP/1.1" 403 Forbidden
-INFO:     127.0.0.1:36614 - "GET /inventory/sync/status HTTP/1.1" 403 Forbidden
-INFO:     127.0.0.1:36662 - "OPTIONS /config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36672 - "GET /config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45354 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45362 - "GET /config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45364 - "OPTIONS /inventory/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45372 - "OPTIONS /inventory/sync/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45384 - "OPTIONS /inventory/business/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45396 - "OPTIONS /inventory/production/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45354 - "OPTIONS /inventory/agentic/status HTTP/1.1" 200 OK
-2026-05-07 12:37:01,728 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:37:01,732 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
-INFO:     127.0.0.1:45362 - "GET /inventory/agentic/status HTTP/1.1" 200 OK
-2026-05-07 12:37:01,739 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.003s]
-2026-05-07 12:37:01,743 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
-INFO:     127.0.0.1:45364 - "GET /inventory/status HTTP/1.1" 200 OK
-2026-05-07 12:37:01,748 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:37:01,764 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.014s]
-2026-05-07 12:37:01,768 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.004s]
-2026-05-07 12:37:01,772 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
-2026-05-07 12:37:01,774 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:37:01,777 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
-INFO:     127.0.0.1:45372 - "GET /inventory/sync/status HTTP/1.1" 200 OK
-2026-05-07 12:37:01,858 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:37:01,861 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
-INFO:     127.0.0.1:45396 - "GET /inventory/production/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45384 - "GET /inventory/business/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45396 - "OPTIONS /inventory/items HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45384 - "GET /inventory/items HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45384 - "OPTIONS /inventory/business/signals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45396 - "GET /inventory/business/signals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45396 - "GET /inventory/items HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45396 - "GET /inventory/business/signals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45396 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45384 - "GET /config HTTP/1.1" 200 OK
-2026-05-07 12:37:04,622 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.003s]
-2026-05-07 12:37:04,626 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.004s]
-INFO:     127.0.0.1:45372 - "GET /inventory/status HTTP/1.1" 200 OK
-2026-05-07 12:37:04,630 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:37:04,645 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.014s]
-2026-05-07 12:37:04,649 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.004s]
-2026-05-07 12:37:04,653 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.003s]
-2026-05-07 12:37:04,655 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:37:04,658 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
-INFO:     127.0.0.1:45364 - "GET /inventory/sync/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45362 - "GET /inventory/business/status HTTP/1.1" 200 OK
-2026-05-07 12:37:04,743 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
-2026-05-07 12:37:04,746 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
-INFO:     127.0.0.1:45354 - "GET /inventory/production/status HTTP/1.1" 200 OK
-2026-05-07 12:37:04,750 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:37:04,753 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
-INFO:     127.0.0.1:45396 - "GET /inventory/agentic/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45396 - "GET /inventory/items HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45396 - "GET /inventory/business/signals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:48862 - "OPTIONS /inventory/route HTTP/1.1" 200 OK
-INFO:     127.0.0.1:48870 - "POST /inventory/route HTTP/1.1" 200 OK
-INFO:     127.0.0.1:48870 - "OPTIONS /inventory/ask/stream HTTP/1.1" 200 OK
-INFO:     127.0.0.1:48862 - "POST /inventory/ask/stream HTTP/1.1" 200 OK
-2026-05-07 12:37:25,173 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:37:25,176 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.003s]
-2026-05-07 12:37:25,188 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.011s]
-2026-05-07 12:37:25,199 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:37:25,277 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.077s]
-2026-05-07 12:37:34,053 | INFO | httpx | HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
-2026-05-07 12:37:34,054 | WARNING | app.services.inventory_service | Natural answer model returned invalid structured output; deterministic fallback was used.
-2026-05-07 12:37:34,060 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=4270a062-758e-42a5-8614-e927ab2b1bb8 execution_path=inventory_ask intent=product_search answer_engine=deterministic total_hits=2 latency_ms=8890.903 fallback_reason=Natural answer model returned invalid structured output; deterministic fallback was used.
-INFO:     127.0.0.1:48862 - "OPTIONS /inventory/chat/trace/4270a062-758e-42a5-8614-e927ab2b1bb8 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34980 - "GET /inventory/chat/trace/4270a062-758e-42a5-8614-e927ab2b1bb8 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47394 - "POST /inventory/route HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47394 - "POST /inventory/ask/stream HTTP/1.1" 200 OK
-2026-05-07 12:37:55,032 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:37:55,035 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.003s]
-2026-05-07 12:37:55,043 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.007s]
-2026-05-07 12:37:55,046 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:37:55,100 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.053s]
-2026-05-07 12:37:55,110 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=e730b9e0-2c1a-4c3b-9873-291fc16bdca5 execution_path=inventory_ask intent=product_detail answer_engine=deterministic total_hits=0 latency_ms=87.007 fallback_reason=No reliable catalog evidence was found for this request.
-INFO:     127.0.0.1:47394 - "OPTIONS /inventory/chat/trace/e730b9e0-2c1a-4c3b-9873-291fc16bdca5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47406 - "GET /inventory/chat/trace/e730b9e0-2c1a-4c3b-9873-291fc16bdca5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53440 - "POST /inventory/route HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53440 - "POST /inventory/ask/stream HTTP/1.1" 200 OK
-2026-05-07 12:38:15,116 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:38:15,119 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.002s]
-2026-05-07 12:38:15,127 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.007s]
-2026-05-07 12:38:15,130 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
-2026-05-07 12:38:15,140 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.009s]
-2026-05-07 12:38:21,677 | INFO | httpx | HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
-2026-05-07 12:38:21,678 | WARNING | app.services.inventory_service | Natural answer model returned invalid structured output; deterministic fallback was used.
-2026-05-07 12:38:21,684 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=fe1ceac6-28ab-4122-9423-1cc3afcad5e9 execution_path=inventory_ask intent=business_analysis answer_engine=deterministic total_hits=2 latency_ms=6573.153 fallback_reason=Natural answer model returned invalid structured output; deterministic fallback was used.
-INFO:     127.0.0.1:53440 - "OPTIONS /inventory/chat/trace/fe1ceac6-28ab-4122-9423-1cc3afcad5e9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58974 - "GET /inventory/chat/trace/fe1ceac6-28ab-4122-9423-1cc3afcad5e9 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60614 - "GET /health HTTP/1.1" 200 OK
+2026-05-07 17:37:03,402 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=8f3e9e94-70ff-4f64-a9e1-ea6afedb3400 execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=1 latency_ms=37.994 fallback_reason=None
+INFO:     127.0.0.1:39194 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33428 - "OPTIONS /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33438 - "OPTIONS /inventory/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33452 - "OPTIONS /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33458 - "OPTIONS /inventory/business/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33468 - "OPTIONS /inventory/production/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33482 - "OPTIONS /inventory/agentic/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33428 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33452 - "GET /inventory/sync/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:33438 - "GET /inventory/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:33458 - "GET /inventory/business/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:33468 - "GET /inventory/production/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:33482 - "GET /inventory/agentic/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:39948 - "OPTIONS /config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39956 - "GET /config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39956 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39948 - "GET /config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39962 - "OPTIONS /inventory/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "OPTIONS /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39982 - "OPTIONS /inventory/business/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39984 - "OPTIONS /inventory/production/status HTTP/1.1" 200 OK
+2026-05-07 17:39:08,657 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.004s]
+2026-05-07 17:39:08,661 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39948 - "GET /inventory/status HTTP/1.1" 200 OK
+2026-05-07 17:39:08,666 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:08,690 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.022s]
+2026-05-07 17:39:08,694 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:39:08,696 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:39:08,698 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:08,702 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.004s]
+INFO:     127.0.0.1:39962 - "GET /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /inventory/business/status HTTP/1.1" 200 OK
+2026-05-07 17:39:08,859 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:39:08,862 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39982 - "GET /inventory/production/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39956 - "OPTIONS /inventory/agentic/status HTTP/1.1" 200 OK
+2026-05-07 17:39:08,878 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:39:08,880 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.002s]
+INFO:     127.0.0.1:39976 - "GET /inventory/agentic/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "OPTIONS /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39982 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39982 - "OPTIONS /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39982 - "GET /config HTTP/1.1" 200 OK
+2026-05-07 17:39:11,425 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.003s]
+2026-05-07 17:39:11,429 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.004s]
+INFO:     127.0.0.1:39956 - "GET /inventory/status HTTP/1.1" 200 OK
+2026-05-07 17:39:11,435 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:11,444 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.008s]
+2026-05-07 17:39:11,447 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.003s]
+2026-05-07 17:39:11,452 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:39:11,454 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:11,457 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39962 - "GET /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39948 - "GET /inventory/business/status HTTP/1.1" 200 OK
+2026-05-07 17:39:11,608 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:39:11,611 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.002s]
+INFO:     127.0.0.1:39984 - "GET /inventory/production/status HTTP/1.1" 200 OK
+2026-05-07 17:39:11,615 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:11,620 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.006s]
+INFO:     127.0.0.1:39976 - "GET /inventory/agentic/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39948 - "GET /config HTTP/1.1" 200 OK
+2026-05-07 17:39:13,314 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:13,318 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39962 - "GET /inventory/status HTTP/1.1" 200 OK
+2026-05-07 17:39:13,324 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:13,341 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.017s]
+2026-05-07 17:39:13,345 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.003s]
+2026-05-07 17:39:13,348 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:39:13,350 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:13,354 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39984 - "GET /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39956 - "GET /inventory/business/status HTTP/1.1" 200 OK
+2026-05-07 17:39:13,509 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:13,512 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39982 - "GET /inventory/production/status HTTP/1.1" 200 OK
+2026-05-07 17:39:13,516 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:13,519 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39976 - "GET /inventory/agentic/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "OPTIONS /inventory/business/signals/delete HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39982 - "POST /inventory/business/signals/delete HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39982 - "OPTIONS /inventory/items/delete HTTP/1.1" 200 OK
+2026-05-07 17:39:14,677 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aacc-oxidized-necklace-blue?refresh=true [status:200 duration:0.036s]
+2026-05-07 17:39:14,697 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aacc-bangles-gold-meena?refresh=true [status:200 duration:0.020s]
+2026-05-07 17:39:14,726 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aacc-clutch-antique-gold?refresh=true [status:200 duration:0.029s]
+2026-05-07 17:39:14,754 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Ablouse-silk-princess-red-40?refresh=true [status:200 duration:0.027s]
+2026-05-07 17:39:14,782 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Ablouse-silk-princess-red-38?refresh=true [status:200 duration:0.027s]
+2026-05-07 17:39:14,808 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Ablouse-cotton-black-36?refresh=true [status:200 duration:0.026s]
+2026-05-07 17:39:14,835 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Asaree-cot-block-mustard?refresh=true [status:200 duration:0.027s]
+2026-05-07 17:39:14,863 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Asaree-cot-block-indigo?refresh=true [status:200 duration:0.027s]
+2026-05-07 17:39:14,891 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Asaree-msn-pastel-peach?refresh=true [status:200 duration:0.028s]
+2026-05-07 17:39:14,907 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Asaree-msn-pastel-mint?refresh=true [status:200 duration:0.016s]
+2026-05-07 17:39:14,947 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Asaree-msn-pastel-lavender?refresh=true [status:200 duration:0.038s]
+2026-05-07 17:39:14,971 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Asaree-ktn-meena-navy?refresh=true [status:200 duration:0.024s]
+2026-05-07 17:39:14,985 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Asaree-ktn-meena-maroon?refresh=true [status:200 duration:0.013s]
+2026-05-07 17:39:15,012 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Asaree-ktn-meena-gold?refresh=true [status:200 duration:0.027s]
+2026-05-07 17:39:15,033 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Asaree-jmd-lotus-blue?refresh=true [status:200 duration:0.020s]
+2026-05-07 17:39:15,052 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Asaree-jmd-lotus-red?refresh=true [status:200 duration:0.018s]
+2026-05-07 17:39:15,069 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Asaree-jmd-lotus-green?refresh=true [status:200 duration:0.017s]
+2026-05-07 17:39:15,084 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Acharger-voltway-65gan?refresh=true [status:200 duration:0.015s]
+2026-05-07 17:39:15,103 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Apowerbank-voltway-20k?refresh=true [status:200 duration:0.018s]
+2026-05-07 17:39:15,130 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aband-vitalloop-fit?refresh=true [status:200 duration:0.027s]
+2026-05-07 17:39:15,145 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Amonitor-visionedge-27?refresh=true [status:200 duration:0.015s]
+2026-05-07 17:39:15,164 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aacc-viewstand-fold?refresh=true [status:200 duration:0.019s]
+2026-05-07 17:39:15,180 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Awatch-summit-x?refresh=true [status:200 duration:0.015s]
+2026-05-07 17:39:15,197 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Agame-strikeview-27-165?refresh=true [status:200 duration:0.017s]
+2026-05-07 17:39:15,212 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aaudio-streamcore-xlr?refresh=true [status:200 duration:0.015s]
+2026-05-07 17:39:15,231 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aorganizer-stackwise-tray?refresh=true [status:200 duration:0.018s]
+2026-05-07 17:39:15,246 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aaudio-soniq-max-speaker?refresh=true [status:200 duration:0.015s]
+2026-05-07 17:39:15,266 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Anet-skyroute-mesh-2pk?refresh=true [status:200 duration:0.019s]
+2026-05-07 17:39:15,291 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Anet-skyroute-ax1800?refresh=true [status:200 duration:0.024s]
+2026-05-07 17:39:15,307 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Anet-signalrise-extender?refresh=true [status:200 duration:0.016s]
+2026-05-07 17:39:15,322 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Anet-securecam-poe-4?refresh=true [status:200 duration:0.015s]
+2026-05-07 17:39:15,337 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aacc-screenmate-clean-kit?refresh=true [status:200 duration:0.015s]
+2026-05-07 17:39:15,353 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Ahome-safenest-cam-indoor?refresh=true [status:200 duration:0.016s]
+2026-05-07 17:39:15,377 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aaudio-roombeam-conference?refresh=true [status:200 duration:0.024s]
+2026-05-07 17:39:15,393 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Ahome-robotidy-slimvac?refresh=true [status:200 duration:0.015s]
+2026-05-07 17:39:15,409 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Anet-portbridge-8g-switch?refresh=true [status:200 duration:0.016s]
+2026-05-07 17:39:15,427 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Amouse-pointera-silent?refresh=true [status:200 duration:0.017s]
+2026-05-07 17:39:15,461 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Amonitor-pixelraft-34-ultrawide?refresh=true [status:200 duration:0.033s]
+2026-05-07 17:39:15,498 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aphone-pathlite-mini?refresh=true [status:200 duration:0.036s]
+2026-05-07 17:39:15,520 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aprinter-paperjet-mono?refresh=true [status:200 duration:0.022s]
+2026-05-07 17:39:15,533 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aacc-packmate-tech-pouch?refresh=true [status:200 duration:0.013s]
+2026-05-07 17:39:15,558 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aphone-novacore-ultra?refresh=true [status:200 duration:0.024s]
+2026-05-07 17:39:15,575 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aphone-novacore-s?refresh=true [status:200 duration:0.017s]
+2026-05-07 17:39:15,594 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Atablet-noteforge-11?refresh=true [status:200 duration:0.018s]
+2026-05-07 17:39:15,613 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Alaptop-nimbus-16-pro?refresh=true [status:200 duration:0.019s]
+2026-05-07 17:39:15,639 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Ahome-lumos-strip-plus?refresh=true [status:200 duration:0.025s]
+2026-05-07 17:39:15,664 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Ahome-lumos-mini-bulb?refresh=true [status:200 duration:0.025s]
+2026-05-07 17:39:15,689 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Alamp-lumenleaf-task?refresh=true [status:200 duration:0.025s]
+2026-05-07 17:39:15,708 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Achair-lumbarflex-air?refresh=true [status:200 duration:0.018s]
+2026-05-07 17:39:15,733 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Akeyboard-keyflow-mech?refresh=true [status:200 duration:0.025s]
+2026-05-07 17:39:15,759 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Adesk-flexispan-120?refresh=true [status:200 duration:0.026s]
+2026-05-07 17:39:15,784 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Astor-flashpeak-1tb-ssd?refresh=true [status:200 duration:0.025s]
+2026-05-07 17:39:15,798 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Acabinet-filevault-3?refresh=true [status:200 duration:0.014s]
+2026-05-07 17:39:15,825 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Ahome-entrylock-touch?refresh=true [status:200 duration:0.027s]
+2026-05-07 17:39:15,860 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Adesktop-coreforge-mini?refresh=true [status:200 duration:0.034s]
+2026-05-07 17:39:15,892 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Anet-cloudpath-5g-hotspot?refresh=true [status:200 duration:0.032s]
+2026-05-07 17:39:15,909 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Ahome-climatehub-sensor?refresh=true [status:200 duration:0.017s]
+2026-05-07 17:39:15,933 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Awebcam-clearframe-4k?refresh=true [status:200 duration:0.024s]
+2026-05-07 17:39:15,946 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aaudio-clairvoice-headset?refresh=true [status:200 duration:0.013s]
+2026-05-07 17:39:15,962 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Awatch-citypulse-classic?refresh=true [status:200 duration:0.016s]
+2026-05-07 17:39:15,991 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aacc-carryshield-15-sleeve?refresh=true [status:200 duration:0.028s]
+2026-05-07 17:39:16,016 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Astor-cardedge-512-microsd?refresh=true [status:200 duration:0.025s]
+2026-05-07 17:39:16,043 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aacc-cablecraft-propack?refresh=true [status:200 duration:0.026s]
+2026-05-07 17:39:16,064 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Awhiteboard-briefgrid-48?refresh=true [status:200 duration:0.021s]
+2026-05-07 17:39:16,095 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aaudio-bassforge-dj?refresh=true [status:200 duration:0.031s]
+2026-05-07 17:39:16,117 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Alaptop-aurora-13-air?refresh=true [status:200 duration:0.021s]
+2026-05-07 17:39:16,132 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Acase-armorloop-novacore?refresh=true [status:200 duration:0.015s]
+2026-05-07 17:39:16,159 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Astor-archivebox-4tb-hdd?refresh=true [status:200 duration:0.026s]
+2026-05-07 17:39:16,187 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aaudio-airtone-mini-earbuds?refresh=true [status:200 duration:0.028s]
+2026-05-07 17:39:16,214 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aseed-audio-004?refresh=true [status:200 duration:0.027s]
+2026-05-07 17:39:16,240 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Awatch-trailmark-pro?refresh=true [status:200 duration:0.026s]
+2026-05-07 17:39:16,265 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Awatch-pulseline-lite?refresh=true [status:200 duration:0.025s]
+2026-05-07 17:39:16,292 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Alaptop-nimbus-14?refresh=true [status:200 duration:0.026s]
+2026-05-07 17:39:16,324 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aseed-office-004?refresh=true [status:200 duration:0.032s]
+2026-05-07 17:39:16,350 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aseed-audio-002?refresh=true [status:200 duration:0.025s]
+2026-05-07 17:39:16,375 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Adock-hub-4k?refresh=true [status:200 duration:0.025s]
+2026-05-07 17:39:16,404 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/inventory-rag/_doc/inventory%3A%3Aseed-audio-001?refresh=true [status:200 duration:0.028s]
+INFO:     127.0.0.1:39976 - "POST /inventory/items/delete HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "OPTIONS /inventory/items/upsert HTTP/1.1" 200 OK
+2026-05-07 17:39:16,449 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:39:16,450 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.001s]
+2026-05-07 17:39:16,517 | INFO | elastic_transport.transport | PUT http://127.0.0.1:4848/_bulk?refresh=true [status:200 duration:0.056s]
+INFO:     127.0.0.1:39982 - "POST /inventory/items/upsert HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39982 - "OPTIONS /inventory/business/signals/upsert HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "POST /inventory/business/signals/upsert HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "OPTIONS /inventory/sync/rebuild HTTP/1.1" 200 OK
+2026-05-07 17:39:16,543 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:16,552 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.008s]
+2026-05-07 17:39:16,555 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.003s]
+2026-05-07 17:39:16,558 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:39:16,573 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:16,575 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.002s]
+2026-05-07 17:39:16,664 | INFO | elastic_transport.transport | PUT http://127.0.0.1:4848/_bulk?refresh=true [status:200 duration:0.075s]
+2026-05-07 17:39:16,667 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:16,677 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.009s]
+2026-05-07 17:39:16,680 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.003s]
+2026-05-07 17:39:16,683 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:39:16,685 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:39:16,689 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.004s]
+INFO:     127.0.0.1:39982 - "POST /inventory/sync/rebuild HTTP/1.1" 200 OK
+2026-05-07 17:39:16,802 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:39:16,814 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.011s]
+2026-05-07 17:39:16,817 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.003s]
+2026-05-07 17:39:16,819 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:39:16,820 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:39:16,823 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39982 - "GET /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39982 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39982 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39982 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39976 - "GET /config HTTP/1.1" 200 OK
+2026-05-07 17:39:16,933 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:16,936 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39984 - "GET /inventory/status HTTP/1.1" 200 OK
+2026-05-07 17:39:16,941 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:16,948 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.007s]
+2026-05-07 17:39:16,951 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:39:16,953 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.001s]
+2026-05-07 17:39:16,954 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:39:16,955 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.002s]
+INFO:     127.0.0.1:39956 - "GET /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39962 - "GET /inventory/business/status HTTP/1.1" 200 OK
+2026-05-07 17:39:17,050 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:17,052 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.002s]
+INFO:     127.0.0.1:39948 - "GET /inventory/production/status HTTP/1.1" 200 OK
+2026-05-07 17:39:17,055 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:39:17,058 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.002s]
+INFO:     127.0.0.1:39982 - "GET /inventory/agentic/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39948 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39962 - "GET /config HTTP/1.1" 200 OK
+2026-05-07 17:39:19,226 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.003s]
+2026-05-07 17:39:19,230 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.004s]
+INFO:     127.0.0.1:39982 - "GET /inventory/status HTTP/1.1" 200 OK
+2026-05-07 17:39:19,236 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:19,249 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.012s]
+2026-05-07 17:39:19,254 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.004s]
+2026-05-07 17:39:19,258 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.003s]
+2026-05-07 17:39:19,261 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:19,264 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39956 - "GET /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39984 - "GET /inventory/business/status HTTP/1.1" 200 OK
+2026-05-07 17:39:19,378 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:19,380 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39976 - "GET /inventory/production/status HTTP/1.1" 200 OK
+2026-05-07 17:39:19,383 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:39:19,386 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:39948 - "GET /inventory/agentic/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39948 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39948 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39948 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39948 - "GET /inventory/business/signals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45884 - "OPTIONS /inventory/route HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45898 - "POST /inventory/route HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45898 - "OPTIONS /inventory/ask/stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45884 - "POST /inventory/ask/stream HTTP/1.1" 200 OK
+2026-05-07 17:39:37,028 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:39:37,031 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.002s]
+2026-05-07 17:39:37,042 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.010s]
+2026-05-07 17:39:37,049 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:39:37,077 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.027s]
+2026-05-07 17:39:37,139 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=709dd343-b612-4eec-accd-513b238d152c execution_path=inventory_ask intent=product_search answer_engine=deterministic total_hits=0 latency_ms=136.561 fallback_reason=No reliable catalog evidence was found for this request.
+INFO:     127.0.0.1:45884 - "OPTIONS /inventory/chat/trace/709dd343-b612-4eec-accd-513b238d152c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45898 - "GET /inventory/chat/trace/709dd343-b612-4eec-accd-513b238d152c HTTP/1.1" 200 OK
+2026-05-07 17:43:03,406 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:43:03,412 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.006s]
+2026-05-07 17:43:03,415 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:43:03,417 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.001s]
+2026-05-07 17:43:03,418 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:43:03,421 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.002s]
+INFO:     127.0.0.1:34980 - "GET /inventory/sync/status HTTP/1.1" 200 OK
+2026-05-07 17:43:03,527 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:43:03,530 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:34990 - "GET /inventory/status HTTP/1.1" 200 OK
+2026-05-07 17:43:16,398 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:43:16,401 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.002s]
+2026-05-07 17:43:16,467 | INFO | elastic_transport.transport | PUT http://127.0.0.1:4848/_bulk?refresh=true [status:200 duration:0.059s]
+INFO:     127.0.0.1:44230 - "POST /inventory/items/upsert HTTP/1.1" 200 OK
+2026-05-07 17:43:16,484 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:43:16,494 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.009s]
+2026-05-07 17:43:16,497 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:43:16,500 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:43:16,515 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:43:16,518 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.002s]
+2026-05-07 17:43:16,606 | INFO | elastic_transport.transport | PUT http://127.0.0.1:4848/_bulk?refresh=true [status:200 duration:0.072s]
+2026-05-07 17:43:16,609 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:43:16,625 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.015s]
+2026-05-07 17:43:16,627 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:43:16,630 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.001s]
+2026-05-07 17:43:16,631 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:43:16,634 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.003s]
+INFO:     127.0.0.1:44244 - "POST /inventory/sync/rebuild HTTP/1.1" 200 OK
+2026-05-07 17:43:59,054 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=cd7fd6b6-a5c7-4d05-904d-7162c3188174 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=37.286 fallback_reason=None
+INFO:     127.0.0.1:51008 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:44:07,416 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=89311522-ffa3-4b18-b85e-40d90dc43bc6 execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=3 latency_ms=29.566 fallback_reason=None
+INFO:     127.0.0.1:51022 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:44:07,461 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=79f5b484-9945-49b0-b7e8-69cd9bea0e1c execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=3 latency_ms=22.911 fallback_reason=None
+INFO:     127.0.0.1:51032 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:44:18,357 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:44:18,364 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?scroll=5m [status:200 duration:0.007s]
+2026-05-07 17:44:18,367 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/_search/scroll [status:200 duration:0.002s]
+2026-05-07 17:44:18,369 | INFO | elastic_transport.transport | DELETE http://127.0.0.1:4848/_search/scroll [status:200 duration:0.001s]
+2026-05-07 17:44:18,371 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:44:18,373 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_count [status:200 duration:0.002s]
+INFO:     127.0.0.1:57184 - "GET /inventory/sync/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59596 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59596 - "OPTIONS /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:45:16,317 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=a16b39db-2a1c-478b-9adf-5d8702fff81f execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=1 latency_ms=53.449 fallback_reason=None
+INFO:     127.0.0.1:59604 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:45:27,980 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=1e841314-432a-4e63-8a92-db7ff2d5274a execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=50.867 fallback_reason=None
+INFO:     127.0.0.1:49452 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:45:41,636 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=bc4032b7-d4ac-4143-8278-a79dd12fabb5 execution_path=inventory_fashion_retail_structured intent=fashion_accessory_match answer_engine=deterministic total_hits=1 latency_ms=23.442 fallback_reason=None
+INFO:     127.0.0.1:58108 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:45:59,720 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=93cb4461-435a-46e4-b403-0cc312351db4 execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=5 latency_ms=69.559 fallback_reason=None
+INFO:     127.0.0.1:44040 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:47:06,434 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=780fca97-8cec-461a-8370-dfe64bc63abd execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=2 latency_ms=25.962 fallback_reason=None
+INFO:     127.0.0.1:37244 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:48:03,893 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=6bce4540-403e-491a-a6c9-8294c12fe829 execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=2 latency_ms=41.489 fallback_reason=None
+INFO:     127.0.0.1:33788 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:49:00,545 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:49:00,547 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.002s]
+2026-05-07 17:49:00,554 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.007s]
+2026-05-07 17:49:00,569 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-07 17:49:00,581 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.012s]
+2026-05-07 17:49:00,606 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=a50b8ba9-0f89-4bb3-b51a-51e025084758 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=120.203 fallback_reason=That does not map cleanly to a supported inventory question I can answer from the current catalog.
+INFO:     127.0.0.1:50738 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:49:20,822 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=9ce81a35-a93e-4d2c-8b91-3544e7e0f9a2 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=2 latency_ms=70.305 fallback_reason=None
+INFO:     127.0.0.1:50874 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:51:26,628 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:51:26,630 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.001s]
+2026-05-07 17:51:26,639 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.009s]
+2026-05-07 17:51:26,648 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-07 17:51:26,699 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.051s]
+2026-05-07 17:51:26,757 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=3122af13-41d4-4eec-b6d9-ac4e95bf2792 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=204.452 fallback_reason=None
+INFO:     127.0.0.1:55012 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:51:50,954 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=f8e77591-f031-4c5a-a5f0-22effb4c746c execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=3 latency_ms=73.129 fallback_reason=None
+INFO:     127.0.0.1:43030 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:52:21,386 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=69bc699a-67bd-4bf6-9425-f53feb4e59e1 execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=1 latency_ms=52.022 fallback_reason=None
+INFO:     127.0.0.1:53396 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39176 - "OPTIONS /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:57:14,416 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=f73a1047-13c7-4c2c-89ef-57e5f98266bf execution_path=inventory_fashion_retail_structured intent=fashion_accessory_match answer_engine=deterministic total_hits=2 latency_ms=46.832 fallback_reason=None
+INFO:     127.0.0.1:39182 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-07 17:57:34,964 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=17264a79-e0da-4212-9dd3-1f7f36ae8c66 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=27.251 fallback_reason=None
+INFO:     127.0.0.1:50124 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46798 - "OPTIONS /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 12:31:57,980 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=53d6415e-8afa-431e-8d26-f96e3cde1c41 execution_path=inventory_ask intent=small_talk answer_engine=deterministic total_hits=0 latency_ms=26.041 fallback_reason=None
+INFO:     127.0.0.1:46802 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 12:32:11,878 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-09 12:32:11,879 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.002s]
+2026-05-09 12:32:11,893 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.013s]
+2026-05-09 12:32:11,901 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-09 12:32:11,924 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.022s]
+2026-05-09 12:32:11,965 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=180c44f8-b50f-4ede-8e3f-c1228748fb05 execution_path=inventory_ask intent=product_search answer_engine=deterministic total_hits=0 latency_ms=170.774 fallback_reason=No reliable catalog evidence was found for this request.
+INFO:     127.0.0.1:39074 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 12:35:30,097 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-09 12:35:30,099 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.001s]
+2026-05-09 12:35:30,108 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.008s]
+2026-05-09 12:35:30,116 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-09 12:35:30,134 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.018s]
+2026-05-09 12:35:30,178 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=df8b464b-2ccb-4da5-9812-ed898eabab64 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=136.812 fallback_reason=That does not map cleanly to a supported inventory question I can answer from the current catalog.
+INFO:     127.0.0.1:46922 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 12:38:13,965 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-09 12:38:13,967 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.001s]
+2026-05-09 12:38:13,973 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.006s]
+2026-05-09 12:38:13,982 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-09 12:38:14,039 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.057s]
+2026-05-09 12:38:14,146 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=bc9fc594-2f6d-4c84-b100-476e58e5a548 execution_path=inventory_ask intent=product_search answer_engine=deterministic total_hits=5 latency_ms=260.161 fallback_reason=The deterministic answer did not pass final answer verification.
+INFO:     127.0.0.1:38440 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 12:38:25,631 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.002s]
+2026-05-09 12:38:25,633 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.002s]
+2026-05-09 12:38:25,644 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.011s]
+2026-05-09 12:38:25,653 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-09 12:38:25,712 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.059s]
+2026-05-09 12:38:25,819 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=aa440189-edde-456c-b8df-3b8cc0e6d732 execution_path=inventory_ask intent=product_search answer_engine=deterministic total_hits=5 latency_ms=258.521 fallback_reason=The deterministic answer did not pass final answer verification.
+INFO:     127.0.0.1:39940 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 12:38:55,530 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=5958b95f-7f69-4055-aadc-be7316af30bb execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=3 latency_ms=29.547 fallback_reason=None
+INFO:     127.0.0.1:52150 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 12:39:11,071 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=f40a9e98-7068-4eb8-8d3c-a497dad719d4 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=51.661 fallback_reason=None
+INFO:     127.0.0.1:55408 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 12:39:22,718 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=2647fbe9-1e76-40e8-bbf9-941f30c944fa execution_path=inventory_fashion_retail_structured intent=fashion_accessory_match answer_engine=deterministic total_hits=1 latency_ms=22.891 fallback_reason=None
+INFO:     127.0.0.1:44678 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 12:40:34,128 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=5c48c7e8-215f-48a4-8b64-ff92cd0ab882 execution_path=inventory_fashion_retail_structured intent=fashion_accessory_match answer_engine=deterministic total_hits=3 latency_ms=55.71 fallback_reason=None
+INFO:     127.0.0.1:35430 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52224 - "OPTIONS /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 12:47:29,420 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=4c49cc5d-82cf-4a4d-ac8b-e7cafc97d780 execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=1 latency_ms=34.156 fallback_reason=None
+INFO:     127.0.0.1:52236 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 12:48:15,584 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-09 12:48:15,586 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.002s]
+2026-05-09 12:48:15,595 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.009s]
+2026-05-09 12:48:15,596 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-09 12:48:15,623 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.026s]
+2026-05-09 12:48:15,631 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=dfbef6e8-b0ca-485d-8ea1-1dfb706b8227 execution_path=inventory_ask intent=product_detail answer_engine=deterministic total_hits=0 latency_ms=112.718 fallback_reason=No reliable catalog evidence was found for this request.
+INFO:     127.0.0.1:59966 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52398 - "OPTIONS /inventory/ask HTTP/1.1" 200 OK
+2026-05-09 13:09:15,239 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-09 13:09:15,241 | INFO | elastic_transport.transport | GET http://127.0.0.1:4848/inventory-rag/_mapping [status:200 duration:0.001s]
+2026-05-09 13:09:15,249 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.007s]
+2026-05-09 13:09:15,258 | INFO | elastic_transport.transport | HEAD http://127.0.0.1:4848/inventory-rag [status:200 duration:0.001s]
+2026-05-09 13:09:15,287 | INFO | elastic_transport.transport | POST http://127.0.0.1:4848/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.029s]
+2026-05-09 13:09:15,378 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=0f00db31-d7eb-44d7-ab61-40f126037ffc execution_path=inventory_ask intent=product_search answer_engine=deterministic total_hits=3 latency_ms=188.678 fallback_reason=Primary recommendation StrikeView 27 Gaming Monitor is in category Gaming, not the required computing category.
+INFO:     127.0.0.1:52414 - "POST /inventory/ask HTTP/1.1" 200 OK

@@ -76,6 +76,7 @@ from app.inventory.spec_utils import (
     spec_requirement_partial_credit,
     spec_requirement_satisfied,
 )
+from app.inventory.fashion_retail import FashionRetailAssistant, FashionRetailOutcome
 from app.inventory.policy import (
     INVENTORY_POLICY_VERSION,
     inventory_family_abstain_triggers,
@@ -437,6 +438,7 @@ class InventoryService:
         self.answer_planner = InventoryAnswerPlanner(self.product_ontology)
         self.final_answer_verifier = InventoryFinalAnswerVerifier(self.product_ontology)
         self.memory_resolver = InventoryMemoryResolver(self.product_ontology)
+        self.fashion_retail_assistant = FashionRetailAssistant()
 
     def _chat_trace_dir(self) -> str:
         if self.config.chat_trace_dir:
@@ -949,6 +951,15 @@ class InventoryService:
             filters=resolved_memory.filters,
             low_stock_threshold=request.low_stock_threshold,
         )
+        fashion_response = self._try_fashion_retail_ask(
+            request=request,
+            trace_id=trace_id,
+            started_at=started_at,
+            effective_filters=effective_filters,
+            memory_resolution=memory_resolution,
+        )
+        if fashion_response is not None:
+            return fashion_response
         route_signals = self._build_route_signals(
             question=request.question,
             filters=effective_filters,
@@ -1068,6 +1079,169 @@ class InventoryService:
             retrieval_steps=retrieval_steps,
         )
         return response
+
+    def _try_fashion_retail_ask(
+        self,
+        *,
+        request: InventoryAskRequest,
+        trace_id: str,
+        started_at: float,
+        effective_filters: InventorySearchFilters,
+        memory_resolution: InventoryMemoryResolution,
+    ) -> InventoryAskResponse | None:
+        catalog = self._load_catalog()
+        last_primary_product_id = request.last_answer_plan.primary_product_id if request.last_answer_plan else None
+        outcome = self.fashion_retail_assistant.answer(
+            question=request.question,
+            catalog=catalog,
+            filters=effective_filters,
+            focused_product_ids=tuple(request.focused_product_ids),
+            last_primary_product_id=last_primary_product_id,
+            top_k=request.top_k,
+        )
+        if outcome is None:
+            return None
+
+        response_hits = self._fashion_retail_hits(outcome=outcome, catalog=catalog)
+        primary = response_hits[0] if response_hits else None
+        cross_sell_ids = list(outcome.cross_sell_product_ids)
+        recommended_ids = [product_id for product_id in outcome.product_ids if product_id not in cross_sell_ids]
+        if not recommended_ids and not cross_sell_ids:
+            recommended_ids = [hit.product_id for hit in response_hits]
+        alternative_ids = [
+            product_id
+            for product_id in outcome.product_ids[1:]
+            if product_id not in cross_sell_ids
+        ]
+        plan = InventoryAnswerPlan(
+            intent=outcome.intent,
+            detected_intent=outcome.intent,
+            intent_confidence=outcome.confidence,
+            intent_reasons=["Handled by generalized fashion retail structured layer."],
+            strategy="fashion_retail_structured_lookup",
+            preferences=outcome.slots.to_plan_dict(),
+            product_type=outcome.slots.category_key,
+            product_family="fashion_retail",
+            primary_product_id=primary.product_id if primary else None,
+            alternative_product_ids=alternative_ids,
+            cross_sell_product_ids=cross_sell_ids,
+            primary_reason="Selected by exact retail slots: category, design, color, size, price, stock, and compatibility.",
+            next_best_question=outcome.follow_up_question,
+            confidence_breakdown={
+                "fashion_retail_confidence": outcome.confidence,
+                "structured_slots": outcome.slots.to_plan_dict(),
+                "total_matches": outcome.total_matches,
+            },
+            reasoning_steps=list(outcome.reasoning_steps)
+            or [
+                "Detected a fashion retail query.",
+                "Applied structured catalog logic before semantic/vector search.",
+            ],
+            metadata_used=[
+                "attributes.design_id",
+                "attributes.color",
+                "attributes.size",
+                "attributes.stock",
+                "attributes.compatible_design_ids",
+            ],
+            abstain=outcome.abstained,
+            abstention_reason=outcome.abstention_reason,
+        )
+        verification = InventoryAnswerVerification(
+            passed=not outcome.abstained,
+            issues=[] if not outcome.abstained else [outcome.abstention_reason or "No structured fashion match."],
+            checked_final_answer=True,
+            final_answer_issues=[],
+        )
+        applied_filters = self._fashion_retail_applied_filters(
+            filters=effective_filters,
+            outcome=outcome,
+        )
+        response = InventoryAskResponse(
+            status="success",
+            question=request.question,
+            answer=outcome.answer,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+            answer_engine="deterministic",
+            confidence_score=outcome.confidence,
+            trace_id=trace_id,
+            abstained=outcome.abstained,
+            abstention_reason=outcome.abstention_reason,
+            total_hits=outcome.total_matches,
+            applied_filters=applied_filters,
+            hits=response_hits,
+            recommended_product_ids=recommended_ids,
+            cross_sell_product_ids=cross_sell_ids,
+            follow_up_question=outcome.follow_up_question,
+            answer_plan=plan,
+            verification=verification,
+            memory_resolution=memory_resolution,
+        )
+        self._save_inventory_chat_trace(
+            trace_id=trace_id,
+            response=response,
+            execution_path="inventory_fashion_retail_structured",
+            started_at=started_at,
+            requested_answer_engine=request.answer_engine,
+            retrieved_hits=response_hits,
+            reranked_hits=response_hits,
+            retrieval_stage_counts={
+                "fashion_structured_requests": 1,
+                "fashion_structured_matches": outcome.total_matches,
+                "returned_hits": len(response_hits),
+            },
+            reasoning_summary=list(outcome.reasoning_steps),
+        )
+        return response
+
+    def _fashion_retail_hits(
+        self,
+        *,
+        outcome: FashionRetailOutcome,
+        catalog: dict[str, InventoryItemRecord],
+    ) -> list[InventorySearchHit]:
+        ordered_ids: list[str] = []
+        for product_id in [*outcome.product_ids, *outcome.cross_sell_product_ids]:
+            if product_id in ordered_ids:
+                continue
+            ordered_ids.append(product_id)
+        hits: list[InventorySearchHit] = []
+        for index, product_id in enumerate(ordered_ids):
+            item = catalog.get(product_id)
+            if item is None:
+                continue
+            score = max(0.0, outcome.confidence - (index * 0.03))
+            hit = self._build_search_hit(item=item, score=score)
+            hit.evidence_scores.update(
+                {
+                    "final_score": score,
+                    "fashion_retail_score": score,
+                    "fashion_retail_intent": outcome.intent,
+                    "structured_slots": outcome.slots.to_plan_dict(),
+                    "reasons": list(outcome.reasoning_steps),
+                }
+            )
+            hits.append(hit)
+        return hits
+
+    def _fashion_retail_applied_filters(
+        self,
+        *,
+        filters: InventorySearchFilters,
+        outcome: FashionRetailOutcome,
+    ) -> InventorySearchFilters:
+        applied = filters.model_copy(deep=True)
+        if outcome.slots.category_label and not applied.categories:
+            if outcome.slots.category_key in {"jewelry", "bag", "accessories"}:
+                applied.categories = ["Accessories"]
+            else:
+                applied.categories = [outcome.slots.category_label]
+        if outcome.slots.budget_min is not None and applied.min_price is None:
+            applied.min_price = outcome.slots.budget_min
+        if outcome.slots.budget_max is not None and applied.max_price is None:
+            applied.max_price = outcome.slots.budget_max
+        return applied
 
     def route(self, request: InventoryRouteRequest) -> InventoryRouteResponse:
         signals = self._build_route_signals(

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inventory Chat</title>
+    <link rel="stylesheet" href="./chat.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Fashion Inventory</p>
+          <h1>Customer Chat</h1>
+        </div>
+        <div class="status-pill" id="statusPill">
+          <span class="status-dot"></span>
+          <span id="statusText">Connecting</span>
+        </div>
+      </header>
+
+      <section class="chat-panel">
+        <div class="messages" id="messages" aria-live="polite"></div>
+        <div class="chips" id="chips">
+          <button type="button">ei same design ta blue color e ache?</button>
+          <button type="button">লাল ব্লাউজ সাইজ ৩৮ আছে?</button>
+          <button type="button">৪০০০ টাকার মধ্যে অফিসে পরার হালকা শাড়ি দেখান</button>
+          <button type="button">নেভি কাতান শাড়ির সাথে কোন গয়না মানাবে?</button>
+        </div>
+        <form class="composer" id="chatForm">
+          <textarea
+            id="chatInput"
+            rows="1"
+            autocomplete="off"
+            placeholder="Type Bangla, Banglish, or English..."
+          ></textarea>
+          <button id="sendButton" type="submit">Send</button>
+        </form>
+      </section>
+    </main>
+    <script src="./chat.js"></script>
+  </body>
+</html>

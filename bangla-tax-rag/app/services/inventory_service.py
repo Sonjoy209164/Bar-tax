@@ -77,6 +77,7 @@ from app.inventory.spec_utils import (
     spec_requirement_satisfied,
 )
 from app.inventory.fashion_retail import FashionRetailAssistant, FashionRetailOutcome
+from app.inventory.proactive import build_proactive_message
 from app.inventory.policy import (
     INVENTORY_POLICY_VERSION,
     inventory_family_abstain_triggers,
@@ -1121,6 +1122,9 @@ class InventoryService:
     ) -> InventoryAskResponse | None:
         catalog = self._load_catalog()
         last_primary_product_id = request.last_answer_plan.primary_product_id if request.last_answer_plan else None
+        conversation_history = [
+            (turn.role, turn.content) for turn in (request.conversation_history or [])
+        ]
         outcome = self.fashion_retail_assistant.answer(
             question=request.question,
             catalog=catalog,
@@ -1128,6 +1132,7 @@ class InventoryService:
             focused_product_ids=tuple(request.focused_product_ids),
             last_primary_product_id=last_primary_product_id,
             top_k=request.top_k,
+            conversation_history=conversation_history,
         )
         if outcome is None:
             return None
@@ -1187,10 +1192,18 @@ class InventoryService:
             filters=effective_filters,
             outcome=outcome,
         )
+        enriched_answer = build_proactive_message(
+            answer=outcome.answer,
+            catalog={pid: item for pid, item in catalog.items()},
+            recommended_ids=recommended_ids,
+            primary_category=outcome.slots.category_key,
+            color_hint=outcome.slots.color,
+            budget_max=outcome.slots.budget_max,
+        )
         response = InventoryAskResponse(
             status="success",
             question=request.question,
-            answer=outcome.answer,
+            answer=enriched_answer,
             assistant_mode=request.assistant_mode,
             reply_style=request.reply_style,
             answer_engine="deterministic",

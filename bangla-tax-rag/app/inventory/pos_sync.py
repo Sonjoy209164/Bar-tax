@@ -101,6 +101,7 @@ class POSSyncEngine:
                     if existing.stock != item.stock:
                         result.stock_changed += 1
                         changed = True
+                        _trigger_restock_if_needed(item.product_id, item.name, existing.stock, item.stock)
                     if existing.price != item.price or existing.status != item.status:
                         changed = True
                     if changed:
@@ -156,6 +157,7 @@ class POSSyncEngine:
 
                 if event == "stock_updated" or old_stock != updated_item.stock:
                     result.stock_changed += 1
+                    _trigger_restock_if_needed(existing.product_id, existing.name, old_stock, updated_item.stock)
                 else:
                     result.updated += 1
 
@@ -239,3 +241,13 @@ def _log_sync(source: str, result: SyncResult) -> None:
     with _SYNC_LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=False))
         handle.write("\n")
+
+
+def _trigger_restock_if_needed(product_id: str, product_name: str, old_stock: int, new_stock: int) -> None:
+    if old_stock > 0 or new_stock <= 0:
+        return
+    try:
+        from app.inventory.waitlist import check_restock_and_notify
+        check_restock_and_notify(product_id, new_stock, old_stock, product_name)
+    except Exception:
+        pass  # Never let waitlist failure break a POS sync

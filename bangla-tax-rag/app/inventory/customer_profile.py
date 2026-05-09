@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.inventory.identity_store import IdentityStore
 
 _PROFILES_PATH = Path("data/customer_profiles/profiles_store.jsonl")
+_identity_store = IdentityStore()
+logger = logging.getLogger(__name__)
 
 FORGET_PHRASES = (
     "amar preference delete",
@@ -159,6 +163,14 @@ class CustomerProfileManager:
         return self._profile
 
     def _load_or_create(self) -> CustomerProfile:
+        # Check identity store first (cross-session, phone-linked)
+        try:
+            identity_data = _identity_store.get_or_create_profile(self._session_id)
+            if identity_data and identity_data.get("phone"):
+                return CustomerProfile.from_dict({**identity_data, "session_id": self._session_id})
+        except Exception as exc:
+            logger.debug("Identity store lookup failed: %s", exc)
+
         if _PROFILES_PATH.exists():
             with _PROFILES_PATH.open("r", encoding="utf-8") as handle:
                 for line in handle:
@@ -172,6 +184,18 @@ class CustomerProfileManager:
                     except (json.JSONDecodeError, KeyError):
                         continue
         return CustomerProfile(session_id=self._session_id)
+
+    def link_phone(self, phone: str) -> None:
+        """Link this session to a phone number for cross-session persistence."""
+        try:
+            self._profile.phone = phone  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
+        try:
+            _identity_store.link_session(self._session_id, phone)
+            _identity_store.save_session_profile(self._session_id, {**self._profile.to_dict(), "phone": phone})
+        except Exception as exc:
+            logger.debug("Identity store link_phone failed: %s", exc)
 
     def extract_and_update(self, text: str) -> list[str]:
         """Extract preferences from customer message, update profile, return confirmation lines."""
@@ -251,6 +275,11 @@ class CustomerProfileManager:
             for entry in existing:
                 handle.write(json.dumps(entry, ensure_ascii=False))
                 handle.write("\n")
+        # Mirror into identity store when phone is available
+        try:
+            _identity_store.save_session_profile(self._session_id, self._profile.to_dict())
+        except Exception as exc:
+            logger.debug("Identity store persist failed: %s", exc)
 
     def _remove_from_store(self) -> None:
         if not _PROFILES_PATH.exists():

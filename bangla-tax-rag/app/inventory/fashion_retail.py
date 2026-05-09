@@ -6,6 +6,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.schemas import InventoryItemRecord, InventorySearchFilters
+from app.inventory.banglish_normalizer import augment_with_bangla
+from app.inventory.llm_slot_extractor import (
+    extract_slots_via_llm,
+    is_ollama_available,
+    merge_llm_slots_into_fashion_slots,
+)
 
 
 BANGLA_DIGIT_TRANS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
@@ -546,14 +552,18 @@ class FashionRetailAssistant:
         focused_product_ids: tuple[str, ...] = (),
         last_primary_product_id: str | None = None,
         top_k: int = 5,
+        conversation_history: list[tuple[str, str]] | None = None,
     ) -> FashionRetailOutcome | None:
         filters = filters or InventorySearchFilters()
         fashion_items = [item for item in catalog.values() if self.is_fashion_item(item)]
         if not fashion_items:
             return None
 
+        # Prepend recent conversation context to improve slot carryover across turns
+        enriched_question = self._enrich_with_history(question, conversation_history)
+
         slots = self.extract_slots(
-            question=question,
+            question=enriched_question,
             filters=filters,
             catalog=fashion_items,
             focused_product_ids=focused_product_ids,
@@ -561,6 +571,11 @@ class FashionRetailAssistant:
         )
         if not self.should_handle(question=question, slots=slots, fashion_items=fashion_items):
             return None
+
+        if slots.intent == "fashion_compare":
+            outcome = self._answer_fashion_compare(question=question, items=fashion_items, slots=slots, top_k=top_k)
+            if outcome is not None:
+                return outcome
 
         if slots.intent == "fashion_styling_advice":
             outcome = self._answer_styling_advice(question=question, items=fashion_items, slots=slots, top_k=top_k)
@@ -637,7 +652,9 @@ class FashionRetailAssistant:
         focused_product_ids: tuple[str, ...] = (),
         last_primary_product_id: str | None = None,
     ) -> FashionRetailSlots:
-        text = normalize_fashion_text(question)
+        # Augment question with Bangla equivalents for Banglish input
+        augmented_question = augment_with_bangla(question)
+        text = normalize_fashion_text(augmented_question)
         evidence: list[str] = []
         language = self._detect_language(question)
         if language != "english":
@@ -695,7 +712,7 @@ class FashionRetailAssistant:
             size=size,
             design_id=design_id,
         )
-        return FashionRetailSlots(
+        regex_slots = FashionRetailSlots(
             category_key=category_key,
             category_label=self.CATEGORY_LABELS.get(category_key) if category_key else None,
             color=color,
@@ -713,6 +730,30 @@ class FashionRetailAssistant:
             language=language,
             evidence=tuple(evidence),
         )
+        # Optionally enrich via LLM (non-blocking — falls back to regex on any failure)
+        if is_ollama_available():
+            llm_slots = extract_slots_via_llm(question)
+            if llm_slots:
+                return merge_llm_slots_into_fashion_slots(llm_slots, regex_slots)
+        return regex_slots
+
+    @staticmethod
+    def _enrich_with_history(
+        question: str,
+        history: list[tuple[str, str]] | None,
+        max_turns: int = 3,
+    ) -> str:
+        """
+        Prepend the last `max_turns` user messages to the current question so
+        slot extraction can carry over category/color/fabric from prior turns.
+        E.g. "এটার দাম কত?" after "লাল জামদানি শাড়ি দেখাও" will inherit
+        category=saree, color=red, fabric=jamdani.
+        """
+        if not history:
+            return question
+        user_turns = [content for role, content in history if role == "user"]
+        prior = " | ".join(user_turns[-max_turns:])
+        return f"{prior} | {question}"
 
     def is_fashion_item(self, item: InventoryItemRecord) -> bool:
         category_text = normalize_fashion_text(item.category)
@@ -1093,6 +1134,18 @@ class FashionRetailAssistant:
             reasons.append("lexical")
         return score, reasons
 
+    COMPARE_PHRASES = (
+        " vs ", " vs. ", " versus ",
+        " ar ", " and ", " ba ", " naki ",
+        "difference between", "difference", "difference koto",
+        "konta bhalo", "konta better", "konta nibo", "konta nebo",
+        "compare", "comparison", "compared to",
+        "কোনটা ভালো", "কোনটা নেব", "পার্থক্য", "তুলনা",
+        "kontar dam beshi", "which one", "which is better",
+        "er moddhe konta", "er maje konta",
+        "prefer kori", "recommend korben",
+    )
+
     STYLING_ADVICE_PHRASES = (
         "styling advice",
         "style suggestion",
@@ -1138,6 +1191,8 @@ class FashionRetailAssistant:
         size: str | None,
         design_id: str | None,
     ) -> str:
+        if any(phrase in text for phrase in self.COMPARE_PHRASES):
+            return "fashion_compare"
         if any(self._contains_phrase(text, phrase) for phrase in self.STYLING_ADVICE_PHRASES):
             return "fashion_styling_advice"
         if size and any(self._contains_phrase(text, phrase) for phrase in self.AVAILABILITY_PHRASES):
@@ -1843,4 +1898,141 @@ class FashionRetailAssistant:
             if any(self._contains_phrase(text, alias) for alias in aliases):
                 return brand.title()
         return None
+
+    def _answer_fashion_compare(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        top_k: int,
+    ) -> FashionRetailOutcome | None:
+        """Compare two products/types side-by-side on price, fabric, occasion, durability, stock."""
+        text = normalize_fashion_text(question)
+
+        # Find two distinct sides to compare
+        side_keys: list[str] = []
+        for key, aliases in self.CATEGORY_ALIASES.items():
+            if any(self._contains_phrase(text, alias) for alias in aliases):
+                if key not in side_keys:
+                    side_keys.append(key)
+            if len(side_keys) == 2:
+                break
+
+        # Fallback: fabric comparison
+        if len(side_keys) < 2:
+            fabric_sides: list[str] = []
+            for key, aliases in self.FABRIC_ALIASES.items():
+                if any(self._contains_phrase(text, alias) for alias in aliases):
+                    if key not in fabric_sides:
+                        fabric_sides.append(key)
+                if len(fabric_sides) == 2:
+                    break
+            if len(fabric_sides) == 2:
+                return self._compare_by_fabric(fabric_sides, items, slots, top_k)
+
+        if len(side_keys) < 2:
+            return None
+
+        a_key, b_key = side_keys[0], side_keys[1]
+        a_items = [i for i in items if i.attributes.get("category_key") == a_key and i.stock > 0]
+        b_items = [i for i in items if i.attributes.get("category_key") == b_key and i.stock > 0]
+
+        if not a_items and not b_items:
+            return None
+
+        def _best(lst: list[InventoryItemRecord]) -> InventoryItemRecord | None:
+            return sorted(lst, key=lambda i: (-i.stock, self._item_price_value(i)))[0] if lst else None
+
+        a_best = _best(a_items)
+        b_best = _best(b_items)
+
+        a_label = self.CATEGORY_LABELS.get(a_key, a_key)
+        b_label = self.CATEGORY_LABELS.get(b_key, b_key)
+
+        lines: list[str] = [f"**{a_label} vs {b_label}:**\n"]
+
+        def _row(label: str, a_val: str, b_val: str) -> str:
+            return f"| {label} | {a_val} | {b_val} |"
+
+        lines.append(f"| | {a_label} | {b_label} |")
+        lines.append("|---|---|---|")
+
+        if a_best and b_best:
+            lines.append(_row("Best match", a_best.name[:40], b_best.name[:40]))
+            lines.append(_row("Price", self._format_price(a_best), self._format_price(b_best)))
+            lines.append(_row("Stock", str(a_best.stock), str(b_best.stock)))
+            a_fabric = a_best.attributes.get("fabric", "—")
+            b_fabric = b_best.attributes.get("fabric", "—")
+            lines.append(_row("Fabric", a_fabric, b_fabric))
+            a_occ = a_best.attributes.get("occasion") or (a_best.tags[0] if a_best.tags else "—")
+            b_occ = b_best.attributes.get("occasion") or (b_best.tags[0] if b_best.tags else "—")
+            lines.append(_row("Occasion", a_occ, b_occ))
+            lines.append(_row("In-stock count", str(len(a_items)), str(len(b_items))))
+        elif a_best:
+            lines.append(f"{a_label} is available but we currently have no {b_label} in stock.")
+        else:
+            lines.append(f"{b_label} is available but we currently have no {a_label} in stock.")
+
+        # Recommendation
+        if a_best and b_best:
+            a_price = self._item_price_value(a_best)
+            b_price = self._item_price_value(b_best)
+            if a_price < b_price:
+                lines.append(f"\n💡 {a_label} is the budget-friendly option. {b_label} is the premium pick.")
+            elif b_price < a_price:
+                lines.append(f"\n💡 {b_label} is the budget-friendly option. {a_label} is the premium pick.")
+            else:
+                lines.append(f"\n💡 Both are similarly priced — choose by fabric and occasion.")
+
+        all_pids = tuple(
+            [a_best.product_id] if a_best else [] + [b_best.product_id] if b_best else []  # type: ignore[operator]
+        )
+        return self._outcome(
+            answer="\n".join(lines),
+            intent="fashion_compare",
+            product_ids=all_pids,
+            total_matches=len(a_items) + len(b_items),
+            confidence=0.80,
+            slots=slots,
+            reasoning_steps=(f"Compared {a_label} vs {b_label} on price, fabric, occasion, stock.",),
+        )
+
+    def _compare_by_fabric(
+        self,
+        fabric_sides: list[str],
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        top_k: int,
+    ) -> FashionRetailOutcome | None:
+        a_fab, b_fab = fabric_sides[0], fabric_sides[1]
+        a_items = [i for i in items if i.attributes.get("fabric") == a_fab and i.stock > 0]
+        b_items = [i for i in items if i.attributes.get("fabric") == b_fab and i.stock > 0]
+        if not a_items and not b_items:
+            return None
+
+        def _best(lst: list[InventoryItemRecord]) -> InventoryItemRecord | None:
+            return sorted(lst, key=lambda i: (-i.stock, self._item_price_value(i)))[0] if lst else None
+
+        a_best = _best(a_items)
+        b_best = _best(b_items)
+        lines = [f"**{a_fab.title()} vs {b_fab.title()} fabric:**\n"]
+        lines.append(f"| | {a_fab.title()} | {b_fab.title()} |")
+        lines.append("|---|---|---|")
+        if a_best and b_best:
+            lines.append(f"| Example | {a_best.name[:35]} | {b_best.name[:35]} |")
+            lines.append(f"| Price | {self._format_price(a_best)} | {self._format_price(b_best)} |")
+            lines.append(f"| In-stock products | {len(a_items)} | {len(b_items)} |")
+        all_pids = tuple(
+            ([a_best.product_id] if a_best else []) + ([b_best.product_id] if b_best else [])
+        )
+        return self._outcome(
+            answer="\n".join(lines),
+            intent="fashion_compare",
+            product_ids=all_pids,
+            total_matches=len(a_items) + len(b_items),
+            confidence=0.75,
+            slots=slots,
+            reasoning_steps=(f"Compared {a_fab} vs {b_fab} fabric options.",),
+        )
 

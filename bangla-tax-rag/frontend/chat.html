@@ -6,6 +6,7 @@
     <title>Inventory Chat</title>
     <link rel="stylesheet" href="./chat.css" />
     <style>
+      /* Image upload */
       .image-upload-area {
         display: flex;
         align-items: center;
@@ -28,52 +29,124 @@
       .image-upload-area label:hover { color: var(--accent); border-color: var(--accent); }
       #imageInput { display: none; }
       #imagePreview {
-        max-height: 48px;
-        max-width: 64px;
-        border-radius: 4px;
-        object-fit: cover;
-        display: none;
-        border: 1px solid var(--line);
+        max-height: 48px; max-width: 64px;
+        border-radius: 4px; object-fit: cover;
+        display: none; border: 1px solid var(--line);
       }
       #clearImageBtn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: var(--muted);
-        font-size: 1rem;
-        display: none;
-        padding: 0 2px;
-        line-height: 1;
+        background: none; border: none; cursor: pointer;
+        color: var(--muted); font-size: 1rem; display: none;
+        padding: 0 2px; line-height: 1;
       }
       #clearImageBtn:hover { color: #dc2626; }
+
+      /* Order bars */
       .order-status-bar {
         padding: 6px 12px;
         background: #fef3c7;
         border-top: 1px solid #fcd34d;
-        font-size: 0.8rem;
-        color: #92400e;
+        font-size: 0.8rem; color: #92400e;
         display: none;
       }
       .order-status-bar.active { display: block; }
       .order-confirm-bar {
-        display: none;
-        gap: 8px;
+        display: none; gap: 8px;
         padding: 6px 12px;
         background: #f0fdf4;
         border-top: 1px solid #86efac;
+        align-items: center;
       }
       .order-confirm-bar.active { display: flex; }
       .order-confirm-bar button {
-        padding: 5px 14px;
-        border-radius: 5px;
-        font-size: 0.82rem;
-        cursor: pointer;
-        font-weight: 600;
+        padding: 5px 14px; border-radius: 5px;
+        font-size: 0.82rem; cursor: pointer; font-weight: 600;
       }
       .btn-confirm { background: var(--accent); color: white; border: 1px solid var(--accent-strong); }
       .btn-confirm:hover { background: var(--accent-strong); }
-      .btn-cancel { background: white; color: #dc2626; border: 1px solid #fca5a5; }
+      .btn-cancel  { background: white; color: #dc2626; border: 1px solid #fca5a5; }
       .btn-cancel:hover { background: #fef2f2; }
+
+      /* Cart panel */
+      .cart-panel {
+        border-top: 1px solid var(--line);
+        background: var(--panel);
+        font-size: 0.8rem;
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.25s ease;
+      }
+      .cart-panel.open { max-height: 220px; overflow-y: auto; }
+      .cart-header {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 4px 12px; cursor: pointer;
+        font-weight: 600; color: var(--muted);
+      }
+      .cart-header:hover { color: var(--fg); }
+      .cart-item-row {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 3px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .cart-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .cart-item-controls { display: flex; align-items: center; gap: 4px; }
+      .cart-qty-btn {
+        background: var(--line); border: none; border-radius: 3px;
+        width: 20px; height: 20px; cursor: pointer; font-weight: bold;
+        font-size: 0.85rem; line-height: 1;
+      }
+      .cart-qty-btn:hover { background: var(--accent); color: white; }
+      .cart-remove-btn {
+        background: none; border: none; color: #dc2626; cursor: pointer;
+        font-size: 0.9rem; padding: 0 2px;
+      }
+      .cart-total-row {
+        padding: 4px 12px; font-weight: 600;
+        display: flex; justify-content: space-between;
+      }
+
+      /* Feedback thumbs */
+      .feedback-row {
+        display: flex; gap: 6px; margin-top: 4px;
+        align-items: center;
+      }
+      .feedback-btn {
+        background: none; border: 1px solid var(--line);
+        border-radius: 4px; padding: 2px 7px;
+        cursor: pointer; font-size: 0.8rem; color: var(--muted);
+        transition: all 0.15s;
+      }
+      .feedback-btn:hover { border-color: var(--accent); color: var(--accent); }
+      .feedback-btn.voted { opacity: 0.5; pointer-events: none; }
+      .feedback-label { font-size: 0.72rem; color: var(--muted); }
+
+      /* Mic button */
+      #micBtn {
+        background: none; border: 1px solid var(--line); border-radius: 5px;
+        padding: 0 9px; cursor: pointer; color: var(--muted);
+        font-size: 1.1rem; height: 36px; display: flex; align-items: center;
+        transition: all 0.15s;
+      }
+      #micBtn:hover { border-color: var(--accent); color: var(--accent); }
+      #micBtn.recording { background: #fef2f2; border-color: #dc2626; color: #dc2626; animation: pulse 1s infinite; }
+      @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+      /* Track order bar */
+      .track-bar {
+        display: none; padding: 5px 12px;
+        background: #eff6ff; border-top: 1px solid #93c5fd;
+        font-size: 0.8rem; color: #1d4ed8; align-items: center; gap: 8px;
+      }
+      .track-bar.active { display: flex; }
+      .track-input {
+        flex: 1; border: 1px solid #93c5fd; border-radius: 4px;
+        padding: 3px 7px; font-size: 0.8rem;
+        background: white;
+      }
+      .track-btn {
+        background: #1d4ed8; color: white; border: none;
+        border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 0.8rem;
+      }
+      .track-btn:hover { background: #1e40af; }
     </style>
   </head>
   <body>
@@ -83,15 +156,22 @@
           <p class="eyebrow">Fashion Inventory</p>
           <h1>Customer Chat</h1>
         </div>
-        <div class="status-pill" id="statusPill">
-          <span class="status-dot"></span>
-          <span id="statusText">Connecting</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="trackOrderToggle" type="button"
+            style="background:none;border:1px solid var(--line);border-radius:5px;padding:3px 9px;cursor:pointer;font-size:0.78rem;color:var(--muted);">
+            📦 Track Order
+          </button>
+          <div class="status-pill" id="statusPill">
+            <span class="status-dot"></span>
+            <span id="statusText">Connecting</span>
+          </div>
         </div>
       </header>
 
       <section class="chat-panel">
         <div class="messages" id="messages" aria-live="polite"></div>
 
+        <!-- Order state bars -->
         <div class="order-status-bar" id="orderStatusBar">
           🛒 Order in progress — please provide your name, phone, delivery area, and payment method.
         </div>
@@ -100,16 +180,39 @@
           <button class="btn-cancel" id="cancelOrderBtn" type="button">✕ Cancel</button>
         </div>
 
+        <!-- Cart panel (collapsible) -->
+        <div class="cart-panel" id="cartPanel">
+          <div class="cart-header" id="cartToggle">
+            🛍 Cart <span id="cartCount" style="font-weight:normal;color:var(--muted);">(0 items)</span>
+            <span id="cartChevron">▲</span>
+          </div>
+          <div id="cartItems"></div>
+          <div class="cart-total-row" id="cartTotalRow" style="display:none;">
+            <span>Subtotal</span><span id="cartSubtotal">BDT 0</span>
+          </div>
+        </div>
+
+        <!-- Order tracking bar -->
+        <div class="track-bar" id="trackBar">
+          <span>Order ID or phone:</span>
+          <input type="text" class="track-input" id="trackInput" placeholder="ORD-XXXX or 01711..." />
+          <button class="track-btn" id="trackBtn" type="button">Track</button>
+          <button type="button" id="trackClose"
+            style="background:none;border:none;cursor:pointer;color:var(--muted);">✕</button>
+        </div>
+
+        <!-- Quick chips -->
         <div class="chips" id="chips">
           <button type="button">ei same design ta blue color e ache?</button>
+          <button type="button">jamdani vs katan — konta nibo?</button>
           <button type="button">oily skin er jonno sunscreen ache?</button>
-          <button type="button">men er brown loafer size 42 ache?</button>
           <button type="button">নেভি কাতান শাড়ির সাথে কোন ব্যাগ মানাবে?</button>
           <button type="button">Dhaka delivery charge koto?</button>
           <button type="button">refund policy ki?</button>
           <button type="button">eid er jonno 5000 er moddhe elegant saree</button>
         </div>
 
+        <!-- Image upload -->
         <div class="image-upload-area" id="imageUploadArea">
           <label for="imageInput">📷 Find by Image</label>
           <input type="file" id="imageInput" accept="image/*" />
@@ -118,12 +221,15 @@
           <span id="imageLabel" style="font-size:0.75rem;color:var(--muted);"></span>
         </div>
 
-        <form class="composer" id="chatForm">
+        <!-- Composer with mic -->
+        <form class="composer" id="chatForm" style="display:flex;align-items:flex-end;gap:5px;">
+          <button type="button" id="micBtn" title="Voice input (Bangla/English)">🎤</button>
           <textarea
             id="chatInput"
             rows="1"
             autocomplete="off"
-            placeholder="Type Bangla, Banglish, or English... or upload a product image above"
+            style="flex:1;"
+            placeholder="Type Bangla, Banglish, or English... or tap 🎤 to speak"
           ></textarea>
           <button id="sendButton" type="submit">Send</button>
         </form>

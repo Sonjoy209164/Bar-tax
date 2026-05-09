@@ -113,6 +113,7 @@ class OrderItem:
 class OrderDraft:
     order_id: str = field(default_factory=lambda: f"ORD-{uuid.uuid4().hex[:6].upper()}")
     status: str = "draft"
+    tracking_status: str = "pending"  # pending → processing → dispatched → delivered
     items: list[OrderItem] = field(default_factory=list)
     customer_name: str | None = None
     customer_phone: str | None = None
@@ -121,6 +122,8 @@ class OrderDraft:
     notes: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     confirmed_at: str | None = None
+    dispatched_at: str | None = None
+    delivered_at: str | None = None
 
     def subtotal(self) -> float:
         return sum(item.line_total() for item in self.items)
@@ -180,6 +183,7 @@ class OrderDraft:
         return {
             "order_id": self.order_id,
             "status": self.status,
+            "tracking_status": self.tracking_status,
             "items": [item.to_dict() for item in self.items],
             "customer_name": self.customer_name,
             "customer_phone": self.customer_phone,
@@ -191,6 +195,8 @@ class OrderDraft:
             "grand_total": self.grand_total(),
             "created_at": self.created_at,
             "confirmed_at": self.confirmed_at,
+            "dispatched_at": self.dispatched_at,
+            "delivered_at": self.delivered_at,
         }
 
 
@@ -244,6 +250,26 @@ class OrderWorkflowEngine:
                 existing.quantity += quantity
                 return
         self._draft.items.append(OrderItem(product_id=product_id, sku=sku, name=name, quantity=quantity, unit_price=unit_price, currency=currency))
+
+    def remove_item(self, product_id: str) -> bool:
+        if self._draft is None:
+            return False
+        before = len(self._draft.items)
+        self._draft.items = [i for i in self._draft.items if i.product_id != product_id]
+        return len(self._draft.items) < before
+
+    def update_quantity(self, product_id: str, quantity: int) -> bool:
+        if self._draft is None or quantity < 1:
+            return False
+        for item in self._draft.items:
+            if item.product_id == product_id:
+                item.quantity = quantity
+                return True
+        return False
+
+    def clear_cart(self) -> None:
+        if self._draft is not None:
+            self._draft.items = []
 
     def update_from_text(self, text: str) -> None:
         if self._draft is None:
@@ -363,6 +389,9 @@ def load_order(order_id: str) -> OrderDraft | None:
                     draft.notes = data.get("notes")
                     draft.created_at = data.get("created_at", draft.created_at)
                     draft.confirmed_at = data.get("confirmed_at")
+                    draft.tracking_status = data.get("tracking_status", "pending")
+                    draft.dispatched_at = data.get("dispatched_at")
+                    draft.delivered_at = data.get("delivered_at")
                     for item_data in data.get("items", []):
                         draft.items.append(
                             OrderItem(
@@ -378,3 +407,71 @@ def load_order(order_id: str) -> OrderDraft | None:
             except (json.JSONDecodeError, KeyError):
                 continue
     return None
+
+
+_VALID_TRACKING_STATUSES = ("pending", "processing", "dispatched", "delivered", "cancelled")
+
+
+def update_order_tracking(order_id: str, tracking_status: str) -> bool:
+    """Update tracking_status for a confirmed order in the JSONL store. Returns True on success."""
+    if tracking_status not in _VALID_TRACKING_STATUSES:
+        return False
+    if not _ORDERS_PATH.exists():
+        return False
+
+    lines = _ORDERS_PATH.read_text(encoding="utf-8").splitlines()
+    updated = False
+    new_lines: list[str] = []
+    now = datetime.now(timezone.utc).isoformat()
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            new_lines.append(line)
+            continue
+        try:
+            data = json.loads(stripped)
+            if data.get("order_id") == order_id:
+                data["tracking_status"] = tracking_status
+                if tracking_status == "dispatched" and not data.get("dispatched_at"):
+                    data["dispatched_at"] = now
+                if tracking_status == "delivered" and not data.get("delivered_at"):
+                    data["delivered_at"] = now
+                new_lines.append(json.dumps(data, ensure_ascii=False))
+                updated = True
+            else:
+                new_lines.append(stripped)
+        except json.JSONDecodeError:
+            new_lines.append(line)
+
+    if updated:
+        _ORDERS_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    return updated
+
+
+def load_orders_by_phone(phone: str) -> list[OrderDraft]:
+    """Return all confirmed orders matching a customer phone number."""
+    results: list[OrderDraft] = []
+    if not _ORDERS_PATH.exists():
+        return results
+    with _ORDERS_PATH.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                data = json.loads(stripped)
+                if data.get("customer_phone") == phone:
+                    draft = load_order(data["order_id"])
+                    if draft is not None:
+                        results.append(draft)
+            except (json.JSONDecodeError, KeyError):
+                continue
+    return results
+
+
+ORDER_TRACKING_PHRASES = (
+    "order status", "order kothay", "order er update", "order track",
+    "kobe ashbe", "kobe deliver", "ki obostha", "delivered hoyeche",
+    "dispatched hoyeche", "parcel kothay", "my order",
+    "অর্ডার কোথায়", "অর্ডার স্ট্যাটাস", "কবে আসবে",
+)

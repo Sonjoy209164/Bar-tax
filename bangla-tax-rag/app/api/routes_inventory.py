@@ -45,8 +45,11 @@ from app.core.schemas import (
     PolicyQARequest,
     PolicyQAResponse,
 )
+from app.inventory.catalog_audit import audit_catalog, enrich_item_attributes
+from app.inventory.clip_matcher import CLIPImageMatcher
 from app.inventory.image_matcher import ImageMatcher
 from app.inventory.policy import inventory_policy_contract
+from app.inventory.waitlist import WaitlistManager
 from app.inventory.policy_qa import PolicyQAEngine
 from app.inventory.pos_sync import POSSyncEngine
 from app.services.inventory_service import get_inventory_service
@@ -368,15 +371,29 @@ async def ask_inventory_stream(request: InventoryAskRequest) -> StreamingRespons
 @router.post("/image-search", response_model=ImageSearchResponse)
 async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
     catalog = get_inventory_service().load_catalog()
-    matcher = ImageMatcher(catalog)
-    results = matcher.search(
-        query_text=request.query_text,
-        image_b64=request.image_b64,
-        category_hint=request.category_hint,
-        color_hint=request.color_hint,
-        budget_max=request.budget_max,
-        top_k=request.top_k,
-    )
+    if CLIPImageMatcher.is_available():
+        from app.inventory.clip_matcher import precompute_catalog_embeddings
+        precompute_catalog_embeddings(catalog)
+        matcher: CLIPImageMatcher | ImageMatcher = CLIPImageMatcher()
+        results = matcher.search(
+            query_text=request.query_text,
+            image_b64=request.image_b64,
+            catalog=catalog,
+            category_hint=request.category_hint,
+            color_hint=request.color_hint,
+            budget_max=request.budget_max,
+            top_k=request.top_k,
+        )
+    else:
+        matcher = ImageMatcher(catalog)
+        results = matcher.search(
+            query_text=request.query_text,
+            image_b64=request.image_b64,
+            category_hint=request.category_hint,
+            color_hint=request.color_hint,
+            budget_max=request.budget_max,
+            top_k=request.top_k,
+        )
     answer = matcher.build_answer(results, request.query_text)
     hits = [
         ImageSearchHit(
@@ -453,3 +470,56 @@ async def policy_qa(request: PolicyQARequest) -> PolicyQAResponse:
             source="policies.json",
         )
     return PolicyQAResponse(status="success", answer=answer, source="policies.json")
+
+
+from pydantic import BaseModel as _BaseModel  # noqa: E402
+
+
+class _WaitlistRequest(_BaseModel):
+    product_id: str
+    product_name: str = ""
+    session_id: str
+    phone: str | None = None
+
+
+@router.get("/audit")
+async def get_catalog_audit() -> dict:
+    svc = get_inventory_service()
+    catalog_path = svc._catalog_path() if hasattr(svc, "_catalog_path") else "data/inventory/catalog.jsonl"
+    report = audit_catalog(catalog_path)
+    return {
+        "total_products": report.total_products,
+        "active_products": report.active_products,
+        "rag_enabled": report.rag_enabled,
+        "out_of_stock": report.out_of_stock,
+        "completeness_score": report.completeness_score,
+        "attribute_coverage": report.attribute_coverage,
+        "category_counts": report.category_counts,
+        "brand_counts": report.brand_counts,
+        "price_range": report.price_range,
+        "enrichment_candidates": report.enrichment_candidates,
+        "issues": [
+            {"product_id": i.product_id, "name": i.name, "issue_type": i.issue_type, "detail": i.detail}
+            for i in report.issues
+        ],
+    }
+
+
+@router.post("/waitlist")
+async def join_waitlist(request: _WaitlistRequest) -> dict:
+    mgr = WaitlistManager()
+    mgr.add(
+        session_id=request.session_id,
+        product_id=request.product_id,
+        product_name=request.product_name,
+        phone=request.phone,
+    )
+    return {"status": "added", "product_id": request.product_id}
+
+
+@router.get("/waitlist/status")
+async def waitlist_status(product_id: str | None = None) -> dict:
+    mgr = WaitlistManager()
+    if product_id:
+        return {"product_id": product_id, "entries": mgr.get_waitlist(product_id)}
+    return {"pending": mgr.get_all_pending()}

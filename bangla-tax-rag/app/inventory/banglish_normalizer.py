@@ -28,7 +28,8 @@ _RULES: list[tuple[str, str]] = [
     (r"\bchuri\b|\bbangles\b|\bbangle\b",                             "চুড়ি"),
     # Fabrics
     (r"\bjamdani\b|\bjaamdaani\b",                                    "জামদানি"),
-    (r"\bkatan\b|\bkatan\b|\bcotton\b",                               "কটন"),
+    (r"\bkatan\b",                                                     "কাতান"),
+    (r"\bcotton\b",                                                    "কটন"),
     (r"\bmuslin\b|\bmusleen\b",                                       "মসলিন"),
     (r"\bsilk\b|\bsilken\b|\breshom\b",                               "সিল্ক"),
     (r"\bgeorgette\b",                                                "জর্জেট"),

@@ -32,7 +32,7 @@ textarea {
 }
 
 .app-shell {
-  width: min(980px, calc(100vw - 28px));
+  width: min(1360px, calc(100vw - 28px));
   height: min(860px, calc(100vh - 28px));
   margin: 14px auto;
   display: grid;
@@ -211,10 +211,25 @@ textarea:focus {
 
   .topbar {
     padding: 12px 14px 0;
+    align-items: flex-start;
+    flex-wrap: wrap;
   }
 
   h1 {
     font-size: 22px;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr !important;
+    position: relative;
+    padding: 0 0 10px;
+  }
+
+  .catalog-side-panel {
+    position: fixed;
+    inset: 74px 10px 10px;
+    z-index: 20;
+    box-shadow: 0 20px 80px rgba(23, 32, 42, 0.24);
   }
 
   .chat-panel {

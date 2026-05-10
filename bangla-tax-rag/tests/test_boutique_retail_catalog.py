@@ -116,3 +116,81 @@ def test_boutique_bot_keeps_same_design_context_for_followup() -> None:
     assert outcome.intent == "fashion_variant_color"
     assert outcome.product_ids[0] == "saree-jmd-lotus-green"
     assert "stock e nei" in outcome.answer.casefold()
+
+
+def test_boutique_bot_answers_banglish_wedding_saree_request() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="amar biye kichu saree dekhan",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_search"
+    assert outcome.product_ids
+    assert outcome.slots.category_key == "saree"
+    assert outcome.slots.occasion == "wedding"
+    assert any(product_id.startswith("saree-ktn") or product_id.startswith("saree-jmd") for product_id in outcome.product_ids)
+
+
+def test_boutique_bot_relaxes_eid_budget_saree_without_abstaining() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="eid er jonno 5000 er moddhe elegant saree",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_search"
+    assert not outcome.abstained
+    assert outcome.product_ids
+    assert all(_active_catalog()[product_id].price <= 5000 for product_id in outcome.product_ids)
+    assert all(_active_catalog()[product_id].attributes.get("category_key") == "saree" for product_id in outcome.product_ids)
+
+
+def test_boutique_bot_does_not_let_old_saree_context_override_new_bag_query() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="amar office ache amake kichu bag dekhan",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+        conversation_history=[
+            ("user", "amar biye kichu saree dekhan"),
+            ("assistant", "Here are some wedding sarees."),
+        ],
+        focused_product_ids=("saree-ktn-meena-maroon",),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_search"
+    assert outcome.slots.category_key == "bag"
+    assert outcome.product_ids[0] == "bag-tote-black-everyday"
+    assert all(_active_catalog()[product_id].attributes.get("category_key") == "bag" for product_id in outcome.product_ids)
+
+
+def test_boutique_bot_enforces_men_filter_for_watch_or_perfume_compare() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="3000 taka er moddhe men watch ba perfume ache?",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_compare"
+    assert "watch-men-leather-brown" in outcome.product_ids
+    assert "perfume-unisex-citrus-50ml" in outcome.product_ids
+    assert "watch-ladies" not in " ".join(outcome.product_ids)
+    assert "perfume-women" not in " ".join(outcome.product_ids)
+
+
+def test_boutique_bot_routes_bag_and_bangle_matching_to_accessory_engine() -> None:
+    outcome = FashionRetailAssistant().answer(
+        question="maroon bridal katan er sathe kon bag ar bangle match korbe?",
+        catalog=_active_catalog(),
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_accessory_match"
+    assert "jewelry-bangles-gold-meena" in outcome.cross_sell_product_ids
+    assert "bag-clutch-antique-gold" in outcome.cross_sell_product_ids
+    assert "bag-tote-black-everyday" not in outcome.cross_sell_product_ids[:2]

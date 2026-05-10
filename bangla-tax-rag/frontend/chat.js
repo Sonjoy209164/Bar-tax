@@ -1,6 +1,6 @@
 const state = {
   apiBaseUrl: "http://127.0.0.1:4849",
-  apiKey: "",
+  apiKey: "5230ff9faefe885d22345444e006cab576acdae5ea75d499",
   conversation: [],
   focusedProductIds: [],
   lastAnswerPlan: null,
@@ -13,9 +13,13 @@ const state = {
   cart: [],                 // [{product_id, name, unit_price, quantity}]
   micRecording: false,
   recognition: null,
+  catalogOpen: true,
+  catalogLoaded: false,
+  catalogItems: [],
 };
 
 const el = {
+  workspace:       document.querySelector("#workspace"),
   messages:        document.querySelector("#messages"),
   form:            document.querySelector("#chatForm"),
   input:           document.querySelector("#chatInput"),
@@ -44,6 +48,13 @@ const el = {
   trackBtn:        document.querySelector("#trackBtn"),
   trackClose:      document.querySelector("#trackClose"),
   trackOrderToggle:document.querySelector("#trackOrderToggle"),
+  catalogToggle:   document.querySelector("#catalogToggle"),
+  catalogRefresh:  document.querySelector("#catalogRefresh"),
+  catalogSearch:   document.querySelector("#catalogSearch"),
+  catalogCategory: document.querySelector("#catalogCategory"),
+  catalogItems:    document.querySelector("#catalogItems"),
+  catalogCount:    document.querySelector("#catalogCount"),
+  catalogEmpty:    document.querySelector("#catalogEmpty"),
 };
 
 init();
@@ -52,11 +63,13 @@ async function init() {
   await loadLocalConfig();
   bindEvents();
   initVoiceInput();
+  setCatalogOpen(true);
   addMessage(
     "assistant",
     "Ready. Ask in Bangla, Banglish, or English — products, styling, delivery, orders, comparisons. Upload a photo to find similar items, or tap 🎤 to speak."
   );
   await checkHealth();
+  await loadCatalog({ quiet: true });
 }
 
 async function loadLocalConfig() {
@@ -91,6 +104,200 @@ function bindEvents() {
   el.trackOrderToggle.addEventListener("click", () => el.trackBar.classList.toggle("active"));
   el.trackClose.addEventListener("click", () => el.trackBar.classList.remove("active"));
   el.trackBtn.addEventListener("click", () => void trackOrder());
+  el.catalogToggle.addEventListener("click", () => {
+    setCatalogOpen(!state.catalogOpen);
+    if (state.catalogOpen && !state.catalogLoaded) void loadCatalog();
+  });
+  el.catalogRefresh.addEventListener("click", () => void loadCatalog({ force: true }));
+  el.catalogSearch.addEventListener("input", renderCatalog);
+  el.catalogCategory.addEventListener("change", renderCatalog);
+  el.catalogItems.addEventListener("click", e => {
+    const askBtn = e.target.closest(".catalog-ask-btn");
+    if (!askBtn) return;
+    el.input.value = askBtn.dataset.question || "";
+    resizeInput();
+    el.input.focus();
+    if (window.innerWidth < 920) setCatalogOpen(false);
+  });
+}
+
+// ── Catalog Panel ──────────────────────────────────────────────────────────────
+
+function setCatalogOpen(open) {
+  state.catalogOpen = Boolean(open);
+  el.workspace.classList.toggle("catalog-hidden", !state.catalogOpen);
+  el.catalogToggle.textContent = state.catalogOpen ? "Hide Catalog" : "Show Catalog";
+  el.catalogToggle.setAttribute("aria-expanded", String(state.catalogOpen));
+}
+
+async function loadCatalog(options = {}) {
+  if (state.catalogLoaded && !options.force) {
+    renderCatalog();
+    return;
+  }
+  el.catalogCount.textContent = "Loading catalog...";
+  el.catalogItems.innerHTML = "";
+  const loading = document.createElement("div");
+  loading.className = "catalog-empty";
+  loading.textContent = "Loading products...";
+  el.catalogItems.appendChild(loading);
+
+  try {
+    const data = await apiGet("/inventory/items");
+    state.catalogItems = Array.isArray(data.items) ? data.items : [];
+    state.catalogLoaded = true;
+    renderCatalogCategories();
+    renderCatalog();
+  } catch (error) {
+    el.catalogCount.textContent = "Catalog unavailable";
+    el.catalogItems.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "catalog-empty";
+    empty.textContent = `Catalog load failed: ${error.message}`;
+    el.catalogItems.appendChild(empty);
+    if (!options.quiet) addMessage("assistant", `Catalog load failed: ${error.message}`);
+  }
+}
+
+function renderCatalogCategories() {
+  const current = el.catalogCategory.value;
+  const categories = Array.from(new Set(
+    state.catalogItems.map(item => item.category || item.attributes?.category_key || "Other").filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b));
+
+  el.catalogCategory.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "All";
+  el.catalogCategory.appendChild(all);
+  categories.forEach(category => {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = category;
+    el.catalogCategory.appendChild(option);
+  });
+  if (categories.includes(current)) el.catalogCategory.value = current;
+}
+
+function renderCatalog() {
+  const query = normalizeCatalogText(el.catalogSearch.value);
+  const category = el.catalogCategory.value;
+  const filtered = state.catalogItems.filter(item => {
+    const itemCategory = item.category || item.attributes?.category_key || "Other";
+    if (category && itemCategory !== category) return false;
+    if (!query) return true;
+    return catalogSearchText(item).includes(query);
+  });
+
+  el.catalogCount.textContent = `${filtered.length} of ${state.catalogItems.length} products`;
+  el.catalogItems.innerHTML = "";
+
+  if (!filtered.length) {
+    const empty = document.createElement("div");
+    empty.className = "catalog-empty";
+    empty.textContent = state.catalogItems.length ? "No products match this filter." : "No products loaded yet.";
+    el.catalogItems.appendChild(empty);
+    return;
+  }
+
+  filtered.forEach(item => el.catalogItems.appendChild(renderCatalogItem(item)));
+}
+
+function renderCatalogItem(item) {
+  const node = document.createElement("article");
+  node.className = "catalog-item";
+
+  const top = document.createElement("div");
+  top.className = "catalog-item-top";
+  const name = document.createElement("h3");
+  name.className = "catalog-item-name";
+  name.textContent = item.name || item.product_id;
+  const price = document.createElement("div");
+  price.className = "catalog-item-price";
+  price.textContent = formatCatalogPrice(item);
+  top.appendChild(name);
+  top.appendChild(price);
+  node.appendChild(top);
+
+  const meta = document.createElement("div");
+  meta.className = "catalog-meta-line";
+  meta.textContent = [
+    item.category || item.attributes?.category_key,
+    item.status || stockLabel(item.stock),
+    `${Number(item.stock || 0)} stock`,
+  ].filter(Boolean).join(" · ");
+  node.appendChild(meta);
+
+  const attrs = [
+    item.attributes?.section,
+    item.attributes?.gender,
+    item.attributes?.color,
+    item.attributes?.size,
+    item.attributes?.fabric,
+    item.attributes?.occasion,
+  ].filter(Boolean).slice(0, 5);
+  if (attrs.length) {
+    const tags = document.createElement("div");
+    tags.className = "catalog-tags";
+    attrs.forEach(value => {
+      const tag = document.createElement("span");
+      tag.className = "catalog-tag";
+      tag.textContent = value;
+      tags.appendChild(tag);
+    });
+    node.appendChild(tags);
+  }
+
+  const desc = item.short_description || item.full_description;
+  if (desc) {
+    const line = document.createElement("div");
+    line.className = "catalog-meta-line";
+    line.textContent = desc.length > 120 ? `${desc.slice(0, 117)}...` : desc;
+    node.appendChild(line);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "catalog-item-actions";
+  const ask = document.createElement("button");
+  ask.className = "catalog-ask-btn";
+  ask.type = "button";
+  ask.textContent = "Ask";
+  ask.dataset.question = `do you have ${item.name}?`;
+  actions.appendChild(ask);
+  node.appendChild(actions);
+
+  return node;
+}
+
+function catalogSearchText(item) {
+  const pieces = [
+    item.product_id,
+    item.sku,
+    item.name,
+    item.category,
+    item.brand,
+    item.short_description,
+    item.full_description,
+    ...(item.tags || []),
+    ...Object.values(item.attributes || {}),
+  ];
+  return normalizeCatalogText(pieces.filter(Boolean).join(" "));
+}
+
+function normalizeCatalogText(text) {
+  return String(text || "").toLowerCase().trim();
+}
+
+function formatCatalogPrice(item) {
+  if (item.price === null || item.price === undefined) return item.currency || "";
+  return `${item.currency || "BDT"} ${Number(item.price).toLocaleString()}`;
+}
+
+function stockLabel(stock) {
+  const n = Number(stock || 0);
+  if (n <= 0) return "Out of stock";
+  if (n <= 3) return "Low stock";
+  return "Active";
 }
 
 // ── Voice Input ────────────────────────────────────────────────────────────────
@@ -471,6 +678,19 @@ async function apiPost(path, payload) {
     method: "POST",
     headers: buildHeaders(),
     body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    const message = data?.detail?.message || data?.message || `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  return data;
+}
+
+async function apiGet(path) {
+  const response = await fetch(`${state.apiBaseUrl}${path}`, {
+    headers: buildHeaders(),
   });
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};

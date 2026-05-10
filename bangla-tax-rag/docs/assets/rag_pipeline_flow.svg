@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1060" viewBox="0 0 1500 1060" role="img" aria-labelledby="title desc">
+  <title id="title">Inventory RAG Pipeline Flowchart</title>
+  <desc id="desc">Flowchart showing index-time inventory ingestion, query-time retrieval augmented generation, answer verification, and feedback loop.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 34px Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 16px Arial, sans-serif; fill: #475569; }
+      .lane-title { font: 700 19px Arial, sans-serif; fill: #0f172a; }
+      .box-title { font: 700 16px Arial, sans-serif; fill: #111827; }
+      .box-text { font: 400 13px Arial, sans-serif; fill: #334155; }
+      .tiny { font: 400 12px Arial, sans-serif; fill: #475569; }
+      .lane { rx: 18; stroke-width: 2; }
+      .box { rx: 12; stroke-width: 1.6; }
+      .arrow { fill: none; stroke: #334155; stroke-width: 2.2; marker-end: url(#arrow); }
+      .dash { fill: none; stroke: #64748b; stroke-width: 2; stroke-dasharray: 8 6; marker-end: url(#arrow); }
+      .decision { fill: #fff7ed; stroke: #f97316; stroke-width: 1.8; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1500" height="1060"/>
+  <text class="title" x="60" y="58">Inventory RAG Pipeline Flowchart</text>
+  <text class="subtitle" x="60" y="86">How catalog data becomes searchable evidence, and how customer questions become grounded retail answers.</text>
+
+  <rect class="lane" x="45" y="120" width="1410" height="250" fill="#ecfeff" stroke="#0891b2"/>
+  <text class="lane-title" x="70" y="154">A. Index-Time Pipeline: Build The Evidence Store</text>
+
+  <rect class="box" x="75" y="190" width="190" height="110" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="95" y="218">Product Sources</text>
+  <text class="box-text" x="95" y="244">catalog.jsonl</text>
+  <text class="box-text" x="95" y="264">POS CSV import</text>
+  <text class="box-text" x="95" y="284">Webhook updates</text>
+
+  <rect class="box" x="315" y="190" width="205" height="110" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="335" y="218">Normalize + Validate</text>
+  <text class="box-text" x="335" y="244">Required fields</text>
+  <text class="box-text" x="335" y="264">Category taxonomy</text>
+  <text class="box-text" x="335" y="284">Stock, price, variants</text>
+
+  <rect class="box" x="570" y="190" width="205" height="110" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="590" y="218">Build Search Text</text>
+  <text class="box-text" x="590" y="244">Name + category</text>
+  <text class="box-text" x="590" y="264">Attributes + metadata</text>
+  <text class="box-text" x="590" y="284">Bangla/Banglish aliases</text>
+
+  <rect class="box" x="825" y="190" width="190" height="110" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="845" y="218">Embed Records</text>
+  <text class="box-text" x="845" y="244">TextEmbedder</text>
+  <text class="box-text" x="845" y="264">Deterministic/local</text>
+  <text class="box-text" x="845" y="284">or model vectors</text>
+
+  <rect class="box" x="1065" y="190" width="205" height="110" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="1085" y="218">Vector Upsert</text>
+  <text class="box-text" x="1085" y="244">Local JSONL vector store</text>
+  <text class="box-text" x="1085" y="264">or Elasticsearch index</text>
+  <text class="box-text" x="1085" y="284">namespace: inventory</text>
+
+  <rect class="box" x="1310" y="190" width="115" height="110" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="1325" y="218">Audit</text>
+  <text class="box-text" x="1325" y="244">sync status</text>
+  <text class="box-text" x="1325" y="264">trace logs</text>
+  <text class="box-text" x="1325" y="284">counts</text>
+
+  <path class="arrow" d="M 265 245 L 315 245"/>
+  <path class="arrow" d="M 520 245 L 570 245"/>
+  <path class="arrow" d="M 775 245 L 825 245"/>
+  <path class="arrow" d="M 1015 245 L 1065 245"/>
+  <path class="arrow" d="M 1270 245 L 1310 245"/>
+
+  <rect class="lane" x="45" y="405" width="1410" height="470" fill="#f0fdf4" stroke="#16a34a"/>
+  <text class="lane-title" x="70" y="440">B. Query-Time RAG Pipeline: Retrieve, Reason, Answer</text>
+
+  <rect class="box" x="75" y="475" width="165" height="100" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="95" y="502">Customer Query</text>
+  <text class="box-text" x="95" y="528">Bangla</text>
+  <text class="box-text" x="95" y="548">English</text>
+  <text class="box-text" x="95" y="568">Banglish</text>
+
+  <rect class="box" x="290" y="475" width="170" height="100" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="310" y="502">Chat UI</text>
+  <text class="box-text" x="310" y="528">history</text>
+  <text class="box-text" x="310" y="548">focused product ids</text>
+  <text class="box-text" x="310" y="568">catalog side panel</text>
+
+  <rect class="box" x="510" y="475" width="170" height="100" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="530" y="502">FastAPI Route</text>
+  <text class="box-text" x="530" y="528">POST /inventory/ask</text>
+  <text class="box-text" x="530" y="548">API key check</text>
+  <text class="box-text" x="530" y="568">schema validation</text>
+
+  <polygon class="decision" points="765,465 855,525 765,585 675,525"/>
+  <text class="box-title" x="720" y="517">Shortcut?</text>
+  <text class="tiny" x="710" y="540">policy / order</text>
+
+  <rect class="box" x="915" y="475" width="190" height="100" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="935" y="502">Normalize + Slots</text>
+  <text class="box-text" x="935" y="528">language + Banglish</text>
+  <text class="box-text" x="935" y="548">intent detection</text>
+  <text class="box-text" x="935" y="568">category, size, budget</text>
+
+  <rect class="box" x="1155" y="475" width="220" height="100" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="1175" y="502">Retrieval Plan</text>
+  <text class="box-text" x="1175" y="528">hard filters first</text>
+  <text class="box-text" x="1175" y="548">gender / category / stock</text>
+  <text class="box-text" x="1175" y="568">semantic fallback allowed</text>
+
+  <rect class="box" x="75" y="650" width="205" height="110" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="95" y="678">Candidate Retrieval</text>
+  <text class="box-text" x="95" y="704">structured catalog scan</text>
+  <text class="box-text" x="95" y="724">vector search</text>
+  <text class="box-text" x="95" y="744">BM25 / semantic matcher</text>
+
+  <rect class="box" x="335" y="650" width="200" height="110" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="355" y="678">Rank + Evidence</text>
+  <text class="box-text" x="355" y="704">rerank candidates</text>
+  <text class="box-text" x="355" y="724">price, stock, attrs</text>
+  <text class="box-text" x="355" y="744">evidence contract</text>
+
+  <rect class="box" x="590" y="650" width="210" height="110" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="610" y="678">Retail Decision</text>
+  <text class="box-text" x="610" y="704">primary match</text>
+  <text class="box-text" x="610" y="724">variants / accessories</text>
+  <text class="box-text" x="610" y="744">abstain if unsafe</text>
+
+  <rect class="box" x="855" y="650" width="210" height="110" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="875" y="678">Answer Writer</text>
+  <text class="box-text" x="875" y="704">deterministic template</text>
+  <text class="box-text" x="875" y="724">or local LLM wording</text>
+  <text class="box-text" x="875" y="744">customer language style</text>
+
+  <rect class="box" x="1120" y="650" width="210" height="110" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="1140" y="678">Grounding Check</text>
+  <text class="box-text" x="1140" y="704">no invented facts</text>
+  <text class="box-text" x="1140" y="724">stock/price verified</text>
+  <text class="box-text" x="1140" y="744">fallback to safe reply</text>
+
+  <rect class="box" x="590" y="790" width="280" height="60" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="610" y="817">Final Customer Response</text>
+  <text class="box-text" x="610" y="840">answer + products + intent + trace id + feedback buttons</text>
+
+  <rect class="box" x="995" y="790" width="270" height="60" fill="#fff7ed" stroke="#f97316"/>
+  <text class="box-title" x="1015" y="817">Shortcut Response</text>
+  <text class="box-text" x="1015" y="840">policy answer, order flow, or small-talk reply</text>
+
+  <path class="arrow" d="M 240 525 L 290 525"/>
+  <path class="arrow" d="M 460 525 L 510 525"/>
+  <path class="arrow" d="M 680 525 L 675 525"/>
+  <path class="arrow" d="M 855 525 L 915 525"/>
+  <path class="arrow" d="M 1105 525 L 1155 525"/>
+  <path class="arrow" d="M 1265 575 C 1265 620 180 610 180 650"/>
+  <path class="arrow" d="M 280 705 L 335 705"/>
+  <path class="arrow" d="M 535 705 L 590 705"/>
+  <path class="arrow" d="M 800 705 L 855 705"/>
+  <path class="arrow" d="M 1065 705 L 1120 705"/>
+  <path class="arrow" d="M 1225 760 C 1225 815 925 820 870 820"/>
+  <path class="dash" d="M 765 585 C 800 745 930 805 995 820"/>
+
+  <rect class="lane" x="45" y="910" width="1410" height="110" fill="#fefce8" stroke="#ca8a04"/>
+  <text class="lane-title" x="70" y="944">C. Learning Loop: Improve The System</text>
+
+  <rect class="box" x="95" y="965" width="205" height="38" fill="#ffffff" stroke="#ca8a04"/>
+  <text class="box-title" x="115" y="990">Feedback + Traces</text>
+
+  <rect class="box" x="380" y="965" width="205" height="38" fill="#ffffff" stroke="#ca8a04"/>
+  <text class="box-title" x="400" y="990">Eval Questions</text>
+
+  <rect class="box" x="665" y="965" width="235" height="38" fill="#ffffff" stroke="#ca8a04"/>
+  <text class="box-title" x="685" y="990">Tune Catalog + Rules</text>
+
+  <rect class="box" x="980" y="965" width="235" height="38" fill="#ffffff" stroke="#ca8a04"/>
+  <text class="box-title" x="1000" y="990">Rebuild Index</text>
+
+  <path class="arrow" d="M 300 984 L 380 984"/>
+  <path class="arrow" d="M 585 984 L 665 984"/>
+  <path class="arrow" d="M 900 984 L 980 984"/>
+  <path class="dash" d="M 1215 984 C 1400 984 1415 245 1425 245"/>
+
+  <text class="tiny" x="60" y="1040">Rule: the RAG answer is allowed to sound human, but every product, price, stock, size, color, policy, and recommendation must be supported by catalog or policy evidence.</text>
+</svg>

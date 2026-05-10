@@ -1516,14 +1516,17 @@ class InventoryService:
                     logger.debug("Answer critic step failed: %s", exc)
         base_answer = natural if natural else outcome.answer
 
-        enriched_answer = build_proactive_message(
-            answer=base_answer,
-            catalog={pid: item for pid, item in catalog.items()},
-            recommended_ids=recommended_ids,
-            primary_category=outcome.slots.category_key,
-            color_hint=outcome.slots.color,
-            budget_max=outcome.slots.budget_max,
-        )
+        if outcome.abstained or not recommended_ids:
+            enriched_answer = base_answer
+        else:
+            enriched_answer = build_proactive_message(
+                answer=base_answer,
+                catalog={pid: item for pid, item in catalog.items()},
+                recommended_ids=recommended_ids,
+                primary_category=outcome.slots.category_key,
+                color_hint=outcome.slots.color,
+                budget_max=outcome.slots.budget_max,
+            )
 
         # Escalation gate: if we've failed this customer multiple turns in a
         # row OR they explicitly asked for a human, replace the answer with a

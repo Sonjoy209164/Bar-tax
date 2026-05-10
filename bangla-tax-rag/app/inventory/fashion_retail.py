@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from app.core.schemas import InventoryItemRecord, InventorySearchFilters
@@ -44,6 +44,7 @@ class FashionRetailSlots:
     work_type: str | None = None
     occasion: str | None = None
     style: str | None = None
+    gender: str | None = None
     design_id: str | None = None
     wants_in_stock: bool = False
     intent: str = "fashion_search"
@@ -69,6 +70,7 @@ class FashionRetailSlots:
             "work_type",
             "occasion",
             "style",
+            "gender",
             "design_id",
             "wants_in_stock",
             "language",
@@ -383,6 +385,39 @@ class FashionRetailAssistant:
         "casual": ("casual", "daily", "college"),
         "comfortable": ("comfortable", "comfort", "flat", "sneaker"),
     }
+    GENDER_ALIASES: dict[str, tuple[str, ...]] = {
+        "men": (
+            "men",
+            "mens",
+            "men's",
+            "male",
+            "gents",
+            "gentleman",
+            "chele",
+            "cheleder",
+            "boys",
+            "পুরুষ",
+            "ছেলে",
+            "ছেলেদের",
+            "জেন্টস",
+        ),
+        "women": (
+            "women",
+            "womens",
+            "women's",
+            "female",
+            "ladies",
+            "lady",
+            "meyeder",
+            "mohila",
+            "নারী",
+            "মহিলা",
+            "মেয়েদের",
+            "মেয়েদের",
+            "লেডিস",
+        ),
+        "unisex": ("unisex", "সবার", "ইউনিসেক্স"),
+    }
     VARIANT_PHRASES = (
         "same design",
         "same pattern",
@@ -566,15 +601,20 @@ class FashionRetailAssistant:
         if not fashion_items:
             return None
 
-        # Prepend recent conversation context to improve slot carryover across turns
-        enriched_question = self._enrich_with_history(question, conversation_history)
+        # Carry prior turns only for true follow-up language ("same design",
+        # "eta", "tar dam"). If the current message names a fresh category,
+        # budget, occasion, or gender, old context must not override it.
+        use_context = self._should_use_conversation_context(question)
+        enriched_question = self._enrich_with_history(question, conversation_history) if use_context else question
+        effective_focused_product_ids = focused_product_ids if use_context else ()
+        effective_last_primary_product_id = last_primary_product_id if use_context else None
 
         slots = self.extract_slots(
             question=enriched_question,
             filters=filters,
             catalog=fashion_items,
-            focused_product_ids=focused_product_ids,
-            last_primary_product_id=last_primary_product_id,
+            focused_product_ids=effective_focused_product_ids,
+            last_primary_product_id=effective_last_primary_product_id,
         )
         if not self.should_handle(question=question, slots=slots, fashion_items=fashion_items):
             return None
@@ -585,11 +625,6 @@ class FashionRetailAssistant:
         clarification = self._maybe_clarify(slots=slots, items=fashion_items)
         if clarification is not None:
             return clarification
-
-        if slots.intent == "fashion_compare":
-            outcome = self._answer_fashion_compare(question=question, items=fashion_items, slots=slots, top_k=top_k)
-            if outcome is not None:
-                return outcome
 
         if slots.intent == "fashion_styling_advice":
             outcome = self._answer_styling_advice(question=question, items=fashion_items, slots=slots, top_k=top_k)
@@ -616,7 +651,60 @@ class FashionRetailAssistant:
             if outcome is not None:
                 return outcome
 
+        if slots.intent == "fashion_compare":
+            outcome = self._answer_fashion_compare(question=question, items=fashion_items, slots=slots, top_k=top_k)
+            if outcome is not None:
+                return outcome
+
         return self._answer_fashion_search(question=question, items=fashion_items, slots=slots, top_k=top_k)
+
+    def _should_use_conversation_context(self, question: str) -> bool:
+        text = normalize_fashion_text(question)
+        if not text:
+            return False
+        if self._extract_category_key(text=text, filters=InventorySearchFilters()):
+            return False
+        if self._extract_budget(question) != (None, None):
+            return False
+        if self._extract_alias(text, self.OCCASION_ALIASES):
+            return False
+        if self._extract_alias(text, self.FABRIC_ALIASES):
+            return False
+        if self._extract_alias(text, self.WORK_ALIASES):
+            return False
+        if self._extract_gender(text):
+            return False
+        if self._extract_color(text)[1] and not any(self._contains_phrase(text, phrase) for phrase in self.VARIANT_PHRASES):
+            return False
+        follow_up_terms = (
+            "eta",
+            "eita",
+            "eitai",
+            "otar",
+            "oita",
+            "oi",
+            "tar",
+            "er dam",
+            "price",
+            "dam",
+            "same design",
+            "same color",
+            "same colour",
+            "another color",
+            "other color",
+            "first one",
+            "second one",
+            "previous",
+            "this one",
+            "that one",
+            "এটা",
+            "ওটা",
+            "তার",
+            "দাম",
+            "একই ডিজাইন",
+            "অন্য রঙ",
+        )
+        return any(self._contains_phrase(text, term) for term in follow_up_terms)
 
     def should_handle(
         self,
@@ -704,6 +792,9 @@ class FashionRetailAssistant:
         style = self._extract_alias(text, self.STYLE_ALIASES)
         if style:
             evidence.append(f"style:{style}")
+        gender = self._extract_gender(text)
+        if gender:
+            evidence.append(f"gender:{gender}")
         wants_in_stock = bool(filters.min_stock and filters.min_stock > 0) or any(
             self._contains_phrase(text, phrase) for phrase in self.AVAILABILITY_PHRASES
         )
@@ -739,6 +830,7 @@ class FashionRetailAssistant:
             work_type=work_type,
             occasion=occasion,
             style=style,
+            gender=gender,
             design_id=design_id,
             wants_in_stock=wants_in_stock,
             intent=intent,
@@ -870,6 +962,7 @@ class FashionRetailAssistant:
             work_type=regex_slots.work_type or classified.work_type,
             occasion=regex_slots.occasion or classified.occasion,
             style=regex_slots.style,
+            gender=regex_slots.gender,
             design_id=regex_slots.design_id,
             wants_in_stock=regex_slots.wants_in_stock or classified.wants_in_stock,
             intent=intent,
@@ -1169,10 +1262,15 @@ class FashionRetailAssistant:
         top_k: int,
     ) -> FashionRetailOutcome | None:
         design_id = slots.design_id
-        anchor = self._resolve_anchor_item(question=question, items=items, slots=slots)
+        requested_accessory_keys = self._extract_requested_accessory_keys(normalize_fashion_text(question))
+        anchor_slots = slots
+        if slots.category_key in {"accessories", *requested_accessory_keys} or (
+            slots.category_key and self._is_accessory_category(slots.category_key)
+        ):
+            anchor_slots = replace(slots, category_key=None, category_label=None)
+        anchor = self._resolve_anchor_item(question=question, items=items, slots=anchor_slots)
         if anchor and not design_id:
             design_id = self._item_design_id(anchor)
-        requested_accessory_keys = self._extract_requested_accessory_keys(normalize_fashion_text(question))
         scored: list[_ScoredItem] = []
         for item in items:
             if anchor and item.product_id == anchor.product_id:
@@ -1180,6 +1278,8 @@ class FashionRetailAssistant:
             if not self._is_accessory_item(item):
                 continue
             if requested_accessory_keys and not any(self._item_category_matches(item, key) for key in requested_accessory_keys):
+                continue
+            if slots.gender and not self._item_gender_matches(item, slots.gender):
                 continue
             score = 0.0
             reasons: list[str] = []
@@ -1230,10 +1330,20 @@ class FashionRetailAssistant:
         top_k: int,
     ) -> FashionRetailOutcome:
         scored = self._rank_search_items(question=question, items=items, slots=slots, top_k=max(top_k, 5))
+        relaxed_reason: str | None = None
+        if not scored:
+            relaxed_slots, relaxed_reason = self._first_relaxed_search_match(
+                question=question,
+                items=items,
+                slots=slots,
+                top_k=max(top_k, 5),
+            )
+            if relaxed_slots is not None:
+                scored = self._rank_search_items(question=question, items=items, slots=relaxed_slots, top_k=max(top_k, 5))
 
-        # Semantic fallback: when slot filtering finds nothing, ask the
-        # embedding matcher. Catches novel vocabulary the regex layer
-        # couldn't parse ("haldi", "ay-er ma", "matha gorom kora rong"...).
+        # Semantic fallback: after deterministic relaxation still finds
+        # nothing, ask the embedding matcher. Catches novel vocabulary the
+        # regex layer could not parse.
         semantic_used = False
         if not scored:
             try:
@@ -1274,14 +1384,23 @@ class FashionRetailAssistant:
                 abstention_reason="No fashion catalog item matched the extracted structured slots.",
                 reasoning_steps=("Applied structured fashion filters before semantic fallback and found no eligible item.",),
             )
+
         selected = [match.item for match in scored[:top_k]]
         if len(selected) == 1:
             answer = f"Yes, the closest match is {self._format_option(selected[0])}."
         else:
-            answer = f"I found {len(scored)} matching option(s): {self._natural_join(self._format_option(item) for item in selected[:3])}."
+            if relaxed_reason:
+                answer = (
+                    f"I do not see an exact {relaxed_reason}, but these are the closest available option(s): "
+                    f"{self._natural_join(self._format_option(item) for item in selected[:3])}."
+                )
+            else:
+                answer = f"I found {len(scored)} matching option(s): {self._natural_join(self._format_option(item) for item in selected[:3])}."
         reasoning_step = (
             "Semantic fallback retrieved candidates after slot filter found nothing."
             if semantic_used
+            else f"Relaxed filters after exact search had no match: {relaxed_reason}."
+            if relaxed_reason
             else "Extracted fashion slots and ranked matching catalog items with stock and exact attributes ahead of fuzzy text."
         )
         return self._outcome(
@@ -1294,6 +1413,52 @@ class FashionRetailAssistant:
             follow_up_question="Should I narrow this by color, size, fabric, budget, or occasion?",
             reasoning_steps=(reasoning_step,),
         )
+
+    def _first_relaxed_search_match(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        top_k: int,
+    ) -> tuple[FashionRetailSlots | None, str | None]:
+        candidates: list[tuple[FashionRetailSlots, str]] = []
+        if slots.style:
+            candidates.append((replace(slots, style=None), f"{slots.style} style {slots.category_label or 'item'}"))
+        if slots.occasion:
+            candidates.append((replace(slots, occasion=None), f"{slots.occasion} {slots.category_label or 'item'}"))
+        if slots.fabric:
+            candidates.append((replace(slots, fabric=None), f"{slots.fabric} {slots.category_label or 'item'}"))
+        if slots.work_type:
+            candidates.append((replace(slots, work_type=None), f"{slots.work_type} work {slots.category_label or 'item'}"))
+        if slots.budget_max is not None:
+            candidates.append((replace(slots, budget_max=None), f"under BDT {slots.budget_max:,.0f} {slots.category_label or 'item'}"))
+        if slots.category_key:
+            candidates.append((
+                replace(slots, color=None, color_family=None, size=None, occasion=None, style=None, fabric=None, work_type=None, budget_min=None, budget_max=None),
+                f"fully matching {slots.category_label or slots.category_key}",
+            ))
+
+        seen: set[tuple[Any, ...]] = set()
+        for candidate_slots, reason in candidates:
+            marker = (
+                candidate_slots.category_key,
+                candidate_slots.color_family,
+                candidate_slots.size,
+                candidate_slots.occasion,
+                candidate_slots.style,
+                candidate_slots.fabric,
+                candidate_slots.work_type,
+                candidate_slots.budget_min,
+                candidate_slots.budget_max,
+                candidate_slots.gender,
+            )
+            if marker in seen:
+                continue
+            seen.add(marker)
+            if self._rank_search_items(question=question, items=items, slots=candidate_slots, top_k=top_k):
+                return candidate_slots, reason
+        return None, None
 
     def _rank_search_items(
         self,
@@ -1321,6 +1486,8 @@ class FashionRetailAssistant:
         strict_color: bool = False,
     ) -> bool:
         if slots.category_key and not self._item_category_matches(item, slots.category_key):
+            return False
+        if slots.gender and not self._item_gender_matches(item, slots.gender):
             return False
         if slots.color_family and (strict_color or slots.intent in {"fashion_search", "fashion_size_availability"}):
             if not self._item_color_matches(item, slots.color_family, slots.color):
@@ -1371,6 +1538,9 @@ class FashionRetailAssistant:
         if slots.style and self._item_style_matches(item, slots.style):
             score += 2.0
             reasons.append("style")
+        if slots.gender and self._item_gender_matches(item, slots.gender):
+            score += 1.4
+            reasons.append("gender")
         if slots.budget_max is not None and item.price is not None and item.price <= slots.budget_max:
             score += 1.2
             reasons.append("budget")
@@ -1440,10 +1610,13 @@ class FashionRetailAssistant:
         size: str | None,
         design_id: str | None,
     ) -> str:
-        if any(phrase in text for phrase in self.COMPARE_PHRASES):
-            return "fashion_compare"
+        if any(self._contains_phrase(text, phrase) for phrase in self.ACCESSORY_MATCH_PHRASES):
+            if self._extract_requested_accessory_keys(text) or self._has_any_accessory_question_word(text):
+                return "fashion_accessory_match"
         if any(self._contains_phrase(text, phrase) for phrase in self.STYLING_ADVICE_PHRASES):
             return "fashion_styling_advice"
+        if any(phrase in text for phrase in self.COMPARE_PHRASES):
+            return "fashion_compare"
         if size and any(self._contains_phrase(text, phrase) for phrase in self.AVAILABILITY_PHRASES):
             return "fashion_size_availability"
         if any(self._contains_phrase(text, phrase) for phrase in self.ACCESSORY_MATCH_PHRASES):
@@ -1473,6 +1646,13 @@ class FashionRetailAssistant:
                 requested.append(key)
         return tuple(dict.fromkeys(requested))
 
+    def _has_any_accessory_question_word(self, text: str) -> bool:
+        return any(
+            self._contains_phrase(text, alias)
+            for key in ("accessories", "bag", "jewelry", "shoes", "watch", "perfume")
+            for alias in self.CATEGORY_ALIASES[key]
+        )
+
     @staticmethod
     def _accessory_match_label(category_key: str) -> str:
         return {
@@ -1490,6 +1670,12 @@ class FashionRetailAssistant:
                 return key
         if text in {"accessory", "accessories"}:
             return "accessories"
+        return None
+
+    def _extract_gender(self, text: str) -> str | None:
+        for gender, aliases in self.GENDER_ALIASES.items():
+            if any(self._contains_phrase(text, alias) for alias in aliases):
+                return gender
         return None
 
     def _extract_color(self, text: str) -> tuple[str | None, str | None]:
@@ -1649,6 +1835,10 @@ class FashionRetailAssistant:
             )
         return any(self._contains_phrase(identity_text, alias) for alias in self.CATEGORY_ALIASES.get(category_key, ()))
 
+    @staticmethod
+    def _is_accessory_category(category_key: str) -> bool:
+        return category_key in {"accessories", "jewelry", "bag", "perfume", "watch", "shoes", "dupatta", "shawl"}
+
     def _is_accessory_item(self, item: InventoryItemRecord) -> bool:
         item_text = self._item_text(item)
         category_key = self._canonical_category_key(item.attributes.get("category_key")) or self._canonical_category_key(item.category)
@@ -1663,6 +1853,30 @@ class FashionRetailAssistant:
             for key in ("bag", "jewelry", "accessories", "perfume", "watch", "shoes")
             for alias in self.CATEGORY_ALIASES[key]
         )
+
+    def _item_gender_matches(self, item: InventoryItemRecord, requested_gender: str | None) -> bool:
+        if not requested_gender:
+            return True
+        values = [
+            item.attributes.get("gender"),
+            item.attributes.get("section"),
+            item.metadata.get("gender"),
+            item.metadata.get("section"),
+            item.name,
+            " ".join(item.tags),
+        ]
+        normalized_values = " ".join(normalize_fashion_text(value) for value in values if value)
+        if requested_gender == "men":
+            if any(self._contains_phrase(normalized_values, marker) for marker in ("men", "mens", "men s", "male", "gents", "unisex")):
+                return True
+            return False
+        if requested_gender == "women":
+            if any(self._contains_phrase(normalized_values, marker) for marker in ("women", "womens", "women s", "female", "ladies", "lady", "unisex")):
+                return True
+            return False
+        if requested_gender == "unisex":
+            return self._contains_phrase(normalized_values, "unisex")
+        return True
 
     def _item_color_matches(self, item: InventoryItemRecord, color_family: str | None, color: str | None) -> bool:
         if not color_family and not color:
@@ -2184,8 +2398,24 @@ class FashionRetailAssistant:
             return None
 
         a_key, b_key = side_keys[0], side_keys[1]
-        a_items = [i for i in items if i.attributes.get("category_key") == a_key and i.stock > 0]
-        b_items = [i for i in items if i.attributes.get("category_key") == b_key and i.stock > 0]
+
+        def _eligible(item: InventoryItemRecord, category_key: str) -> bool:
+            if item.stock <= 0:
+                return False
+            if not self._item_category_matches(item, category_key):
+                return False
+            if slots.gender and not self._item_gender_matches(item, slots.gender):
+                return False
+            if slots.budget_min is not None and (item.price is None or item.price < slots.budget_min):
+                return False
+            if slots.budget_max is not None and (item.price is None or item.price > slots.budget_max):
+                return False
+            if slots.occasion and not self._contains_phrase(self._item_text(item), slots.occasion):
+                return False
+            return True
+
+        a_items = [i for i in items if _eligible(i, a_key)]
+        b_items = [i for i in items if _eligible(i, b_key)]
 
         if not a_items and not b_items:
             return None
@@ -2234,9 +2464,7 @@ class FashionRetailAssistant:
             else:
                 lines.append(f"\n💡 Both are similarly priced — choose by fabric and occasion.")
 
-        all_pids = tuple(
-            [a_best.product_id] if a_best else [] + [b_best.product_id] if b_best else []  # type: ignore[operator]
-        )
+        all_pids = tuple(([a_best.product_id] if a_best else []) + ([b_best.product_id] if b_best else []))
         return self._outcome(
             answer="\n".join(lines),
             intent="fashion_compare",
@@ -2284,4 +2512,3 @@ class FashionRetailAssistant:
             slots=slots,
             reasoning_steps=(f"Compared {a_fab} vs {b_fab} fabric options.",),
         )
-

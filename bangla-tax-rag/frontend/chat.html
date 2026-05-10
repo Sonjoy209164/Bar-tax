@@ -147,6 +147,172 @@
         border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 0.8rem;
       }
       .track-btn:hover { background: #1e40af; }
+
+      /* Catalog side panel */
+      .catalog-toggle {
+        background: none;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 3px 9px;
+        cursor: pointer;
+        font-size: 0.78rem;
+        color: var(--muted);
+      }
+      .catalog-toggle:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .workspace {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 12px;
+      }
+      .workspace.catalog-hidden {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .workspace.catalog-hidden .catalog-side-panel {
+        display: none;
+      }
+      .catalog-side-panel {
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+      }
+      .catalog-side-header {
+        padding: 14px;
+        border-bottom: 1px solid var(--line);
+        display: grid;
+        gap: 10px;
+      }
+      .catalog-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        gap: 8px;
+      }
+      .catalog-title-row h2 {
+        margin: 0;
+        font-size: 18px;
+        line-height: 1.2;
+      }
+      .catalog-count {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .catalog-refresh {
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: white;
+        color: var(--muted);
+        cursor: pointer;
+        padding: 4px 9px;
+        font-size: 12px;
+      }
+      .catalog-refresh:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .catalog-controls {
+        display: grid;
+        grid-template-columns: 1fr 120px;
+        gap: 8px;
+      }
+      .catalog-controls input,
+      .catalog-controls select {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--ink);
+        padding: 8px 9px;
+        font-size: 13px;
+        outline: none;
+      }
+      .catalog-controls input:focus,
+      .catalog-controls select:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1);
+      }
+      .catalog-list {
+        min-height: 0;
+        overflow-y: auto;
+        padding: 8px;
+        display: grid;
+        gap: 8px;
+      }
+      .catalog-item {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 10px;
+        display: grid;
+        gap: 6px;
+      }
+      .catalog-item-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .catalog-item-name {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.25;
+        font-weight: 800;
+      }
+      .catalog-item-price {
+        flex: 0 0 auto;
+        color: var(--accent-strong);
+        font-weight: 800;
+        font-size: 12px;
+      }
+      .catalog-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+      .catalog-tag {
+        border: 1px solid #d7e7e4;
+        color: #315c58;
+        background: #f4fbf9;
+        border-radius: 999px;
+        padding: 2px 7px;
+        font-size: 11px;
+      }
+      .catalog-meta-line {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+      .catalog-item-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+      .catalog-ask-btn {
+        border: 1px solid var(--accent);
+        border-radius: 5px;
+        background: white;
+        color: var(--accent-strong);
+        cursor: pointer;
+        padding: 5px 8px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .catalog-ask-btn:hover {
+        background: var(--soft);
+      }
+      .catalog-empty {
+        color: var(--muted);
+        text-align: center;
+        padding: 24px 14px;
+        font-size: 13px;
+      }
     </style>
   </head>
   <body>
@@ -157,6 +323,9 @@
           <h1>Customer Chat</h1>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
+          <button id="catalogToggle" class="catalog-toggle" type="button">
+            Hide Catalog
+          </button>
           <button id="trackOrderToggle" type="button"
             style="background:none;border:1px solid var(--line);border-radius:5px;padding:3px 9px;cursor:pointer;font-size:0.78rem;color:var(--muted);">
             📦 Track Order
@@ -168,73 +337,97 @@
         </div>
       </header>
 
-      <section class="chat-panel">
-        <div class="messages" id="messages" aria-live="polite"></div>
+      <div class="workspace" id="workspace">
+        <section class="chat-panel">
+          <div class="messages" id="messages" aria-live="polite"></div>
 
-        <!-- Order state bars -->
-        <div class="order-status-bar" id="orderStatusBar">
-          🛒 Order in progress — please provide your name, phone, delivery area, and payment method.
-        </div>
-        <div class="order-confirm-bar" id="orderConfirmBar">
-          <button class="btn-confirm" id="confirmOrderBtn" type="button">✅ Confirm Order</button>
-          <button class="btn-cancel" id="cancelOrderBtn" type="button">✕ Cancel</button>
-        </div>
-
-        <!-- Cart panel (collapsible) -->
-        <div class="cart-panel" id="cartPanel">
-          <div class="cart-header" id="cartToggle">
-            🛍 Cart <span id="cartCount" style="font-weight:normal;color:var(--muted);">(0 items)</span>
-            <span id="cartChevron">▲</span>
+          <!-- Order state bars -->
+          <div class="order-status-bar" id="orderStatusBar">
+            🛒 Order in progress — please provide your name, phone, delivery area, and payment method.
           </div>
-          <div id="cartItems"></div>
-          <div class="cart-total-row" id="cartTotalRow" style="display:none;">
-            <span>Subtotal</span><span id="cartSubtotal">BDT 0</span>
+          <div class="order-confirm-bar" id="orderConfirmBar">
+            <button class="btn-confirm" id="confirmOrderBtn" type="button">✅ Confirm Order</button>
+            <button class="btn-cancel" id="cancelOrderBtn" type="button">✕ Cancel</button>
           </div>
-        </div>
 
-        <!-- Order tracking bar -->
-        <div class="track-bar" id="trackBar">
-          <span>Order ID or phone:</span>
-          <input type="text" class="track-input" id="trackInput" placeholder="ORD-XXXX or 01711..." />
-          <button class="track-btn" id="trackBtn" type="button">Track</button>
-          <button type="button" id="trackClose"
-            style="background:none;border:none;cursor:pointer;color:var(--muted);">✕</button>
-        </div>
+          <!-- Cart panel (collapsible) -->
+          <div class="cart-panel" id="cartPanel">
+            <div class="cart-header" id="cartToggle">
+              🛍 Cart <span id="cartCount" style="font-weight:normal;color:var(--muted);">(0 items)</span>
+              <span id="cartChevron">▲</span>
+            </div>
+            <div id="cartItems"></div>
+            <div class="cart-total-row" id="cartTotalRow" style="display:none;">
+              <span>Subtotal</span><span id="cartSubtotal">BDT 0</span>
+            </div>
+          </div>
 
-        <!-- Quick chips -->
-        <div class="chips" id="chips">
-          <button type="button">ei same design ta blue color e ache?</button>
-          <button type="button">jamdani vs katan — konta nibo?</button>
-          <button type="button">oily skin er jonno sunscreen ache?</button>
-          <button type="button">নেভি কাতান শাড়ির সাথে কোন ব্যাগ মানাবে?</button>
-          <button type="button">Dhaka delivery charge koto?</button>
-          <button type="button">refund policy ki?</button>
-          <button type="button">eid er jonno 5000 er moddhe elegant saree</button>
-        </div>
+          <!-- Order tracking bar -->
+          <div class="track-bar" id="trackBar">
+            <span>Order ID or phone:</span>
+            <input type="text" class="track-input" id="trackInput" placeholder="ORD-XXXX or 01711..." />
+            <button class="track-btn" id="trackBtn" type="button">Track</button>
+            <button type="button" id="trackClose"
+              style="background:none;border:none;cursor:pointer;color:var(--muted);">✕</button>
+          </div>
 
-        <!-- Image upload -->
-        <div class="image-upload-area" id="imageUploadArea">
-          <label for="imageInput">📷 Find by Image</label>
-          <input type="file" id="imageInput" accept="image/*" />
-          <img id="imagePreview" alt="Selected image" />
-          <button type="button" id="clearImageBtn" title="Remove image">✕</button>
-          <span id="imageLabel" style="font-size:0.75rem;color:var(--muted);"></span>
-        </div>
+          <!-- Quick chips -->
+          <div class="chips" id="chips">
+            <button type="button">ei same design ta blue color e ache?</button>
+            <button type="button">jamdani vs katan — konta nibo?</button>
+            <button type="button">oily skin er jonno sunscreen ache?</button>
+            <button type="button">নেভি কাতান শাড়ির সাথে কোন ব্যাগ মানাবে?</button>
+            <button type="button">Dhaka delivery charge koto?</button>
+            <button type="button">refund policy ki?</button>
+            <button type="button">eid er jonno 5000 er moddhe elegant saree</button>
+          </div>
 
-        <!-- Composer with mic -->
-        <form class="composer" id="chatForm" style="display:flex;align-items:flex-end;gap:5px;">
-          <button type="button" id="micBtn" title="Voice input (Bangla/English)">🎤</button>
-          <textarea
-            id="chatInput"
-            rows="1"
-            autocomplete="off"
-            style="flex:1;"
-            placeholder="Type Bangla, Banglish, or English... or tap 🎤 to speak"
-          ></textarea>
-          <button id="sendButton" type="submit">Send</button>
-        </form>
-      </section>
+          <!-- Image upload -->
+          <div class="image-upload-area" id="imageUploadArea">
+            <label for="imageInput">📷 Find by Image</label>
+            <input type="file" id="imageInput" accept="image/*" />
+            <img id="imagePreview" alt="Selected image" />
+            <button type="button" id="clearImageBtn" title="Remove image">✕</button>
+            <span id="imageLabel" style="font-size:0.75rem;color:var(--muted);"></span>
+          </div>
+
+          <!-- Composer with mic -->
+          <form class="composer" id="chatForm" style="display:flex;align-items:flex-end;gap:5px;">
+            <button type="button" id="micBtn" title="Voice input (Bangla/English)">🎤</button>
+            <textarea
+              id="chatInput"
+              rows="1"
+              autocomplete="off"
+              style="flex:1;"
+              placeholder="Type Bangla, Banglish, or English... or tap 🎤 to speak"
+            ></textarea>
+            <button id="sendButton" type="submit">Send</button>
+          </form>
+        </section>
+
+        <aside class="catalog-side-panel" id="catalogPanel" aria-label="Current inventory catalog">
+          <div class="catalog-side-header">
+            <div class="catalog-title-row">
+              <div>
+                <p class="eyebrow">Live Catalog</p>
+                <h2>Inventory</h2>
+                <div class="catalog-count" id="catalogCount">Loading catalog...</div>
+              </div>
+              <button class="catalog-refresh" id="catalogRefresh" type="button">Refresh</button>
+            </div>
+            <div class="catalog-controls">
+              <input id="catalogSearch" type="search" placeholder="Search products..." />
+              <select id="catalogCategory" aria-label="Filter catalog by category">
+                <option value="">All</option>
+              </select>
+            </div>
+          </div>
+          <div class="catalog-list" id="catalogItems">
+            <div class="catalog-empty" id="catalogEmpty">Catalog will appear here.</div>
+          </div>
+        </aside>
+      </div>
     </main>
-    <script src="./chat.js"></script>
+    <script src="./chat.js?v=20260510-catalog-key"></script>
   </body>
 </html>

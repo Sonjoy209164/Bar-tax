@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120" role="img" aria-labelledby="title desc">
+  <title id="title">Advanced inventory chatbot architecture flow</title>
+  <desc id="desc">Flowchart showing the customer chat UI, FastAPI routes, inventory service, retail reasoning layer, data stores, and answer outputs.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f5f7fb; }
+      .lane { fill: #ffffff; stroke: #d8dee9; stroke-width: 2; rx: 18; }
+      .box { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; rx: 12; }
+      .box2 { fill: #e8f4f2; stroke: #0f766e; stroke-width: 2; rx: 12; }
+      .box3 { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; rx: 12; }
+      .box4 { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; rx: 12; }
+      .box5 { fill: #f0fdf4; stroke: #16a34a; stroke-width: 2; rx: 12; }
+      .title { font: 700 28px Inter, Arial, sans-serif; fill: #17202a; }
+      .laneTitle { font: 700 18px Inter, Arial, sans-serif; fill: #0f172a; }
+      .text { font: 600 16px Inter, Arial, sans-serif; fill: #17202a; }
+      .small { font: 500 13px Inter, Arial, sans-serif; fill: #475569; }
+      .tiny { font: 500 12px Inter, Arial, sans-serif; fill: #64748b; }
+      .arrow { stroke: #334155; stroke-width: 2.6; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #64748b; stroke-width: 2; fill: none; stroke-dasharray: 7 7; marker-end: url(#arrowSoft); }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrowSoft" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="1120"/>
+  <text class="title" x="56" y="58">Advanced Inventory Chatbot Flow</text>
+  <text class="small" x="56" y="84">Customer query to grounded retail answer, catalog panel, policy, order, image search, and sync paths.</text>
+
+  <rect class="lane" x="40" y="120" width="300" height="890"/>
+  <text class="laneTitle" x="62" y="156">1. Customer UI</text>
+  <rect class="box2" x="70" y="190" width="240" height="105"/>
+  <text class="text" x="92" y="224">chat.html / chat.js</text>
+  <text class="small" x="92" y="250">Bangla, Banglish, English</text>
+  <text class="small" x="92" y="272">Catalog side panel</text>
+  <rect class="box" x="70" y="330" width="240" height="105"/>
+  <text class="text" x="92" y="364">UI actions</text>
+  <text class="small" x="92" y="390">Ask, image upload</text>
+  <text class="small" x="92" y="412">Track order, feedback</text>
+  <rect class="box" x="70" y="470" width="240" height="120"/>
+  <text class="text" x="92" y="504">Local chat state</text>
+  <text class="small" x="92" y="530">conversation_history</text>
+  <text class="small" x="92" y="552">focused_product_ids</text>
+  <text class="small" x="92" y="574">last_answer_plan</text>
+
+  <rect class="lane" x="380" y="120" width="300" height="890"/>
+  <text class="laneTitle" x="402" y="156">2. FastAPI Routes</text>
+  <rect class="box3" x="410" y="190" width="240" height="105"/>
+  <text class="text" x="432" y="224">Security + CORS</text>
+  <text class="small" x="432" y="250">X-API-Key</text>
+  <text class="small" x="432" y="272">rate limit guard</text>
+  <rect class="box3" x="410" y="330" width="240" height="120"/>
+  <text class="text" x="432" y="364">/inventory/ask</text>
+  <text class="small" x="432" y="390">main chat endpoint</text>
+  <text class="small" x="432" y="412">returns answer + trace</text>
+  <rect class="box" x="410" y="485" width="240" height="150"/>
+  <text class="text" x="432" y="519">Side endpoints</text>
+  <text class="small" x="432" y="545">/inventory/items</text>
+  <text class="small" x="432" y="567">/inventory/image-search</text>
+  <text class="small" x="432" y="589">/inventory/policy-qa</text>
+  <text class="small" x="432" y="611">/orders/*</text>
+
+  <rect class="lane" x="720" y="120" width="360" height="890"/>
+  <text class="laneTitle" x="742" y="156">3. Inventory Service Orchestrator</text>
+  <rect class="box2" x="755" y="190" width="290" height="120"/>
+  <text class="text" x="778" y="224">InventoryService.ask()</text>
+  <text class="small" x="778" y="250">small talk, policy quick path</text>
+  <text class="small" x="778" y="272">loads catalog + memory</text>
+  <text class="small" x="778" y="294">chooses structured retail path</text>
+  <rect class="box2" x="755" y="345" width="290" height="150"/>
+  <text class="text" x="778" y="379">Context controls</text>
+  <text class="small" x="778" y="405">safe follow-up memory</text>
+  <text class="small" x="778" y="427">topic change detection</text>
+  <text class="small" x="778" y="449">profile + conversation state</text>
+  <text class="small" x="778" y="471">no stale category override</text>
+  <rect class="box2" x="755" y="530" width="290" height="160"/>
+  <text class="text" x="778" y="564">Answer assembly</text>
+  <text class="small" x="778" y="590">deterministic answer plan</text>
+  <text class="small" x="778" y="612">optional natural LLM wording</text>
+  <text class="small" x="778" y="634">low stock notices</text>
+  <text class="small" x="778" y="656">soft confirm + trace + feedback</text>
+
+  <rect class="lane" x="1120" y="120" width="420" height="890"/>
+  <text class="laneTitle" x="1142" y="156">4. Retail Reasoning + Data</text>
+  <rect class="box4" x="1155" y="190" width="350" height="150"/>
+  <text class="text" x="1180" y="224">FashionRetailAssistant</text>
+  <text class="small" x="1180" y="250">Banglish normalization</text>
+  <text class="small" x="1180" y="272">intent + slot extraction</text>
+  <text class="small" x="1180" y="294">hard filters: category, gender,</text>
+  <text class="small" x="1180" y="316">size, budget, occasion, stock</text>
+  <rect class="box4" x="1155" y="375" width="350" height="185"/>
+  <text class="text" x="1180" y="409">Specialized answer engines</text>
+  <text class="small" x="1180" y="435">availability and price</text>
+  <text class="small" x="1180" y="457">same design / color variants</text>
+  <text class="small" x="1180" y="479">size availability</text>
+  <text class="small" x="1180" y="501">accessory compatibility</text>
+  <text class="small" x="1180" y="523">compare and styling advice</text>
+  <text class="small" x="1180" y="545">safe abstain if no match</text>
+  <rect class="box5" x="1155" y="595" width="350" height="185"/>
+  <text class="text" x="1180" y="629">Data stores</text>
+  <text class="small" x="1180" y="655">catalog.jsonl: 47 boutique items</text>
+  <text class="small" x="1180" y="677">policies.json: delivery/payment/refund</text>
+  <text class="small" x="1180" y="699">orders_store.jsonl: confirmed orders</text>
+  <text class="small" x="1180" y="721">local vectors or Elasticsearch</text>
+  <text class="small" x="1180" y="743">POS CSV/webhook sync</text>
+
+  <rect class="box5" x="450" y="795" width="680" height="110"/>
+  <text class="text" x="478" y="831">Final customer response</text>
+  <text class="small" x="478" y="857">Grounded answer + product IDs + confidence + follow-up question + trace_id</text>
+  <text class="small" x="478" y="879">UI renders answer, metadata, feedback buttons, and catalog side panel.</text>
+
+  <path class="arrow" d="M310 240 C350 240 370 240 410 240"/>
+  <path class="arrow" d="M650 390 C700 390 710 250 755 250"/>
+  <path class="arrow" d="M1045 250 C1090 250 1110 265 1155 265"/>
+  <path class="arrow" d="M1045 610 C1090 610 1110 690 1155 690"/>
+  <path class="arrow" d="M1330 560 C1330 820 1130 850 1130 850"/>
+  <path class="arrow" d="M755 610 C650 610 650 760 790 795"/>
+  <path class="arrow" d="M450 850 C260 850 190 700 190 590"/>
+
+  <path class="dash" d="M310 520 C360 520 370 545 410 545"/>
+  <text class="tiny" x="326" y="515">catalog, image, order side calls</text>
+  <path class="dash" d="M650 560 C710 560 710 430 755 430"/>
+  <text class="tiny" x="656" y="552">session state</text>
+  <path class="dash" d="M1330 780 C1330 935 900 945 790 905"/>
+  <text class="tiny" x="1130" y="928">sync/rebuild updates index</text>
+</svg>

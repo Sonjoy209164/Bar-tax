@@ -118,6 +118,31 @@
       .feedback-btn:hover { border-color: var(--accent); color: var(--accent); }
       .feedback-btn.voted { opacity: 0.5; pointer-events: none; }
       .feedback-label { font-size: 0.72rem; color: var(--muted); }
+      .feedback-comment {
+        width: min(430px, 100%); margin-top: 6px;
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      .feedback-comment[hidden] { display: none; }
+      .feedback-comment textarea {
+        width: 100%; resize: vertical; min-height: 46px;
+        border: 1px solid var(--line); border-radius: 6px;
+        padding: 7px 9px; font: inherit; font-size: 0.82rem;
+        background: #fff; color: var(--text);
+      }
+      .feedback-comment textarea:focus {
+        outline: none; border-color: var(--accent);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+      }
+      .feedback-comment-actions { display: flex; gap: 6px; }
+      .feedback-submit,
+      .feedback-skip {
+        border: 1px solid var(--line); border-radius: 5px;
+        padding: 4px 10px; cursor: pointer; font-size: 0.78rem;
+        background: #fff; color: var(--text);
+      }
+      .feedback-submit { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .feedback-submit:disabled,
+      .feedback-skip:disabled { opacity: 0.55; cursor: default; }
 
       /* Mic button */
       #micBtn {
@@ -373,13 +398,28 @@
 
           <!-- Quick chips -->
           <div class="chips" id="chips">
+            <span class="chip-label">Try</span>
+            <button type="button">do you have White Pearl Earrings?</button>
+            <button type="button">white pearl earrings er blue color ache?</button>
             <button type="button">ei same design ta blue color e ache?</button>
+            <button type="button">Lotus Buti Jamdani red ar royal blue er moddhe konta better?</button>
             <button type="button">jamdani vs katan — konta nibo?</button>
-            <button type="button">oily skin er jonno sunscreen ache?</button>
-            <button type="button">নেভি কাতান শাড়ির সাথে কোন ব্যাগ মানাবে?</button>
-            <button type="button">Dhaka delivery charge koto?</button>
-            <button type="button">refund policy ki?</button>
+            <button type="button">biye te porar moto premium saree ache?</button>
             <button type="button">eid er jonno 5000 er moddhe elegant saree</button>
+            <button type="button">office er jonno cotton saree dekhan</button>
+            <button type="button">panjabi size XL ache?</button>
+            <button type="button">men's blue shirt size M available?</button>
+            <button type="button">oily skin er jonno sunscreen ache?</button>
+            <button type="button">warm beige foundation stock e ache?</button>
+            <button type="button">gift er jonno 1500 er moddhe jewelry suggest korun</button>
+            <button type="button">black tote bag office er jonno bhalo hobe?</button>
+            <button type="button">নেভি কাতান শাড়ির সাথে কোন ব্যাগ মানাবে?</button>
+            <button type="button">এই শাড়ির সাথে কোন গয়না মানাবে?</button>
+            <button type="button">Dhaka delivery charge koto?</button>
+            <button type="button">COD payment available?</button>
+            <button type="button">refund policy ki?</button>
+            <button type="button">eta order korte chai</button>
+            <button type="button">amar order track korte chai</button>
           </div>
 
           <!-- Image upload -->

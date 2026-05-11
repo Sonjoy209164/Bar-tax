@@ -12,6 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.schemas import InventoryAskRequest
 from app.inventory.conversion_tracker import summarize_conversions
 from app.inventory.escalation import (
     list_pending_escalations,
@@ -19,10 +20,12 @@ from app.inventory.escalation import (
 )
 from app.inventory.feedback_to_eval import (
     approve_case,
+    evaluate_case_against_response,
     harvest_bad_feedback_to_pending,
     list_approved_cases,
     list_pending_cases,
 )
+from app.services.inventory_service import get_inventory_service
 
 router = APIRouter(prefix="/owner", tags=["owner"])
 
@@ -68,6 +71,47 @@ async def pending_cases(limit: int = 50) -> list[dict]:
 @router.get("/cases/approved")
 async def approved_cases() -> list[dict]:
     return list_approved_cases()
+
+
+@router.post("/cases/evaluate")
+async def evaluate_approved_cases(limit: int = 100) -> dict:
+    """Run approved feedback cases against the current inventory bot."""
+    cases = list_approved_cases()[-max(1, min(limit, 500)):]
+    service = get_inventory_service()
+    results: list[dict] = []
+    for case in cases:
+        try:
+            response = service.ask(
+                InventoryAskRequest(
+                    question=case.get("question", ""),
+                    assistant_mode="support",
+                    reply_style="short",
+                    answer_engine="deterministic",
+                    top_k=5,
+                )
+            )
+            response_payload = response.model_dump(mode="json")
+            results.append(evaluate_case_against_response(case, response_payload))
+        except Exception as exc:
+            results.append(
+                {
+                    "case_id": case.get("case_id"),
+                    "feedback_id": case.get("feedback_id"),
+                    "question": case.get("question", ""),
+                    "passed": False,
+                    "issues": [f"Case execution failed: {exc}"],
+                    "expected": {},
+                    "actual": {},
+                }
+            )
+    passed = sum(1 for result in results if result.get("passed"))
+    return {
+        "total": len(results),
+        "passed": passed,
+        "failed": len(results) - passed,
+        "pass_rate": round(passed / len(results), 3) if results else None,
+        "results": results,
+    }
 
 
 class CaseApproveRequest(BaseModel):

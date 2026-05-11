@@ -187,6 +187,15 @@ _GENERIC_RELATION_TAGS = {
     "wireless",
 }
 _INVENTORY_REQUEST_HINTS = [
+    "do you have",
+    "have any",
+    "got any",
+    "is there",
+    "looking for",
+    "i need",
+    "need a",
+    "need an",
+    "need some",
     "product",
     "products",
     "item",
@@ -3196,7 +3205,7 @@ class InventoryService:
         token_count = len(normalized.split())
         inventory_request = self._looks_like_inventory_request(normalized)
 
-        if self._has_any_phrase(normalized, _HOW_ARE_YOU_PHRASES):
+        if self._has_standalone_phrase(normalized, _HOW_ARE_YOU_PHRASES):
             if assistant_mode == "sales":
                 return (
                     InventoryReply(
@@ -3225,7 +3234,7 @@ class InventoryService:
                 1.0,
             )
 
-        if token_count <= 6 and self._has_any_phrase(normalized, _GREETING_PHRASES) and not inventory_request:
+        if token_count <= 6 and self._has_standalone_phrase(normalized, _GREETING_PHRASES) and not inventory_request:
             if assistant_mode == "sales":
                 return (
                     InventoryReply(
@@ -3252,7 +3261,7 @@ class InventoryService:
                 1.0,
             )
 
-        if token_count <= 8 and self._has_any_phrase(normalized, _THANKS_PHRASES) and not inventory_request:
+        if token_count <= 8 and self._has_standalone_phrase(normalized, _THANKS_PHRASES) and not inventory_request:
             if assistant_mode == "sales":
                 return (
                     InventoryReply(
@@ -3267,7 +3276,7 @@ class InventoryService:
                 1.0,
             )
 
-        if token_count <= 8 and self._has_any_phrase(normalized, _CLOSING_PHRASES) and not inventory_request:
+        if token_count <= 8 and self._has_standalone_phrase(normalized, _CLOSING_PHRASES) and not inventory_request:
             if assistant_mode == "sales":
                 return (
                     InventoryReply(answer="Talk soon. When you are back, I can help you sell, upsell, or compare products."),
@@ -3342,12 +3351,12 @@ class InventoryService:
         is_small_talk = (
             not self._looks_like_inventory_request(normalized)
             and (
-                self._has_any_phrase(normalized, _GREETING_PHRASES)
-                or self._has_any_phrase(normalized, _HOW_ARE_YOU_PHRASES)
-                or self._has_any_phrase(normalized, _THANKS_PHRASES)
-                or self._has_any_phrase(normalized, _HELP_PHRASES)
-                or self._has_any_phrase(normalized, _IDENTITY_PHRASES)
-                or self._has_any_phrase(normalized, _CLOSING_PHRASES)
+                self._has_standalone_phrase(normalized, _GREETING_PHRASES)
+                or self._has_standalone_phrase(normalized, _HOW_ARE_YOU_PHRASES)
+                or self._has_standalone_phrase(normalized, _THANKS_PHRASES)
+                or self._has_standalone_phrase(normalized, _HELP_PHRASES)
+                or self._has_standalone_phrase(normalized, _IDENTITY_PHRASES)
+                or self._has_standalone_phrase(normalized, _CLOSING_PHRASES)
             )
         )
         has_explicit_product_reference = bool(filters.product_ids) or self._is_detail_request(question) or bool(
@@ -7778,6 +7787,18 @@ class InventoryService:
     @staticmethod
     def _has_any_phrase(text: str, phrases: list[str]) -> bool:
         return any(phrase in text for phrase in phrases)
+
+    @staticmethod
+    def _has_standalone_phrase(text: str, phrases: list[str]) -> bool:
+        tokens = set(text.split())
+        for phrase in phrases:
+            if " " in phrase:
+                if phrase in text:
+                    return True
+                continue
+            if phrase in tokens:
+                return True
+        return False
 
     @staticmethod
     def _is_out_of_stock(hit: InventorySearchHit) -> bool:

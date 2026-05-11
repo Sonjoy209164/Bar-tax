@@ -457,7 +457,43 @@ async function trackOrder() {
 
 // ── Feedback ───────────────────────────────────────────────────────────────────
 
-function addFeedbackRow(msgNode, question, answer, intent) {
+function feedbackProductIdsFromResponse(response = {}) {
+  const ids = [
+    ...(response?.recommended_product_ids || []),
+    ...(response?.cross_sell_product_ids || []),
+    ...((response?.hits || []).map(hit => hit?.product_id).filter(Boolean)),
+  ];
+  return Array.from(new Set(ids.map(id => String(id).trim()).filter(Boolean))).slice(0, 8);
+}
+
+function compactFeedbackAnswerPlan(plan) {
+  if (!plan) return null;
+  return {
+    intent: plan.intent || null,
+    detected_intent: plan.detected_intent || null,
+    intent_confidence: plan.intent_confidence ?? null,
+    primary_product_id: plan.primary_product_id || null,
+    alternative_product_ids: plan.alternative_product_ids || [],
+    cross_sell_product_ids: plan.cross_sell_product_ids || [],
+    excluded_product_ids: plan.excluded_product_ids || [],
+    abstain: Boolean(plan.abstain),
+    abstention_reason: plan.abstention_reason || null,
+    next_best_question: plan.next_best_question || null,
+  };
+}
+
+function feedbackContextFromResponse(response = {}) {
+  return {
+    traceId: response.trace_id || null,
+    confidenceScore: typeof response.confidence_score === "number" ? response.confidence_score : null,
+    abstained: typeof response.abstained === "boolean" ? response.abstained : null,
+    abstentionReason: response.abstention_reason || null,
+    answerPlan: compactFeedbackAnswerPlan(response.answer_plan),
+    productIds: feedbackProductIdsFromResponse(response),
+  };
+}
+
+function addFeedbackRow(msgNode, question, answer, intent, feedbackContext = {}) {
   const row = document.createElement("div");
   row.className = "feedback-row";
   const label = document.createElement("span");
@@ -471,26 +507,86 @@ function addFeedbackRow(msgNode, question, answer, intent) {
   down.className = "feedback-btn";
   down.textContent = "👎";
   down.title = "This didn't help";
+  const commentBox = document.createElement("div");
+  commentBox.className = "feedback-comment";
+  commentBox.hidden = true;
+  const textarea = document.createElement("textarea");
+  textarea.rows = 2;
+  textarea.maxLength = 500;
+  textarea.placeholder = "What was wrong? Example: wrong product, missed size/color, not human enough";
+  const actions = document.createElement("div");
+  actions.className = "feedback-comment-actions";
+  const sendComment = document.createElement("button");
+  sendComment.type = "button";
+  sendComment.className = "feedback-submit";
+  sendComment.textContent = "Send";
+  const skipComment = document.createElement("button");
+  skipComment.type = "button";
+  skipComment.className = "feedback-skip";
+  skipComment.textContent = "Skip";
+  actions.appendChild(sendComment);
+  actions.appendChild(skipComment);
+  commentBox.appendChild(textarea);
+  commentBox.appendChild(actions);
 
-  const vote = async (rating) => {
+  let submitted = false;
+  const vote = async (rating, comment = null) => {
+    if (submitted) return;
+    submitted = true;
     up.classList.add("voted");
     down.classList.add("voted");
-    label.textContent = rating === "up" ? "Thanks!" : "Sorry!";
-    await apiPost("/feedback", {
-      session_id: state.sessionId,
-      question,
-      answer: answer.slice(0, 400),
-      rating,
-      intent: intent || null,
-      product_ids: state.focusedProductIds.slice(0, 4),
-    }).catch(() => {});
+    up.disabled = true;
+    down.disabled = true;
+    sendComment.disabled = true;
+    skipComment.disabled = true;
+    textarea.disabled = true;
+    label.textContent = rating === "up" ? "Saving..." : "Saving for review...";
+    const productIds = feedbackContext.productIds?.length ? feedbackContext.productIds : state.focusedProductIds;
+    try {
+      const result = await apiPost("/feedback", {
+        session_id: state.sessionId,
+        question,
+        answer: answer.slice(0, 500),
+        rating,
+        comment: comment || null,
+        intent: intent || feedbackContext.answerPlan?.intent || null,
+        product_ids: productIds.slice(0, 8),
+        trace_id: feedbackContext.traceId || null,
+        confidence_score: feedbackContext.confidenceScore,
+        abstained: feedbackContext.abstained,
+        abstention_reason: feedbackContext.abstentionReason || null,
+        answer_plan: feedbackContext.answerPlan || null,
+        source: "chat_ui",
+      });
+      label.textContent = rating === "up"
+        ? "Thanks!"
+        : (result.pending_case_created ? "Saved for review" : "Feedback saved");
+      commentBox.hidden = true;
+    } catch (error) {
+      submitted = false;
+      up.classList.remove("voted");
+      down.classList.remove("voted");
+      up.disabled = false;
+      down.disabled = false;
+      sendComment.disabled = false;
+      skipComment.disabled = false;
+      textarea.disabled = false;
+      label.textContent = "Feedback failed";
+    }
   };
   up.addEventListener("click", () => vote("up"));
-  down.addEventListener("click", () => vote("down"));
+  down.addEventListener("click", () => {
+    if (submitted) return;
+    commentBox.hidden = false;
+    textarea.focus();
+  });
+  sendComment.addEventListener("click", () => vote("down", textarea.value.trim()));
+  skipComment.addEventListener("click", () => vote("down"));
   row.appendChild(label);
   row.appendChild(up);
   row.appendChild(down);
   msgNode.appendChild(row);
+  msgNode.appendChild(commentBox);
 }
 
 // ── Image Upload ───────────────────────────────────────────────────────────────
@@ -544,7 +640,7 @@ async function sendImageSearch(queryText) {
     });
     thinking.querySelector(".body").textContent = response.answer || "No similar items found.";
     renderImageMeta(thinking, response);
-    addFeedbackRow(thinking, displayText, response.answer || "", "image_search");
+    addFeedbackRow(thinking, displayText, response.answer || "", "image_search", feedbackContextFromResponse(response));
   } catch (error) {
     thinking.querySelector(".body").textContent = `Image search failed: ${error.message}`;
   } finally {
@@ -584,7 +680,7 @@ async function sendMessage(rawText) {
     renderMeta(thinking, response);
 
     const intent = response?.answer_plan?.intent;
-    addFeedbackRow(thinking, text, answer, intent);
+    addFeedbackRow(thinking, text, answer, intent, feedbackContextFromResponse(response));
 
     state.conversation.push({ role: "user", content: text });
     state.conversation.push({ role: "assistant", content: answer });

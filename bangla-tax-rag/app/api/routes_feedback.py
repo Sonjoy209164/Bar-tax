@@ -4,9 +4,12 @@ import json
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Literal
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+
+from app.inventory.feedback_to_eval import create_pending_case_from_feedback
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
@@ -17,16 +20,52 @@ class FeedbackRequest(BaseModel):
     session_id: str
     question: str
     answer: str
-    rating: str          # "up" | "down"
+    rating: Literal["up", "down"]
     comment: str | None = None
     intent: str | None = None
-    product_ids: list[str] = []
+    product_ids: list[str] = Field(default_factory=list)
+    trace_id: str | None = None
+    confidence_score: float | None = None
+    abstained: bool | None = None
+    abstention_reason: str | None = None
+    answer_plan: dict[str, Any] | None = None
+    source: str | None = "chat_ui"
+
+    @field_validator("session_id", "question", "answer")
+    @classmethod
+    def require_non_empty_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("field must not be empty")
+        return stripped
+
+    @field_validator("comment", "intent", "trace_id", "abstention_reason", "source")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("product_ids")
+    @classmethod
+    def normalize_product_ids(cls, value: list[str]) -> list[str]:
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for product_id in value:
+            stripped = str(product_id).strip()
+            if not stripped or stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return normalized
 
 
 class FeedbackResponse(BaseModel):
     status: str
     feedback_id: str
     message: str
+    pending_case_created: bool = False
 
 
 @router.post("", response_model=FeedbackResponse)
@@ -43,14 +82,22 @@ async def submit_feedback(request: FeedbackRequest) -> FeedbackResponse:
         "comment": request.comment,
         "intent": request.intent,
         "product_ids": request.product_ids,
+        "trace_id": request.trace_id,
+        "confidence_score": request.confidence_score,
+        "abstained": request.abstained,
+        "abstention_reason": request.abstention_reason,
+        "answer_plan": _compact_answer_plan(request.answer_plan),
+        "source": request.source or "chat_ui",
         "created_at": now,
     }
     with _FEEDBACK_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    pending_case_created = create_pending_case_from_feedback(entry)
     return FeedbackResponse(
         status="saved",
         feedback_id=fid,
         message="Thank you for your feedback!" if request.rating == "up" else "Sorry about that — we'll improve.",
+        pending_case_created=pending_case_created,
     )
 
 
@@ -107,3 +154,25 @@ async def recent_feedback(limit: int = 20) -> list:
             except json.JSONDecodeError:
                 pass
     return entries[-limit:]
+
+
+def _compact_answer_plan(answer_plan: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not answer_plan:
+        return None
+    allowed_keys = {
+        "intent",
+        "detected_intent",
+        "intent_confidence",
+        "primary_product_id",
+        "alternative_product_ids",
+        "cross_sell_product_ids",
+        "excluded_product_ids",
+        "abstain",
+        "abstention_reason",
+        "next_best_question",
+    }
+    return {
+        key: value
+        for key, value in answer_plan.items()
+        if key in allowed_keys
+    }

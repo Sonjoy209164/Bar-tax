@@ -41,6 +41,11 @@ class PendingEvalCase:
     bot_answer: str
     bot_intent: str | None
     user_comment: str | None
+    trace_id: str | None = None
+    confidence_score: float | None = None
+    product_ids: list[str] = field(default_factory=list)
+    abstained: bool | None = None
+    abstention_reason: str | None = None
     expected_intent: str | None = None      # filled in by reviewer
     expected_product_ids: list[str] = field(default_factory=list)
     expected_substring: str | None = None    # text the answer must contain
@@ -57,6 +62,11 @@ class PendingEvalCase:
             "bot_answer": self.bot_answer,
             "bot_intent": self.bot_intent,
             "user_comment": self.user_comment,
+            "trace_id": self.trace_id,
+            "confidence_score": self.confidence_score,
+            "product_ids": self.product_ids,
+            "abstained": self.abstained,
+            "abstention_reason": self.abstention_reason,
             "expected_intent": self.expected_intent,
             "expected_product_ids": self.expected_product_ids,
             "expected_substring": self.expected_substring,
@@ -87,16 +97,7 @@ def harvest_bad_feedback_to_pending() -> int:
         fb_id = entry.get("feedback_id") or ""
         if not fb_id or fb_id in existing_ids:
             continue
-        case_id = f"CASE-{fb_id}"
-        case = PendingEvalCase(
-            case_id=case_id,
-            feedback_id=fb_id,
-            question=entry.get("question", ""),
-            bot_answer=entry.get("answer", ""),
-            bot_intent=entry.get("intent"),
-            user_comment=entry.get("comment"),
-            created_at=now,
-        )
+        case = _case_from_feedback_entry(entry, created_at=now)
         new_cases.append(case)
 
     if not new_cases:
@@ -108,6 +109,28 @@ def harvest_bad_feedback_to_pending() -> int:
             for case in new_cases:
                 f.write(json.dumps(case.to_dict(), ensure_ascii=False) + "\n")
     return len(new_cases)
+
+
+def create_pending_case_from_feedback(entry: dict[str, Any]) -> bool:
+    """
+    Immediately convert one thumbs-down feedback entry into a pending eval case.
+
+    This is used by the live feedback route so the owner does not need to
+    remember to run a separate harvest step before seeing failures.
+    """
+    if entry.get("rating") != "down":
+        return False
+    feedback_id = str(entry.get("feedback_id") or "").strip()
+    if not feedback_id or feedback_id in _existing_pending_feedback_ids():
+        return False
+
+    now = datetime.now(timezone.utc).isoformat()
+    case = _case_from_feedback_entry(entry, created_at=now)
+    _PENDING_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _FILE_LOCK:
+        with _PENDING_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(case.to_dict(), ensure_ascii=False) + "\n")
+    return True
 
 
 def list_pending_cases(limit: int = 50) -> list[dict[str, Any]]:
@@ -210,6 +233,69 @@ def list_approved_cases() -> list[dict[str, Any]]:
     return entries
 
 
+def evaluate_case_against_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
+    """
+    Evaluate a bot response against one approved feedback-derived case.
+
+    This deliberately uses simple deterministic checks. Feedback should not
+    tune the bot by vibes; a reviewer must specify concrete expectations.
+    """
+    answer = str(response.get("answer") or "")
+    normalized_answer = answer.casefold()
+    expected_intent = _clean_optional_string(case.get("expected_intent"))
+    expected_product_ids = [str(value) for value in case.get("expected_product_ids") or [] if str(value).strip()]
+    expected_substring = _clean_optional_string(case.get("expected_substring"))
+    must_not_contain = [str(value) for value in case.get("must_not_contain") or [] if str(value).strip()]
+
+    actual_intent = _response_intent(response)
+    actual_product_ids = _response_product_ids(response)
+    issues: list[str] = []
+    checks_run = 0
+
+    if expected_intent:
+        checks_run += 1
+        if actual_intent != expected_intent:
+            issues.append(f"Expected intent {expected_intent!r}, got {actual_intent!r}.")
+
+    if expected_product_ids:
+        checks_run += 1
+        missing_ids = [product_id for product_id in expected_product_ids if product_id not in actual_product_ids]
+        if missing_ids:
+            issues.append(f"Missing expected product ids: {', '.join(missing_ids)}.")
+
+    if expected_substring:
+        checks_run += 1
+        if expected_substring.casefold() not in normalized_answer:
+            issues.append(f"Expected answer to contain {expected_substring!r}.")
+
+    for forbidden in must_not_contain:
+        checks_run += 1
+        if forbidden.casefold() in normalized_answer:
+            issues.append(f"Answer must not contain {forbidden!r}.")
+
+    if checks_run == 0:
+        issues.append("Approved case has no concrete expectations to check.")
+
+    return {
+        "case_id": case.get("case_id"),
+        "feedback_id": case.get("feedback_id"),
+        "question": case.get("question", ""),
+        "passed": not issues,
+        "issues": issues,
+        "expected": {
+            "intent": expected_intent,
+            "product_ids": expected_product_ids,
+            "substring": expected_substring,
+            "must_not_contain": must_not_contain,
+        },
+        "actual": {
+            "intent": actual_intent,
+            "product_ids": actual_product_ids,
+            "answer_excerpt": answer[:300],
+        },
+    }
+
+
 def _read_thumbs_down_entries() -> list[dict[str, Any]]:
     if not _FEEDBACK_PATH.exists():
         return []
@@ -225,6 +311,24 @@ def _read_thumbs_down_entries() -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             continue
     return out
+
+
+def _case_from_feedback_entry(entry: dict[str, Any], *, created_at: str) -> PendingEvalCase:
+    feedback_id = str(entry.get("feedback_id") or "")
+    return PendingEvalCase(
+        case_id=f"CASE-{feedback_id}",
+        feedback_id=feedback_id,
+        question=entry.get("question", ""),
+        bot_answer=entry.get("answer", ""),
+        bot_intent=entry.get("intent"),
+        user_comment=entry.get("comment"),
+        trace_id=entry.get("trace_id"),
+        confidence_score=_coerce_float(entry.get("confidence_score")),
+        product_ids=_normalize_string_list(entry.get("product_ids", [])),
+        abstained=entry.get("abstained") if isinstance(entry.get("abstained"), bool) else None,
+        abstention_reason=entry.get("abstention_reason"),
+        created_at=created_at,
+    )
 
 
 def _existing_pending_feedback_ids() -> set[str]:
@@ -244,3 +348,78 @@ def _existing_pending_feedback_ids() -> set[str]:
             except json.JSONDecodeError:
                 continue
     return ids
+
+
+def _clean_optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    stripped = str(value).strip()
+    return stripped or None
+
+
+def _normalize_string_list(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _response_intent(response: dict[str, Any]) -> str | None:
+    answer_plan = response.get("answer_plan")
+    if isinstance(answer_plan, dict):
+        intent = answer_plan.get("intent") or answer_plan.get("detected_intent")
+        if intent:
+            return str(intent)
+    signals = response.get("signals")
+    if isinstance(signals, dict):
+        detected = signals.get("detected_intent") or signals.get("intent")
+        if detected:
+            return str(detected)
+    intent = response.get("intent")
+    return str(intent) if intent else None
+
+
+def _response_product_ids(response: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+
+    def add(values: object) -> None:
+        if not isinstance(values, list):
+            return
+        for value in values:
+            product_id = str(value).strip()
+            if product_id and product_id not in ids:
+                ids.append(product_id)
+
+    add(response.get("recommended_product_ids"))
+    add(response.get("cross_sell_product_ids"))
+    hits = response.get("hits")
+    if isinstance(hits, list):
+        for hit in hits:
+            if isinstance(hit, dict):
+                product_id = str(hit.get("product_id") or "").strip()
+                if product_id and product_id not in ids:
+                    ids.append(product_id)
+    answer_plan = response.get("answer_plan")
+    if isinstance(answer_plan, dict):
+        primary = answer_plan.get("primary_product_id")
+        if primary and str(primary) not in ids:
+            ids.append(str(primary))
+        add(answer_plan.get("alternative_product_ids"))
+        add(answer_plan.get("cross_sell_product_ids"))
+    return ids
+
+
+def _coerce_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

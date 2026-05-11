@@ -142,9 +142,20 @@ h1 {
 
 .chips {
   display: flex;
+  align-items: center;
   gap: 8px;
   overflow-x: auto;
   padding: 0 16px 12px;
+  scrollbar-width: thin;
+}
+
+.chip-label {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
 }
 
 .chips button {

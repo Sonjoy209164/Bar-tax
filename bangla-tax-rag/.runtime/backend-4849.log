@@ -1,28 +1,45 @@
-INFO:     Started server process [8588]
+INFO:     Started server process [130604]
 INFO:     Waiting for application startup.
-2026-05-10 19:03:59,316 | INFO | app.main | FastAPI app started
+2026-05-11 17:25:47,771 | INFO | app.main | FastAPI app started
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:4849 (Press CTRL+C to quit)
-INFO:     127.0.0.1:36422 - "GET /docs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36422 - "GET /openapi.json HTTP/1.1" 200 OK
-2026-05-10 19:04:14,763 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
-2026-05-10 19:04:48,937 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=29464419-13a8-4d10-8ed3-0b6504afdbff execution_path=inventory_fashion_retail_structured intent=fashion_compare answer_engine=deterministic total_hits=5 latency_ms=34203.058 fallback_reason=None
-INFO:     127.0.0.1:36434 - "POST /inventory/ask HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42258 - "GET /docs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45660 - "GET /docs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40600 - "GET /frontend/chat.html HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36434 - "GET /frontend/chat.html HTTP/1.1" 304 Not Modified
-INFO:     127.0.0.1:36434 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:36434 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36434 - "GET /inventory/items HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47216 - "GET /openapi.json HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47230 - "HEAD /docs HTTP/1.1" 405 Method Not Allowed
-INFO:     127.0.0.1:54458 - "GET /docs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54474 - "GET /frontend/chat.html HTTP/1.1" 200 OK
-2026-05-10 19:05:59,126 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=c16b5cbf-e596-4347-b0ff-4882ddd78403 execution_path=inventory_ask intent=product_search answer_engine=deterministic total_hits=0 latency_ms=22.512 fallback_reason=None
-INFO:     127.0.0.1:38456 - "POST /inventory/ask HTTP/1.1" 200 OK
-2026-05-10 19:06:05,041 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=673f2aac-9198-4728-bb32-4db3a7f427bc execution_path=inventory_ask intent=small_talk answer_engine=deterministic total_hits=0 latency_ms=10.018 fallback_reason=None
-INFO:     127.0.0.1:58364 - "POST /inventory/ask HTTP/1.1" 200 OK
-2026-05-10 19:06:08,427 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
-2026-05-10 19:06:42,630 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=6df0244d-1d01-4889-974e-6ebbe5f60cf2 execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=1 latency_ms=34229.652 fallback_reason=None
-INFO:     127.0.0.1:58364 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48784 - "GET /health HTTP/1.1" 200 OK
+2026-05-11 17:28:43,185 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-11 17:29:17,412 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=b1cb8bf6-5b75-46b4-bcbc-dfad66324d58 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=34255.779 fallback_reason=None
+INFO:     127.0.0.1:36688 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-11 17:29:29,503 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-11 17:30:03,697 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=b07f5691-ccef-4efb-83d3-387908804233 execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=4 latency_ms=34246.048 fallback_reason=None
+INFO:     127.0.0.1:38944 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47168 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43366 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44550 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44550 - "GET /frontend/chat.js?v=20260510-catalog-key HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:44550 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:44550 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44550 - "GET /inventory/items HTTP/1.1" 200 OK
+2026-05-11 17:32:54,455 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-11 17:33:02,623 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=fd6314e9-2d20-4373-821a-e53bc558c072 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=8212.351 fallback_reason=That does not map cleanly to a supported inventory question I can answer from the current catalog.
+INFO:     127.0.0.1:44564 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-11 17:33:30,347 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-11 17:33:42,386 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=fb9c2de0-d48b-446e-abe7-1a1a911feac0 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=34229.655 fallback_reason=None
+INFO:     127.0.0.1:57122 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-11 17:34:03,717 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-11 17:34:23,841 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=cb9883fc-dc0d-4d8f-95d5-b7afa8469a43 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=34259.358 fallback_reason=None
+INFO:     127.0.0.1:55042 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-11 17:34:34,287 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-11 17:35:08,560 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=3d28a5c7-4cf7-4a56-86da-ae13bf30ea1b execution_path=inventory_fashion_retail_structured intent=fashion_styling_advice answer_engine=deterministic total_hits=4 latency_ms=34327.825 fallback_reason=None
+INFO:     127.0.0.1:48502 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-11 17:35:38,919 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-11 17:36:13,097 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=1a8e545b-dd01-49f1-8b82-249ef7df9066 execution_path=inventory_fashion_retail_structured intent=fashion_compare answer_engine=deterministic total_hits=5 latency_ms=34234.015 fallback_reason=None
+INFO:     127.0.0.1:53006 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-11 17:37:47,495 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-11 17:38:21,700 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=f3062516-6485-447b-9a6e-21e5f5bffebb execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=34246.43 fallback_reason=None
+INFO:     127.0.0.1:37224 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50430 - "GET /frontend/chat.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:50430 - "GET /frontend/chat.js?v=20260510-catalog-key HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:50430 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50430 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50430 - "GET /inventory/items HTTP/1.1" 200 OK
+2026-05-11 17:38:48,053 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-11 17:38:56,215 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=c1bcba08-27ff-44e8-82e9-03f933e05e25 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=8217.451 fallback_reason=That does not map cleanly to a supported inventory question I can answer from the current catalog.
+INFO:     127.0.0.1:50442 - "POST /inventory/ask HTTP/1.1" 200 OK

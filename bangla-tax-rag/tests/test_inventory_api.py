@@ -1878,6 +1878,45 @@ async def test_inventory_support_mode_handles_small_talk_without_searching(monke
     assert "ready to help with product questions" in payload["answer"].lower()
 
 
+def test_inventory_support_mode_does_not_treat_white_product_name_as_greeting(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="jewelry-pearl-earring-white",
+                sku="JW-ERG-PRL-WHT",
+                name="White Pearl Earrings",
+                category="Jewelry",
+                brand="Sonjoy Boutique",
+                short_description="White pearl earrings for saree, three piece, and office looks.",
+                price=750.0,
+                currency="BDT",
+                stock=8,
+                status="Active",
+                tags=["jewelry", "earring", "pearl", "white"],
+                attributes={"category_key": "jewelry", "jewelry_type": "earrings", "color": "white"},
+                include_in_rag=True,
+            )
+        ]
+    )
+
+    response = service.ask(
+        InventoryAskRequest(
+            question="do you have White Pearl Earrings?",
+            assistant_mode="support",
+            reply_style="short",
+            answer_engine="deterministic",
+            top_k=5,
+        )
+    )
+
+    assert response.total_hits >= 1
+    assert response.recommended_product_ids == ["jewelry-pearl-earring-white"]
+    assert "Hello. I can help with inventory" not in response.answer
+    assert "White Pearl Earrings" in response.answer
+    assert response.answer_plan.detected_intent in {"product_search", "fashion_search"}
+
+
 @pytest.mark.anyio
 async def test_inventory_agentic_mode_handles_small_talk_without_searching(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     from app.api import routes_inventory

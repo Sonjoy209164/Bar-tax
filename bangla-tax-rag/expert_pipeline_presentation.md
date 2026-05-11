@@ -4,6 +4,16 @@ This is the presentation script and architecture map for explaining the current 
 
 The system is a catalog-grounded inventory assistant. It answers customer questions about fashion retail products using structured inventory data, retrieval, ranking, decision planning, and controlled answer generation.
 
+## Full Pipeline Diagram
+
+Use this PNG when you need the complete board-level architecture in one view:
+
+![Full Current Inventory RAG Pipeline](docs/assets/full_current_inventory_pipeline.png)
+
+Tree view version for explaining responsibility boundaries:
+
+![Inventory Chatbot Pipeline Tree](docs/assets/inventory_pipeline_tree.png)
+
 ## 1. One-Sentence Summary
 
 The bot takes structured product inventory, turns it into searchable evidence, retrieves the right catalog items for a customer question, applies retail-specific decision logic, and then writes a grounded answer without inventing stock, price, size, color, policy, or product facts.
@@ -1132,4 +1142,3 @@ Human-like tone comes from:
 ## 30. Final Expert-Level Summary
 
 The current system is a hybrid structured-RAG retail assistant. Product records are stored in JSONL and indexed into a vector store after converting structured catalog facts into searchable text. At query time, FastAPI receives the customer message and `InventoryService` routes it through small-talk, policy, fashion-retail structured reasoning, or generic inventory RAG. The retrieval layer combines dense vector search, lexical matching, metadata filters, candidate gates, and ecommerce reranking. The decision layer builds an evidence contract and answer plan so the response writer cannot freely hallucinate. Finally, deterministic templates or Ollama-backed prompts generate the answer, and verification/critic logic checks that the reply stays grounded in catalog and policy evidence.
-

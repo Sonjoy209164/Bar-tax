@@ -69,6 +69,16 @@ For this repo, retrieval quality should be treated as the first research variabl
 
 ## Flow Diagrams
 
+### Inventory RAG Pipeline
+
+The current inventory chatbot pipeline is documented as a presentation-ready PNG:
+
+![Full Current Inventory RAG Pipeline](docs/assets/full_current_inventory_pipeline.png)
+
+Source generator:
+
+- `scripts/generate_full_pipeline_png.py`
+
 ### System Workflow
 
 ```mermaid

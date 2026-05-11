@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ASSURE-RAG Q1 Research Proposal</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 22mm 19mm 20mm 19mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: #17202a;
+      background: #ffffff;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 10.8pt;
+      line-height: 1.5;
+    }
+
+    .cover {
+      min-height: 88vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      border-left: 8px solid #155e63;
+      padding-left: 28px;
+    }
+
+    .eyebrow {
+      color: #155e63;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-size: 10pt;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      margin: 0 0 14px 0;
+      font-size: 30pt;
+      line-height: 1.08;
+      color: #0f2f35;
+    }
+
+    .subtitle {
+      font-size: 15pt;
+      line-height: 1.35;
+      max-width: 650px;
+      color: #334155;
+      margin-bottom: 26px;
+    }
+
+    .meta {
+      border-top: 1px solid #cbd5e1;
+      padding-top: 14px;
+      max-width: 650px;
+      color: #475569;
+      font-size: 10.5pt;
+    }
+
+    h2 {
+      margin: 28px 0 10px 0;
+      padding-bottom: 5px;
+      border-bottom: 1px solid #d8dee9;
+      color: #0f2f35;
+      font-size: 17pt;
+      page-break-after: avoid;
+    }
+
+    h3 {
+      margin: 18px 0 8px 0;
+      color: #155e63;
+      font-size: 12.6pt;
+      page-break-after: avoid;
+    }
+
+    p {
+      margin: 0 0 9px 0;
+    }
+
+    ul, ol {
+      margin: 6px 0 12px 21px;
+      padding: 0;
+    }
+
+    li {
+      margin: 4px 0;
+    }
+
+    strong {
+      color: #0f2f35;
+    }
+
+    .callout {
+      margin: 12px 0 16px 0;
+      border-left: 5px solid #155e63;
+      background: #f4fbfb;
+      padding: 12px 14px;
+      page-break-inside: avoid;
+    }
+
+    .warning {
+      border-left-color: #b45309;
+      background: #fff8ed;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 12px 0 16px 0;
+    }
+
+    .box {
+      border: 1px solid #d8dee9;
+      border-radius: 6px;
+      padding: 11px 12px;
+      page-break-inside: avoid;
+    }
+
+    .box h3 {
+      margin-top: 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 16px 0;
+      font-size: 9.4pt;
+      page-break-inside: avoid;
+    }
+
+    th, td {
+      border: 1px solid #d8dee9;
+      padding: 7px 8px;
+      vertical-align: top;
+    }
+
+    th {
+      background: #eef6f6;
+      color: #0f2f35;
+      text-align: left;
+    }
+
+    code, pre {
+      font-family: "DejaVu Sans Mono", Consolas, monospace;
+    }
+
+    pre {
+      background: #f8fafc;
+      border: 1px solid #d8dee9;
+      border-radius: 6px;
+      padding: 10px 12px;
+      white-space: pre-wrap;
+      font-size: 9.2pt;
+      line-height: 1.35;
+      page-break-inside: avoid;
+    }
+
+    .page-break {
+      page-break-before: always;
+    }
+
+    .references {
+      font-size: 9.7pt;
+    }
+
+    .references li {
+      margin-bottom: 7px;
+    }
+
+    a {
+      color: #155e63;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <div class="eyebrow">Q1 Research Proposal</div>
+    <h1>ASSURE-RAG</h1>
+    <div class="subtitle">
+      Integrity-Gated Retrieval-Augmented Generation for Software Supply Chain Security Triage
+    </div>
+    <div class="meta">
+      <p><strong>Prepared for:</strong> Software supply chain security, SBOM, provenance, and secure remediation research</p>
+      <p><strong>Prepared on:</strong> May 11, 2026</p>
+      <p><strong>Target venues:</strong> Journal of Systems and Software, Computers &amp; Security, ACM TOSEM, IEEE Transactions on Software Engineering</p>
+    </div>
+  </section>
+
+  <section class="page-break">
+    <h2>Executive Summary</h2>
+    <p>
+      Modern software systems depend on third-party packages, transitive dependencies, automated build pipelines,
+      container images, vulnerability feeds, and generated Software Bills of Materials (SBOMs). These artifacts improve
+      transparency, but they do not automatically produce trustworthy remediation decisions. A generated SBOM may be
+      incomplete, stale, inconsistent with a lockfile, missing transitive dependencies, disconnected from the built artifact,
+      or unsupported by build provenance. A vulnerability advisory may apply to a package name but not to the deployed
+      version, reachable code path, or actual artifact. A large language model can then turn weak or conflicting evidence
+      into confident but unsafe advice.
+    </p>
+    <div class="callout">
+      <strong>Core claim:</strong> For software supply chain security, semantic relevance is insufficient.
+      RAG systems must verify evidence integrity before recommending dependency upgrades, vulnerability fixes,
+      package removal, or deployment decisions.
+    </div>
+    <p>
+      ASSURE-RAG proposes an integrity-gated RAG framework for software supply chain security triage. The system retrieves
+      SBOM, manifest, lockfile, vulnerability, package reputation, provenance, and build evidence, but it does not treat
+      retrieved evidence as automatically actionable. Instead, it applies consistency checks and security gates before
+      producing a remediation plan. If evidence conflicts, the system abstains or returns a bounded risk note instead of
+      inventing a fix.
+    </p>
+
+    <h2>Problem Statement</h2>
+    <p>
+      Existing SBOM and vulnerability management tools are valuable but fragmented. They typically answer narrow questions:
+      which dependencies exist, which CVEs are associated with them, or whether a repository has certain security practices.
+      Developers and security analysts still face the higher-order decision problem:
+    </p>
+    <div class="callout warning">
+      <strong>Can we trust the available evidence enough to act, and what remediation is justified by that evidence?</strong>
+    </div>
+    <p>
+      The gap is visible in four common failure modes:
+    </p>
+    <ol>
+      <li><strong>SBOM inconsistency:</strong> the SBOM does not match package manifests, lockfiles, or build output.</li>
+      <li><strong>Stale security evidence:</strong> vulnerability data or package metadata is outdated relative to the deployed artifact.</li>
+      <li><strong>Weak provenance:</strong> source, build, and artifact integrity cannot be established with sufficient confidence.</li>
+      <li><strong>Unsafe LLM remediation:</strong> a model recommends upgrades or suppressions without verifying applicability, evidence conflicts, or operational risk.</li>
+    </ol>
+
+    <h2>Research Gap</h2>
+    <p>
+      Recent Q1 work has advanced the field in several directions: software supply chain research agendas, SBOM adoption
+      studies, malicious package detection, build reproducibility, and LLM supply chain risk. However, these streams leave
+      a practical gap between evidence transparency and trustworthy remediation. ASSURE-RAG targets that gap by combining
+      evidence retrieval, integrity verification, remediation planning, and final-answer verification in one measurable
+      security workflow.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Existing Research Stream</th>
+          <th>What It Solves</th>
+          <th>Remaining Gap Addressed Here</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SBOM adoption and quality</td>
+          <td>Measures whether projects create SBOMs and what fields they contain.</td>
+          <td>Does not decide whether SBOM evidence is sufficient for safe remediation.</td>
+        </tr>
+        <tr>
+          <td>Malicious package detection</td>
+          <td>Detects suspicious packages in ecosystems such as npm and PyPI.</td>
+          <td>Does not integrate package risk with SBOM, provenance, and CVE remediation advice.</td>
+        </tr>
+        <tr>
+          <td>Reproducible build research</td>
+          <td>Studies whether artifacts can be rebuilt and verified.</td>
+          <td>Does not convert build integrity signals into developer-facing triage recommendations.</td>
+        </tr>
+        <tr>
+          <td>General RAG and LLM security</td>
+          <td>Studies retrieved evidence, poisoning, and agent risks.</td>
+          <td>Does not provide a domain-specific framework for software supply chain remediation.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Proposed Novelty</h2>
+    <p>
+      The proposed novelty is an <strong>integrity-gated RAG architecture</strong> for software supply chain security.
+      Unlike vanilla RAG, which asks whether evidence is relevant, ASSURE-RAG asks whether evidence is relevant,
+      current, consistent, provenance-backed, and safe enough to support a remediation recommendation.
+    </p>
+    <div class="grid">
+      <div class="box">
+        <h3>Novelty 1: Evidence Integrity Gates</h3>
+        <p>
+          The system checks consistency among SBOMs, manifests, lockfiles, vulnerability feeds, package metadata,
+          and build/provenance records before allowing evidence into a remediation plan.
+        </p>
+      </div>
+      <div class="box">
+        <h3>Novelty 2: Remediation Planning</h3>
+        <p>
+          Retrieved evidence is separated from actionable advice. The system explicitly classifies recommendations
+          as fix, monitor, investigate, suppress with justification, or abstain.
+        </p>
+      </div>
+      <div class="box">
+        <h3>Novelty 3: Conflict-Aware Abstention</h3>
+        <p>
+          When the SBOM, lockfile, advisory, or provenance evidence conflicts, the system refuses unsupported fixes
+          and explains the missing evidence required for action.
+        </p>
+      </div>
+      <div class="box">
+        <h3>Novelty 4: Security-Specific RAG Benchmark</h3>
+        <p>
+          The proposal introduces SSC-RAGBench, a benchmark for evaluating software supply chain RAG under clean,
+          stale, incomplete, conflicting, and adversarial evidence.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="page-break">
+    <h2>Research Questions</h2>
+    <ol>
+      <li>
+        <strong>RQ1:</strong> Does integrity-gated RAG reduce unsafe remediation recommendations compared with vanilla RAG
+        and scanner-only baselines?
+      </li>
+      <li>
+        <strong>RQ2:</strong> Can SBOM-manifest-lockfile consistency checks identify stale or incomplete SBOMs with useful
+        precision and recall?
+      </li>
+      <li>
+        <strong>RQ3:</strong> Does adding provenance and package-risk evidence improve vulnerability prioritization and
+        reduce false remediation urgency?
+      </li>
+      <li>
+        <strong>RQ4:</strong> Can the system abstain correctly when vulnerability, package, SBOM, or provenance evidence is
+        conflicting or insufficient?
+      </li>
+      <li>
+        <strong>RQ5:</strong> How much latency and implementation cost does integrity gating add compared with standard RAG?
+      </li>
+    </ol>
+
+    <h2>System Architecture</h2>
+    <p>
+      ASSURE-RAG is designed as a security triage layer over existing repository and package evidence. It does not replace
+      SBOM generators, vulnerability scanners, or build systems. It orchestrates their outputs and verifies whether the
+      evidence supports an action.
+    </p>
+    <pre>Repository or package input
+  -> parse manifest and lockfile
+  -> load or generate SBOM
+  -> retrieve vulnerability and advisory evidence
+  -> retrieve package risk and repository hygiene evidence
+  -> retrieve provenance and build-integrity evidence
+  -> run consistency and integrity gates
+  -> create remediation plan
+  -> verify final answer against allowed evidence
+  -> output recommendation, evidence links, risk level, and abstention if needed</pre>
+
+    <h3>Key Evidence Types</h3>
+    <ul>
+      <li><strong>Dependency evidence:</strong> package manifests, lockfiles, direct and transitive dependency graphs.</li>
+      <li><strong>SBOM evidence:</strong> SPDX or CycloneDX documents, component identifiers, versions, relationships, and timestamps.</li>
+      <li><strong>Vulnerability evidence:</strong> CVE, OSV, GitHub Security Advisory, NVD, or ecosystem-specific advisories.</li>
+      <li><strong>Package-risk evidence:</strong> maintainer activity, repository hygiene, install scripts, typosquatting signals, release velocity, and suspicious metadata.</li>
+      <li><strong>Provenance evidence:</strong> SLSA/in-toto attestations, build workflow metadata, signatures, reproducibility signals, and artifact-source links.</li>
+    </ul>
+
+    <h3>Integrity Gates</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Gate</th>
+          <th>Check</th>
+          <th>Failure Response</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SBOM completeness</td>
+          <td>Required fields and dependency relationships are present.</td>
+          <td>Mark SBOM as incomplete; avoid high-confidence remediation.</td>
+        </tr>
+        <tr>
+          <td>SBOM consistency</td>
+          <td>SBOM components match manifest and lockfile dependencies.</td>
+          <td>Flag mismatch; request regeneration or manual validation.</td>
+        </tr>
+        <tr>
+          <td>Vulnerability applicability</td>
+          <td>Advisory package, ecosystem, version range, and fixed version match the actual dependency.</td>
+          <td>Downgrade confidence or abstain from fix recommendation.</td>
+        </tr>
+        <tr>
+          <td>Package integrity</td>
+          <td>Package metadata, maintainer signals, scripts, and repository hygiene do not indicate high risk.</td>
+          <td>Classify as investigate or block depending on severity.</td>
+        </tr>
+        <tr>
+          <td>Provenance sufficiency</td>
+          <td>Source, build, artifact, signature, and attestation signals meet a configured assurance threshold.</td>
+          <td>Do not claim artifact trust; recommend provenance improvement.</td>
+        </tr>
+        <tr>
+          <td>Answer verification</td>
+          <td>Final text mentions only evidence-backed packages, versions, vulnerabilities, and fixes.</td>
+          <td>Reject answer and return deterministic fallback or abstention.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Benchmark Proposal: SSC-RAGBench</h2>
+    <p>
+      The paper will introduce <strong>SSC-RAGBench</strong>, a benchmark for evaluating RAG systems on software supply
+      chain security triage. The initial benchmark should focus on Python and JavaScript because PyPI and npm have rich
+      dependency ecosystems and known attack patterns.
+    </p>
+    <h3>Benchmark Size and Format</h3>
+    <ul>
+      <li><strong>Initial study:</strong> 300 labeled cases across Python and JavaScript projects.</li>
+      <li><strong>Extended study:</strong> 1,000 labeled cases if time and annotation capacity allow.</li>
+      <li><strong>Unit of evaluation:</strong> a security query plus repository/package evidence bundle.</li>
+      <li><strong>Labels:</strong> vulnerable package, safe package, required fix, allowed evidence, forbidden claim, must-abstain flag, and expected risk class.</li>
+    </ul>
+
+    <h3>Case Categories</h3>
+    <ul>
+      <li>Direct vulnerable dependency with known fixed version.</li>
+      <li>Transitive dependency vulnerability.</li>
+      <li>SBOM missing a dependency present in the lockfile.</li>
+      <li>SBOM includes a dependency not present in the build input.</li>
+      <li>Conflicting vulnerability advisories.</li>
+      <li>Package name confusion or typosquatting.</li>
+      <li>Suspicious install script or release metadata.</li>
+      <li>Missing provenance or unsigned artifact.</li>
+      <li>Outdated SBOM timestamp relative to deployed artifact.</li>
+      <li>Adversarial package description attempting prompt injection.</li>
+    </ul>
+
+    <h2>Evaluation Design</h2>
+    <h3>Baselines</h3>
+    <ol>
+      <li><strong>Vanilla LLM:</strong> prompt-only security advice with no retrieval.</li>
+      <li><strong>Vanilla RAG:</strong> retrieval over advisories and package documents without integrity gates.</li>
+      <li><strong>Scanner-only baseline:</strong> output from common SBOM or vulnerability scanners.</li>
+      <li><strong>SBOM-RAG:</strong> RAG over SBOM and advisory evidence, but without consistency gates.</li>
+      <li><strong>ASSURE-RAG without provenance:</strong> ablation removing build/provenance evidence.</li>
+      <li><strong>ASSURE-RAG full:</strong> all gates, remediation planner, and final-answer verifier.</li>
+    </ol>
+
+    <h3>Metrics</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Metric Family</th>
+          <th>Metrics</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Security correctness</td>
+          <td>Unsafe recommendation rate, hallucinated fix rate, wrong-version fix rate, vulnerability identification precision.</td>
+        </tr>
+        <tr>
+          <td>Evidence integrity</td>
+          <td>SBOM mismatch detection accuracy, stale SBOM detection accuracy, conflict detection accuracy.</td>
+        </tr>
+        <tr>
+          <td>Remediation quality</td>
+          <td>Correct fix recommendation rate, correct suppress/monitor/investigate classification, evidence coverage.</td>
+        </tr>
+        <tr>
+          <td>Abstention</td>
+          <td>Abstention precision, abstention recall, false abstention rate, false action rate.</td>
+        </tr>
+        <tr>
+          <td>Robustness</td>
+          <td>Attack success rate under poisoned retrieved evidence and prompt-injected package metadata.</td>
+        </tr>
+        <tr>
+          <td>Operational cost</td>
+          <td>Latency p50/p95, token cost, gate runtime, scanner integration overhead.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="page-break">
+    <h2>Expected Contributions</h2>
+    <ol>
+      <li>
+        <strong>A formal integrity-gated RAG architecture</strong> for software supply chain security triage.
+      </li>
+      <li>
+        <strong>A remediation planning schema</strong> that separates retrieved evidence from allowed security actions.
+      </li>
+      <li>
+        <strong>SSC-RAGBench,</strong> a benchmark for evaluating RAG systems under incomplete, stale, conflicting, and adversarial software supply chain evidence.
+      </li>
+      <li>
+        <strong>An empirical comparison</strong> against LLM-only, vanilla RAG, scanner-only, SBOM-RAG, and ablated ASSURE-RAG baselines.
+      </li>
+      <li>
+        <strong>Failure analysis</strong> showing where SBOMs, vulnerability feeds, package metadata, and provenance evidence most often fail to support safe remediation.
+      </li>
+    </ol>
+
+    <h2>Implementation Plan</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Phase</th>
+          <th>Work</th>
+          <th>Output</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Weeks 1-2</td>
+          <td>Define evidence schema, remediation plan schema, and benchmark labels.</td>
+          <td>Dataset specification and first 50 cases.</td>
+        </tr>
+        <tr>
+          <td>Weeks 3-4</td>
+          <td>Build parsers for manifests, lockfiles, SBOM files, and vulnerability evidence.</td>
+          <td>Evidence ingestion prototype.</td>
+        </tr>
+        <tr>
+          <td>Weeks 5-6</td>
+          <td>Implement consistency gates and remediation planner.</td>
+          <td>ASSURE-RAG core pipeline.</td>
+        </tr>
+        <tr>
+          <td>Weeks 7-8</td>
+          <td>Create benchmark cases and run baselines.</td>
+          <td>Initial results table and error taxonomy.</td>
+        </tr>
+        <tr>
+          <td>Weeks 9-10</td>
+          <td>Run ablations and adversarial evidence experiments.</td>
+          <td>Security robustness analysis.</td>
+        </tr>
+        <tr>
+          <td>Weeks 11-12</td>
+          <td>Write paper, finalize tables, release replication artifacts.</td>
+          <td>Q1-ready manuscript draft.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Risk and Scope Control</h2>
+    <p>
+      The main risk is trying to cover the entire software supply chain. That would dilute the contribution. The first
+      paper should focus on dependency and remediation triage for Python and JavaScript projects, with SBOM consistency,
+      vulnerability applicability, package-risk signals, and provenance sufficiency. Container images, firmware, cloud
+      deployment, and enterprise procurement workflows should be treated as future work.
+    </p>
+    <div class="callout warning">
+      <strong>Strategic constraint:</strong> Do not pitch this as "AI for supply chain security." Pitch it as
+      <strong>evidence-integrity verification before LLM-assisted software supply chain remediation</strong>.
+      That is narrower, more defensible, and easier to evaluate.
+    </div>
+
+    <h2>Target Q1 Positioning</h2>
+    <ul>
+      <li>
+        <strong>Journal of Systems and Software:</strong> strongest fit if the contribution emphasizes empirical software engineering, SBOM quality, benchmark design, and developer-facing triage.
+      </li>
+      <li>
+        <strong>Computers &amp; Security:</strong> strongest fit if the evaluation emphasizes attack scenarios, poisoned evidence, malicious package metadata, and unsafe recommendation prevention.
+      </li>
+      <li>
+        <strong>ACM TOSEM:</strong> highest bar; suitable only if the dataset, taxonomy, and empirical design are very strong.
+      </li>
+      <li>
+        <strong>IEEE Transactions on Software Engineering:</strong> suitable if the study deeply connects build provenance, reproducibility, and large-scale empirical analysis.
+      </li>
+    </ul>
+
+    <h2>Reference List</h2>
+    <ol class="references">
+      <li>
+        Williams, L., Benedetti, G., Hamer, S., Paramitha, R., Rahman, I., Tamanna, M., Tystahl, G.,
+        Zahan, N., Morrison, P. J., Acar, Y., Cukier, M., Kaestner, C., Kapravelos, A., Wermke, D.,
+        and Enck, W. (2025). Research Directions in Software Supply Chain Security.
+        <em>ACM Transactions on Software Engineering and Methodology</em>, 34(5), 1-38.
+        DOI: <a href="https://doi.org/10.1145/3714464">10.1145/3714464</a>.
+      </li>
+      <li>
+        Nocera, S., Romano, S., Di Penta, M., Francese, R., and Scanniello, G. (2025).
+        On the adoption of software bill of materials in open-source software projects.
+        <em>Journal of Systems and Software</em>, 230, 112540.
+        DOI: <a href="https://doi.org/10.1016/j.jss.2025.112540">10.1016/j.jss.2025.112540</a>.
+      </li>
+      <li>
+        Wang, S., Zhao, Y., Hou, X., and Wang, H. (2025). Large Language Model Supply Chain:
+        A Research Agenda. <em>ACM Transactions on Software Engineering and Methodology</em>.
+        DOI: <a href="https://doi.org/10.1145/3708531">10.1145/3708531</a>.
+      </li>
+      <li>
+        Huang, K. et al. (2024). Killing Two Birds with One Stone: Malicious Package Detection
+        in NPM and PyPI using a Single Model of Malicious Behavior Sequence.
+        <em>ACM Transactions on Software Engineering and Methodology</em>.
+        DOI: <a href="https://doi.org/10.1145/3705304">10.1145/3705304</a>.
+      </li>
+      <li>
+        Sharma, A., Baudry, B., and Monperrus, M. (2026). Causes and Canonicalization of
+        Unreproducible Builds in Java. <em>IEEE Transactions on Software Engineering</em>, 52(1), 54-69.
+        DOI: <a href="https://doi.org/10.1109/TSE.2025.3627891">10.1109/TSE.2025.3627891</a>.
+      </li>
+      <li>
+        National Institute of Standards and Technology. (2022). Secure Software Development Framework
+        (SSDF) Version 1.1: Recommendations for Mitigating the Risk of Software Vulnerabilities.
+        NIST SP 800-218. <a href="https://csrc.nist.gov/pubs/sp/800/218/final">https://csrc.nist.gov/pubs/sp/800/218/final</a>.
+      </li>
+      <li>
+        Cybersecurity and Infrastructure Security Agency. Software Bill of Materials (SBOM).
+        <a href="https://www.cisa.gov/sbom">https://www.cisa.gov/sbom</a>.
+      </li>
+      <li>
+        SLSA Project. Supply-chain Levels for Software Artifacts.
+        <a href="https://slsa.dev/">https://slsa.dev/</a>.
+      </li>
+      <li>
+        Open Source Security Foundation. OpenSSF Scorecard.
+        <a href="https://openssf.org/scorecard/">https://openssf.org/scorecard/</a>.
+      </li>
+    </ol>
+  </section>
+</body>
+</html>

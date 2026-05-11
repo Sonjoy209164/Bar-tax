@@ -14,6 +14,80 @@ Tree view version for explaining responsibility boundaries:
 
 ![Inventory Chatbot Pipeline Tree](docs/assets/inventory_pipeline_tree.png)
 
+## Tree Node Reference: Technology, Logic, And Prompts
+
+The PNG is a static visual map. The linked reference below is the operational map: every tree element points to the code, the technology used, the decision logic, and whether a prompt is involved.
+
+### Prompt Rule Of Thumb
+
+The system is not "one big prompt." That would be fragile. The stronger design is a layered system:
+
+- Deterministic code owns hard facts: stock, price, SKU, size, color, product ids, policy values, and abstention.
+- Retrieval owns candidate discovery: structured filters, vector search, lexical search, and reranking.
+- Prompts are used only where language understanding or final wording benefits from an LLM.
+- Verification runs after writing so a fluent answer cannot override catalog evidence.
+
+### 1. Data + Storage
+
+| Tree Element | Linked Code/Data | Technology | Core Logic | Prompt Used |
+|---|---|---|---|---|
+| Catalog DB | [data/inventory/catalog.jsonl](data/inventory/catalog.jsonl), [app/core/schemas.py](app/core/schemas.py), [app/inventory/storage.py](app/inventory/storage.py) | JSONL by default; optional SQLite mirror; Pydantic models | Stores each product as structured facts: `product_id`, `sku`, `name`, `category`, `price`, `stock`, `attributes`, `tags`, `status`, `include_in_rag`. The bot treats this as ground truth. | None. This layer must stay deterministic. |
+| POS Sync | [app/inventory/pos_sync.py](app/inventory/pos_sync.py), [app/api/routes_inventory.py](app/api/routes_inventory.py) | CSV import, JSON webhook import, FastAPI endpoints | Imports stock/product updates, validates rows, merges by product id/SKU, persists catalog, writes sync audit, and can trigger rebuild/status checks. | None. Sync should not depend on LLM output. |
+| Orders + Signals | [data/orders/orders_store.jsonl](data/orders/orders_store.jsonl), [app/inventory/order_workflow.py](app/inventory/order_workflow.py), [app/api/routes_orders.py](app/api/routes_orders.py), [app/services/inventory_service.py](app/services/inventory_service.py) | JSONL order store, Pydantic order models, FastAPI order routes | Tracks cart/order actions and business signals. These signals can later support restock, alternatives, and operational recommendations. | Mostly none. [order_workflow.py](app/inventory/order_workflow.py) uses deterministic field prompts such as asking for missing name/phone/address/product/quantity. |
+
+### 2. API + UI
+
+| Tree Element | Linked Code/Data | Technology | Core Logic | Prompt Used |
+|---|---|---|---|---|
+| Chat UI | [frontend/chat.html](frontend/chat.html), [frontend/chat.js](frontend/chat.js), [frontend/chat.css](frontend/chat.css) | Plain HTML/CSS/JavaScript; `fetch`; same-origin runtime config | Renders chat, sends `/inventory/ask`, loads `/inventory/items`, shows hideable catalog panel, sends feedback, cart/order requests, focused products, session id, and API key header. | The customer's message is input, but no system prompt lives in the frontend. |
+| FastAPI | [app/main.py](app/main.py), [app/api/routes_inventory.py](app/api/routes_inventory.py) | FastAPI, Pydantic request/response models, optional SSE streaming | Mounts `/frontend`, serves `/docs`, exposes inventory chat/search/sync/image/policy/order routes, validates request models, and delegates to service classes. | None. API routes orchestrate code paths. |
+| Security | [app/core/security.py](app/core/security.py), [app/main.py](app/main.py), [frontend/chat.js](frontend/chat.js) | API key header: `X-API-Key`; settings-based accepted keys | Protects inventory, ingest, query, eval, feedback, order, and owner endpoints through route dependencies. Frontend attaches the configured key. | None. Auth must remain deterministic. |
+
+### 3. Understanding
+
+| Tree Element | Linked Code/Data | Technology | Core Logic | Prompt Used |
+|---|---|---|---|---|
+| Language Normalizer | [app/inventory/banglish_normalizer.py](app/inventory/banglish_normalizer.py), [app/inventory/fuzzy_corrector.py](app/inventory/fuzzy_corrector.py), [app/inventory/fashion_retail.py](app/inventory/fashion_retail.py) | Regex normalization, Bangla digit translation, `difflib` fuzzy matching | Converts Banglish and typo-heavy text into forms the slot logic can understand. Example: `sharee/sari/shari` maps toward saree terms; typo correction catches terms like `jamdhani` -> `jamdani`. | None. This is fast deterministic preprocessing. |
+| Intent Classifier | [app/inventory/intent.py](app/inventory/intent.py), [app/inventory/llm_intent_classifier.py](app/inventory/llm_intent_classifier.py), [app/inventory/intent_planner.py](app/inventory/intent_planner.py) | Deterministic phrase classifier plus optional Ollama `qwen3:8b` JSON classifier/planner | Classifies customer goal: search, compare, styling advice, same-design color, size availability, policy, order, small talk, or unknown. Multi-turn planner can read recent conversation and infer shifted intent or constraints. | Yes, optional. `_PROMPT` in [llm_intent_classifier.py](app/inventory/llm_intent_classifier.py) returns JSON intent/slots/confidence. `_PROMPT` in [intent_planner.py](app/inventory/intent_planner.py) returns a conversation-level plan. |
+| Slot Extractor | [app/inventory/fashion_retail.py](app/inventory/fashion_retail.py), [app/inventory/llm_slot_extractor.py](app/inventory/llm_slot_extractor.py) | Regex patterns, alias dictionaries, optional Ollama JSON extraction | Extracts category, color, color family, size, budget, fabric, work type, occasion, style, gender, design id, and in-stock intent. Regex output is merged with LLM output; deterministic matches win where safer. | Yes, optional. `_EXTRACTION_PROMPT` in [llm_slot_extractor.py](app/inventory/llm_slot_extractor.py) asks the model to return a strict JSON slot object. |
+
+### 4. Retrieval
+
+| Tree Element | Linked Code/Data | Technology | Core Logic | Prompt Used |
+|---|---|---|---|---|
+| Structured Search | [app/inventory/fashion_retail.py](app/inventory/fashion_retail.py), [app/services/inventory_service.py](app/services/inventory_service.py) | Python filters over Pydantic catalog records | Best path for hard catalog questions. It filters/ranks by category, size, color, design id, budget, gender, fabric, occasion, stock, and exact product context. Handles same-design colors and size availability without needing an LLM. | None. This layer must be exact and auditable. |
+| Vector Search | [app/retrieval/embedder.py](app/retrieval/embedder.py), [app/retrieval/vector_store_base.py](app/retrieval/vector_store_base.py), [app/retrieval/local_store.py](app/retrieval/local_store.py), [app/retrieval/elasticsearch_store.py](app/retrieval/elasticsearch_store.py), [app/services/inventory_service.py](app/services/inventory_service.py) | Embeddings: deterministic, multilingual, transformers, OpenAI-compatible. Vector DB: local JSONL, Elasticsearch dense vector, Pinecone, Milvus | Builds searchable product text, embeds it, upserts vectors, embeds query text, retrieves nearest products, then maps vector matches back to catalog items. Elasticsearch supports dense kNN plus filters. | No chat prompt. The query/product text is embedded, not asked as a generative prompt. |
+| Lexical Search | [app/retrieval/bm25_index.py](app/retrieval/bm25_index.py), [app/retrieval/elasticsearch_store.py](app/retrieval/elasticsearch_store.py), [app/services/inventory_service.py](app/services/inventory_service.py) | BM25-style lexical ranking, Elasticsearch `multi_match`, SKU/name/category matching | Catches exact names, SKUs, brands, categories, aliases, and direct product references. This protects the system when semantic embeddings are too fuzzy. | None. |
+
+### 5. Decisions
+
+| Tree Element | Linked Code/Data | Technology | Core Logic | Prompt Used |
+|---|---|---|---|---|
+| Ranking | [app/inventory/reranker.py](app/inventory/reranker.py), [app/inventory/decisioning.py](app/inventory/decisioning.py), [app/inventory/llm_reasoner.py](app/inventory/llm_reasoner.py) | Deterministic ecommerce score; optional LLM candidate reasoner | Scores relevance using semantic score, lexical score, exact SKU/name match, category, brand, product type, price fit, stock fit, metadata/spec fit, premium/budget fit, and penalties. Optional reasoner can pick from a bounded candidate list. | Optional. `_PROMPT` in [llm_reasoner.py](app/inventory/llm_reasoner.py) asks the model to select product ids only from provided candidates. |
+| Evidence Contract | [app/inventory/evidence_contract.py](app/inventory/evidence_contract.py), [app/core/schemas.py](app/core/schemas.py) | Pydantic evidence contract | Converts chosen hits into allowed facts: price, stock, availability, category, brand, specs, business signals, missing facts, contradictions, rejected candidates, and allowed claims. This is the anti-hallucination boundary. | None. |
+| Abstention Gate | [app/inventory/policy.py](app/inventory/policy.py), [app/inventory/planner.py](app/inventory/planner.py), [app/inventory/verifier.py](app/inventory/verifier.py), [app/services/inventory_service.py](app/services/inventory_service.py) | Deterministic confidence thresholds, missing-fact checks, verification checks | Decides when to answer, ask one clarification question, or abstain. Typical triggers: no matching product, weak evidence, unsupported product family, conflicting stock, missing required slot, or failed verification. | No independent prompt. If the LLM writer is used, the writer prompt receives `answer_plan.abstain` and must stay cautious. |
+
+### 6. Answer + Loop
+
+| Tree Element | Linked Code/Data | Technology | Core Logic | Prompt Used |
+|---|---|---|---|---|
+| Answer Writer | [app/inventory/fashion_retail.py](app/inventory/fashion_retail.py), [app/inventory/natural_answer.py](app/inventory/natural_answer.py), [app/services/inventory_service.py](app/services/inventory_service.py), [app/generation/generator.py](app/generation/generator.py) | Deterministic templates plus optional Ollama/OpenAI-compatible chat writer | First creates a safe base answer from structured evidence. If natural answers are enabled, an LLM rewrites the already-decided answer into a warmer customer-facing response while obeying the answer plan. | Yes, optional. `_SYSTEM_PROMPT` and `_PRODUCT_CONTEXT_TEMPLATE` in [natural_answer.py](app/inventory/natural_answer.py). `_build_inventory_answer_messages()` in [inventory_service.py](app/services/inventory_service.py) creates the strict ecommerce writer contract. [generator.py](app/generation/generator.py) contains the separate legal-tax RAG citation prompt. |
+| Verifier | [app/inventory/verifier.py](app/inventory/verifier.py), [app/inventory/answer_critic.py](app/inventory/answer_critic.py), [app/generation/generator.py](app/generation/generator.py) | Deterministic final-answer verifier plus optional LLM critic | Checks that final text does not mention excluded products, invented product names, unsupported prices, unsupported stock, bad cross-sell substitution, or too many follow-ups. Optional critic can flag major language/factual issues and trigger one retry. | Optional. `_PROMPT` in [answer_critic.py](app/inventory/answer_critic.py) reviews the answer against product facts. [generator.py](app/generation/generator.py) also verifies citation-grounded legal answers. |
+| Feedback Loop | [app/api/routes_feedback.py](app/api/routes_feedback.py), [app/inventory/feedback_to_eval.py](app/inventory/feedback_to_eval.py), [app/services/inventory_service.py](app/services/inventory_service.py), [evaluation/](evaluation/), [results/](results/) | Feedback API, trace records, Markdown reports, evaluation question sets | Captures thumbs up/down, trace ids, responses, failed questions, and test artifacts. This is what drives the build-test-fix loop instead of guessing from demos. | None by default. Future improvement: use feedback to generate new eval cases, but keep production answers grounded. |
+
+### Prompt Registry
+
+| Prompt | File | Purpose | Output Contract |
+|---|---|---|---|
+| Intent + slot classifier prompt | [app/inventory/llm_intent_classifier.py](app/inventory/llm_intent_classifier.py) | Understand Bangla/Banglish/English customer goal in one call. | Strict JSON with `intent`, slots, language, confidence, ambiguity reason. |
+| Slot extraction prompt | [app/inventory/llm_slot_extractor.py](app/inventory/llm_slot_extractor.py) | Extract shopping slots when regex is not enough. | Strict JSON with category/color/fabric/size/budget/occasion/intent. |
+| Conversation planner prompt | [app/inventory/intent_planner.py](app/inventory/intent_planner.py) | Read recent conversation and decide what the customer is really doing. | Strict JSON `IntentPlan`: intent, situation, constraints, clarification, pipeline hints. |
+| Candidate reasoner prompt | [app/inventory/llm_reasoner.py](app/inventory/llm_reasoner.py) | Pick best products from a small bounded candidate set. | Strict JSON with selected product ids, reasoning, confidence, `none_fit`. |
+| Natural boutique answer prompt | [app/inventory/natural_answer.py](app/inventory/natural_answer.py) | Make supported catalog facts sound warm and human. | Chat messages; final natural-language answer. |
+| Strict ecommerce writer prompt | [app/services/inventory_service.py](app/services/inventory_service.py) | Rewrite final customer answer while obeying `answer_plan`, `writer_contract`, evidence, and verification. | Strict JSON: `answer`, `follow_up_question`, `abstained`, `abstention_reason`. |
+| Answer critic prompt | [app/inventory/answer_critic.py](app/inventory/answer_critic.py) | Review answer against product facts before accepting it. | Strict JSON: `passes`, `severity`, `issues`, `suggested_fix`. |
+| Legal-tax RAG citation prompt | [app/generation/generator.py](app/generation/generator.py) | Separate legal-tax pipeline: answer from evidence chunks with citations. | Strict JSON answer sentences with citation markers. |
+
 ## 1. One-Sentence Summary
 
 The bot takes structured product inventory, turns it into searchable evidence, retrieves the right catalog items for a customer question, applies retail-specific decision logic, and then writes a grounded answer without inventing stock, price, size, color, policy, or product facts.

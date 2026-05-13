@@ -1,5 +1,5 @@
 const state = {
-  apiBaseUrl: "http://127.0.0.1:4849",
+  apiBaseUrl: window.location.origin,
   apiKey: "5230ff9faefe885d22345444e006cab576acdae5ea75d499",
   conversation: [],
   focusedProductIds: [],
@@ -61,6 +61,7 @@ init();
 
 async function init() {
   await loadLocalConfig();
+  await loadRuntimeConfig();
   bindEvents();
   initVoiceInput();
   setCatalogOpen(true);
@@ -79,6 +80,15 @@ async function loadLocalConfig() {
     const config = await resp.json();
     if (config.apiBaseUrl) state.apiBaseUrl = String(config.apiBaseUrl).replace(/\/+$/, "");
     if (typeof config.apiKey === "string") state.apiKey = config.apiKey.trim();
+  } catch (_) {}
+}
+
+async function loadRuntimeConfig() {
+  try {
+    const resp = await fetch("./runtime-config.json", { cache: "no-store" });
+    if (!resp.ok) return;
+    const config = await resp.json();
+    if (config.apiBaseUrl) state.apiBaseUrl = String(config.apiBaseUrl).replace(/\/+$/, "");
   } catch (_) {}
 }
 

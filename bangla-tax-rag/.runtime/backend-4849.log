@@ -43,3 +43,35 @@ INFO:     127.0.0.1:50430 - "GET /inventory/items HTTP/1.1" 200 OK
 2026-05-11 17:38:48,053 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
 2026-05-11 17:38:56,215 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=c1bcba08-27ff-44e8-82e9-03f933e05e25 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=8217.451 fallback_reason=That does not map cleanly to a supported inventory question I can answer from the current catalog.
 INFO:     127.0.0.1:50442 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48140 - "GET /frontend/chat.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:48140 - "GET /frontend/chat.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48144 - "GET /frontend/chat.js?v=20260510-catalog-key HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:48140 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:48140 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48140 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48140 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48140 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45178 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:45178 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45178 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:45182 - "GET /inventory/items HTTP/1.1" 200 OK
+2026-05-13 00:42:56,502 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-13 00:43:16,656 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=423995c3-2994-4f33-9ce8-4a93683ebcf1 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=20201.639 fallback_reason=None
+INFO:     127.0.0.1:49282 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50638 - "POST /feedback HTTP/1.1" 200 OK
+2026-05-13 00:43:37,671 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-13 00:44:11,872 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=ebdd19a8-71be-4d22-9cfe-301f9899d9bc execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=34232.422 fallback_reason=None
+INFO:     127.0.0.1:44864 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34840 - "POST /feedback HTTP/1.1" 200 OK
+2026-05-13 10:40:59,054 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-13 10:41:35,260 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-13 10:41:47,310 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=ae85b231-c8d3-4729-96da-0986679b27b1 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=48316.058 fallback_reason=None
+INFO:     127.0.0.1:37402 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-13 10:44:29,987 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-13 10:45:06,186 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-13 10:45:18,232 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=3aaa5379-a90b-4925-a10f-b93148f4c446 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=3 latency_ms=48272.289 fallback_reason=None
+INFO:     127.0.0.1:50732 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-13 10:45:57,351 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-13 10:46:33,551 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-05-13 10:46:45,602 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=ce83194e-32aa-404f-9a27-8f259bb56074 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=2 latency_ms=48303.14 fallback_reason=None
+INFO:     127.0.0.1:53950 - "POST /inventory/ask HTTP/1.1" 200 OK

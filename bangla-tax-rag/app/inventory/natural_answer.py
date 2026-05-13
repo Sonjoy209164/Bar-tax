@@ -26,7 +26,7 @@ Rules you MUST follow:
 4. Keep responses concise — 2-4 sentences for simple queries, up to 6 for complex ones.
 5. When recommending products, mention the price and stock count.
 6. Do not repeat the customer's question back to them.
-7. End with a natural follow-up question when appropriate (e.g., "কোন সাইজ দরকার?" or "Would you like to place an order?").
+7. End with a natural follow-up question when the product has that attribute or it is appropriate (e.g., "কোন সাইজ দরকার?" or "Would you like to place an order?").
 """
 
 _PRODUCT_CONTEXT_TEMPLATE = """\

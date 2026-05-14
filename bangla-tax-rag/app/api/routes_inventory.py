@@ -47,7 +47,7 @@ from app.core.schemas import (
 )
 from app.inventory.catalog_audit import audit_catalog, enrich_item_attributes
 from app.inventory.clip_matcher import CLIPImageMatcher
-from app.inventory.image_matcher import ImageMatcher
+from app.inventory.image_matcher import ImageMatcher, finalize_image_search
 from app.inventory.policy import inventory_policy_contract
 from app.inventory.waitlist import WaitlistManager
 from app.inventory.policy_qa import PolicyQAEngine
@@ -371,6 +371,7 @@ async def ask_inventory_stream(request: InventoryAskRequest) -> StreamingRespons
 @router.post("/image-search", response_model=ImageSearchResponse)
 async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
     catalog = get_inventory_service().load_catalog()
+    raw_top_k = min(max(request.top_k * 4, 12), 20)
     if CLIPImageMatcher.is_available():
         from app.inventory.clip_matcher import precompute_catalog_embeddings
         precompute_catalog_embeddings(catalog)
@@ -382,7 +383,7 @@ async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
             category_hint=request.category_hint,
             color_hint=request.color_hint,
             budget_max=request.budget_max,
-            top_k=request.top_k,
+            top_k=raw_top_k,
         )
     else:
         matcher = ImageMatcher(catalog)
@@ -392,9 +393,15 @@ async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
             category_hint=request.category_hint,
             color_hint=request.color_hint,
             budget_max=request.budget_max,
-            top_k=request.top_k,
+            top_k=raw_top_k,
         )
-    answer = matcher.build_answer(results, request.query_text)
+    decision = finalize_image_search(
+        catalog=catalog,
+        results=results,
+        query_text=request.query_text,
+        requested_color=request.color_hint,
+        top_k=request.top_k,
+    )
     hits = [
         ImageSearchHit(
             product_id=r.product_id,
@@ -406,10 +413,30 @@ async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
             currency=r.currency,
             stock=r.stock,
             image_url=r.image_url,
+            decision_label=r.decision_label,
+            variant_group_id=r.variant_group_id,
+            design_id=r.design_id,
+            color=r.color,
+            size=r.size,
+            image_kind=r.image_kind,
+            is_reference=r.is_reference,
+            score_breakdown=r.score_breakdown,
         )
-        for r in results
+        for r in decision.hits
     ]
-    return ImageSearchResponse(status="success", answer=answer, hits=hits, total=len(hits))
+    return ImageSearchResponse(
+        status="success",
+        answer=decision.answer,
+        hits=hits,
+        total=len(hits),
+        decision_label=decision.decision_label,
+        primary_product_id=decision.primary_product_id,
+        same_design_variant_ids=list(decision.same_design_variant_ids),
+        similar_product_ids=list(decision.similar_product_ids),
+        requested_color=decision.requested_color,
+        available_colors=list(decision.available_colors),
+        score_breakdown=decision.score_breakdown,
+    )
 
 
 @router.post("/sync/import", response_model=POSSyncResponse)

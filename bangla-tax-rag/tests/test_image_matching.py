@@ -3,7 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.core.schemas import InventoryItemRecord, InventorySearchFilters
-from app.inventory.image_matcher import ImageMatcher, ImageMatchResult, is_image_search_query, primary_image_url
+from app.inventory.image_matcher import (
+    ImageMatcher,
+    ImageMatchResult,
+    finalize_image_search,
+    is_image_search_query,
+    primary_image_url,
+)
 
 
 def _active_catalog() -> dict[str, InventoryItemRecord]:
@@ -118,3 +124,70 @@ def test_image_matcher_returns_no_duplicates():
     results = matcher.search(query_text="saree", top_k=10)
     ids = [r.product_id for r in results]
     assert len(ids) == len(set(ids))
+
+
+def test_image_decision_confirms_product_photo_exact_and_variants():
+    catalog = _active_catalog()
+    raw = [
+        ImageMatchResult(
+            product_id="shirt-ribbed-polo-black",
+            name="Ribbed Open-Collar Knit Polo - Black",
+            score=0.99,
+            match_type="visual_similar",
+            reasons=("test visual hit",),
+            price=1750.0,
+            currency="BDT",
+            stock=5,
+        )
+    ]
+    decision = finalize_image_search(catalog=catalog, results=raw, query_text="eta ache?", top_k=6)
+    assert decision.decision_label == "confirmed_exact"
+    assert decision.primary_product_id == "shirt-ribbed-polo-black"
+    assert "shirt-ribbed-polo-white" in decision.same_design_variant_ids
+    assert any(hit.decision_label == "confirmed_exact" for hit in decision.hits)
+
+
+def test_image_decision_answers_same_design_requested_color():
+    catalog = _active_catalog()
+    raw = [
+        ImageMatchResult(
+            product_id="shirt-ribbed-polo-black",
+            name="Ribbed Open-Collar Knit Polo - Black",
+            score=0.99,
+            match_type="visual_similar",
+            reasons=("test visual hit",),
+            price=1750.0,
+            currency="BDT",
+            stock=5,
+        )
+    ]
+    decision = finalize_image_search(
+        catalog=catalog,
+        results=raw,
+        query_text="same design white color ache?",
+        top_k=6,
+    )
+    assert decision.decision_label == "confirmed_same_design_variant"
+    assert decision.requested_color == "white"
+    assert "shirt-ribbed-polo-white" in [hit.product_id for hit in decision.hits]
+    assert "white" in decision.answer.casefold()
+
+
+def test_reference_image_never_becomes_confirmed_exact():
+    catalog = _active_catalog()
+    raw = [
+        ImageMatchResult(
+            product_id="saree-jmd-lotus-red",
+            name="Lotus Buti Dhakai Jamdani Saree - Red",
+            score=0.99,
+            match_type="visual_similar",
+            reasons=("test visual hit",),
+            price=6800.0,
+            currency="BDT",
+            stock=3,
+        )
+    ]
+    decision = finalize_image_search(catalog=catalog, results=raw, query_text="eta ache?", top_k=4)
+    assert decision.decision_label != "confirmed_exact"
+    assert all(hit.decision_label != "confirmed_exact" for hit in decision.hits)
+    assert decision.hits[0].is_reference is True

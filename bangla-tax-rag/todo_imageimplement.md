@@ -40,6 +40,55 @@ Customer uploads screenshot
 
 This is not only a CLIP/image-search feature. It is a product-identity system. The visual model is the eye; the catalog is the truth.
 
+## Current Implementation Status
+
+- [x] Built a 100-product local demo catalog with local image files.
+  - Purpose: test product cards and visual search without remote image links.
+  - Files:
+    - `data/inventory/catalog.jsonl`
+    - `frontend/assets/demo_catalog/`
+
+- [x] Added real product-photo shirt variant group for black, grey, olive, and white ribbed polo shirts.
+  - Purpose: test exact product and same-design/different-color behavior.
+
+- [x] Added image decision labels.
+  - Implemented labels:
+    - `confirmed_exact`
+    - `confirmed_same_design_variant`
+    - `likely_same_design`
+    - `similar_style`
+    - `no_confident_match`
+
+- [x] Added post-retrieval decision policy.
+  - Purpose: raw CLIP hits are now converted into business-safe product decisions.
+  - File:
+    - `app/inventory/image_matcher.py`
+
+- [x] Added same-design variant resolution through `variant_group_id` / `design_id`.
+  - Purpose: answer "same design other color ache?" from catalog identity, not only visual similarity.
+
+- [x] Added API response fields for image-search decisions.
+  - Purpose: frontend and debug tools can inspect decision label, requested color, available colors, variant IDs, and score breakdown.
+  - Files:
+    - `app/core/schemas.py`
+    - `app/api/routes_inventory.py`
+
+- [x] Added customer UI product cards with local image rendering and match badges.
+  - Purpose: customer can visually inspect returned products.
+  - Files:
+    - `frontend/chat.js`
+    - `frontend/chat.css`
+    - `frontend/chat.html`
+
+- [x] Added image-search gold set and focused tests.
+  - Purpose: protect exact/same-design/reference-image behavior.
+  - Files:
+    - `evaluation/image_search_gold_set.jsonl`
+    - `tests/test_image_matching.py`
+    - `scripts/run_image_search_eval.py`
+
+- [ ] Still future work: real product-photo import workflow, object/background crop, separate image-vector Elasticsearch index, DINOv2/SigLIP pattern channel, owner correction UI, and full multi-shop isolation.
+
 ## Strategic Design Rule
 
 - [ ] Never say "same product" only because CLIP score is high.

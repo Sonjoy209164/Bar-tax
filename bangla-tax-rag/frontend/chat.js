@@ -693,6 +693,7 @@ async function sendImageSearch(queryText) {
     const response = await apiPost("/inventory/image-search", {
       query_text: queryText || "",
       image_b64: state.pendingImageB64,
+      session_id: state.sessionId,
       top_k: 5,
     });
     thinking.querySelector(".body").textContent = response.answer || "No similar items found.";
@@ -892,7 +893,10 @@ function renderMeta(node, response) {
 function renderImageMeta(node, response) {
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.textContent = `image-search · ${response?.total || 0} result(s)`;
+  const parts = [`image-search`, `${response?.total || 0} result(s)`];
+  if (response?.decision_label) parts.push(labelText(response.decision_label));
+  if (response?.requested_color) parts.push(`requested: ${response.requested_color}`);
+  meta.textContent = parts.join(" · ");
   node.appendChild(meta);
 }
 
@@ -913,6 +917,9 @@ function renderImageResults(node, response) {
     }
     const body = document.createElement("div");
     body.className = "image-result-body";
+    const badge = document.createElement("div");
+    badge.className = `image-result-badge ${badgeClass(hit.decision_label)}`;
+    badge.textContent = labelText(hit.decision_label || hit.match_type || "similar_style");
     const name = document.createElement("p");
     name.className = "image-result-name";
     name.textContent = hit.name || hit.product_id || "Product";
@@ -921,13 +928,64 @@ function renderImageResults(node, response) {
     const price = typeof hit.price === "number" ? `BDT ${hit.price.toLocaleString()}` : "Price N/A";
     const stock = Number.isFinite(hit.stock) ? `${hit.stock} in stock` : "Stock N/A";
     const score = typeof hit.score === "number" ? `${Math.round(hit.score * 100)}% visual` : "visual match";
-    facts.textContent = `${price} · ${stock} · ${score}`;
+    const color = hit.color ? ` · ${hit.color}` : "";
+    const size = hit.size ? ` · ${hit.size}` : "";
+    facts.textContent = `${price} · ${stock}${color}${size} · ${score}`;
+    body.appendChild(badge);
     body.appendChild(name);
     body.appendChild(facts);
     card.appendChild(body);
     grid.appendChild(card);
   });
   node.appendChild(grid);
+  renderImageQuickActions(node, response);
+}
+
+function renderImageQuickActions(node, response) {
+  const primary = response?.primary_product_id;
+  const colors = Array.isArray(response?.available_colors) ? response.available_colors.slice(0, 5) : [];
+  const actions = [];
+  if (colors.length) actions.push(`same design colors: ${colors.join(", ")}`);
+  if (primary) {
+    actions.push("M size ache?");
+    actions.push("price koto?");
+    actions.push("show similar");
+  }
+  if (!actions.length) return;
+  const row = document.createElement("div");
+  row.className = "image-result-actions";
+  actions.forEach(text => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = text;
+    btn.addEventListener("click", () => {
+      el.input.value = text;
+      resizeInput();
+      el.input.focus();
+    });
+    row.appendChild(btn);
+  });
+  node.appendChild(row);
+}
+
+function labelText(value) {
+  const labels = {
+    confirmed_exact: "Exact",
+    confirmed_same_design_variant: "Same design",
+    likely_same_design: "Likely same design",
+    similar_style: "Similar",
+    no_confident_match: "Not confident",
+    visual_similar: "Similar",
+    same_design_variant: "Same design",
+  };
+  return labels[value] || String(value || "Similar").replaceAll("_", " ");
+}
+
+function badgeClass(value) {
+  if (value === "confirmed_exact") return "exact";
+  if (value === "confirmed_same_design_variant" || value === "likely_same_design") return "design";
+  if (value === "no_confident_match") return "weak";
+  return "similar";
 }
 
 async function checkHealth() {

@@ -1449,6 +1449,7 @@ class OrderResponse(BaseModel):
 class ImageSearchRequest(BaseModel):
     query_text: str = ""
     image_b64: str | None = None
+    session_id: str | None = None
     category_hint: str | None = None
     color_hint: str | None = None
     budget_max: float | None = None
@@ -1465,6 +1466,14 @@ class ImageSearchHit(BaseModel):
     currency: str = "BDT"
     stock: int = 0
     image_url: str | None = None
+    decision_label: str | None = None
+    variant_group_id: str | None = None
+    design_id: str | None = None
+    color: str | None = None
+    size: str | None = None
+    image_kind: str | None = None
+    is_reference: bool = False
+    score_breakdown: dict[str, Any] | None = None
 
 
 class ImageSearchResponse(BaseModel):
@@ -1472,6 +1481,13 @@ class ImageSearchResponse(BaseModel):
     answer: str
     hits: list[ImageSearchHit] = Field(default_factory=list)
     total: int = 0
+    decision_label: str | None = None
+    primary_product_id: str | None = None
+    same_design_variant_ids: list[str] = Field(default_factory=list)
+    similar_product_ids: list[str] = Field(default_factory=list)
+    requested_color: str | None = None
+    available_colors: list[str] = Field(default_factory=list)
+    score_breakdown: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

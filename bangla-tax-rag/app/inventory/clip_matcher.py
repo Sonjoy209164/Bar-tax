@@ -238,9 +238,8 @@ class CLIPImageMatcher:
         top_k: int = 5,
     ) -> list[ImageMatchResult]:
         if catalog:
-            # Precompute if not done yet
-            if not _catalog_embeddings or len(_catalog_embeddings) < len(catalog) // 2:
-                precompute_catalog_embeddings(catalog)
+            # Fast no-op when the catalog signature is unchanged; rebuilds when images/products change.
+            precompute_catalog_embeddings(catalog)
 
         query_vec: list[float] | None = None
         if image_b64:

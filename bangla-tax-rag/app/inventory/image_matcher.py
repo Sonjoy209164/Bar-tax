@@ -16,10 +16,31 @@ class ImageMatchResult:
     score: float
     match_type: str
     reasons: tuple[str, ...]
-    price: float | None
-    currency: str
-    stock: int
+    price: float | None = None
+    currency: str = "BDT"
+    stock: int = 0
     image_url: str | None = None
+    decision_label: str = "similar_style"
+    variant_group_id: str | None = None
+    design_id: str | None = None
+    color: str | None = None
+    size: str | None = None
+    image_kind: str | None = None
+    is_reference: bool = False
+    score_breakdown: dict[str, float | str | bool] | None = None
+
+
+@dataclass(frozen=True)
+class ImageSearchDecision:
+    answer: str
+    hits: list[ImageMatchResult]
+    decision_label: str
+    primary_product_id: str | None
+    same_design_variant_ids: tuple[str, ...]
+    similar_product_ids: tuple[str, ...]
+    requested_color: str | None
+    available_colors: tuple[str, ...]
+    score_breakdown: dict[str, Any]
 
 
 IMAGE_QUERY_PHRASES = (
@@ -231,6 +252,341 @@ class ImageMatcher:
                 lines.append(f"- {r.name} (out of stock)")
 
         return "\n".join(lines)
+
+
+def finalize_image_search(
+    *,
+    catalog: dict[str, InventoryItemRecord],
+    results: list[ImageMatchResult],
+    query_text: str,
+    requested_color: str | None = None,
+    top_k: int = 6,
+) -> ImageSearchDecision:
+    """Apply business-safe product identity rules after raw visual retrieval."""
+
+    normalized_color = normalize_color(requested_color) or infer_requested_color(query_text)
+    enriched = [_enrich_hit(hit, catalog) for hit in results if hit.product_id in catalog]
+    enriched.sort(key=lambda hit: _decision_sort_key(hit), reverse=True)
+
+    if not enriched:
+        return ImageSearchDecision(
+            answer=(
+                "Ei screenshot er exact product catalog e confident bhabe pachchi na. "
+                "Color, size, ba category bolle ami similar options dekhate pari."
+            ),
+            hits=[],
+            decision_label="no_confident_match",
+            primary_product_id=None,
+            same_design_variant_ids=(),
+            similar_product_ids=(),
+            requested_color=normalized_color,
+            available_colors=(),
+            score_breakdown={"reason": "no_raw_visual_hits"},
+        )
+
+    primary = enriched[0]
+    group_key = primary.variant_group_id or primary.design_id
+    same_design_items = _same_design_items(catalog, group_key) if group_key else []
+    available_colors = tuple(_unique_color(item) for item in same_design_items if _unique_color(item))
+    available_colors = tuple(dict.fromkeys(available_colors))
+
+    requested_color_items = [
+        item for item in same_design_items
+        if normalized_color and _color_matches(item, normalized_color)
+    ]
+    in_stock_requested = [item for item in requested_color_items if item.stock > 0]
+
+    variant_hits = [_result_from_item(item, primary, "confirmed_same_design_variant") for item in same_design_items]
+    merged_hits = _merge_hits(enriched, variant_hits)
+    merged_hits = _apply_requested_color_priority(merged_hits, normalized_color)
+    decision_label = _response_decision_label(primary, same_design_items, normalized_color, in_stock_requested)
+    answer = _build_decision_answer(
+        primary=primary,
+        hits=merged_hits,
+        decision_label=decision_label,
+        same_design_items=same_design_items,
+        requested_color=normalized_color,
+        requested_color_items=requested_color_items,
+        in_stock_requested=in_stock_requested,
+        available_colors=available_colors,
+    )
+    same_design_ids = tuple(item.product_id for item in same_design_items if item.product_id != primary.product_id)
+    similar_ids = tuple(hit.product_id for hit in merged_hits if hit.product_id not in {primary.product_id, *same_design_ids})
+    return ImageSearchDecision(
+        answer=answer,
+        hits=merged_hits[:top_k],
+        decision_label=decision_label,
+        primary_product_id=primary.product_id,
+        same_design_variant_ids=same_design_ids,
+        similar_product_ids=similar_ids[: max(0, top_k - 1)],
+        requested_color=normalized_color,
+        available_colors=available_colors,
+        score_breakdown={
+            "primary_visual_score": primary.score,
+            "primary_decision_label": primary.decision_label,
+            "primary_image_kind": primary.image_kind,
+            "primary_is_reference": primary.is_reference,
+            "same_design_count": len(same_design_items),
+            "requested_color": normalized_color,
+        },
+    )
+
+
+def infer_requested_color(text: str) -> str | None:
+    normalized = text.casefold()
+    color_aliases = {
+        "black": ("black", "kalo", "কালো"),
+        "white": ("white", "shada", "সাদা"),
+        "blue": ("blue", "nil", "নীল", "navy"),
+        "green": ("green", "sobuj", "সবুজ", "olive"),
+        "red": ("red", "lal", "লাল", "maroon"),
+        "pink": ("pink", "golapi", "গোলাপি"),
+        "yellow": ("yellow", "holud", "হলুদ", "mustard"),
+        "gold": ("gold", "golden", "sonali", "সোনালি"),
+        "silver": ("silver", "rupali", "রুপালি"),
+        "brown": ("brown", "tan", "বাদামি"),
+        "grey": ("grey", "gray", "dhushor", "ধূসর"),
+        "purple": ("purple", "beguni", "বেগুনি", "lavender"),
+        "cream": ("cream", "beige", "off white"),
+    }
+    for color, aliases in color_aliases.items():
+        if any(alias in normalized for alias in aliases):
+            return color
+    return None
+
+
+def normalize_color(value: str | None) -> str | None:
+    if not value:
+        return None
+    return infer_requested_color(value) or value.strip().casefold()
+
+
+def _enrich_hit(hit: ImageMatchResult, catalog: dict[str, InventoryItemRecord]) -> ImageMatchResult:
+    item = catalog[hit.product_id]
+    image = primary_image_asset(item)
+    attrs = item.attributes or {}
+    image_kind = image.kind if image else None
+    is_reference = bool(image.is_reference) if image else False
+    decision_label = _hit_decision_label(hit.score, image_kind, is_reference, hit.match_type)
+    reasons = list(hit.reasons)
+    if is_reference:
+        reasons.append("reference image only")
+    if attrs.get("variant_group_id") or attrs.get("design_id"):
+        reasons.append("catalog design identity available")
+    return ImageMatchResult(
+        product_id=hit.product_id,
+        name=item.name,
+        score=hit.score,
+        match_type=hit.match_type,
+        reasons=tuple(dict.fromkeys(reasons)),
+        price=item.price,
+        currency=item.currency,
+        stock=item.stock,
+        image_url=primary_image_url(item),
+        decision_label=decision_label,
+        variant_group_id=attrs.get("variant_group_id") or attrs.get("variant_group_name") or attrs.get("design_id"),
+        design_id=attrs.get("design_id"),
+        color=attrs.get("color") or attrs.get("color_family"),
+        size=attrs.get("size") or attrs.get("size_options"),
+        image_kind=image_kind,
+        is_reference=is_reference,
+        score_breakdown={
+            "visual_score": hit.score,
+            "stock": item.stock,
+            "category": item.category or attrs.get("category_key") or "",
+            "reference_image": is_reference,
+            "product_photo": image_kind == "product_photo",
+            "decision_label": decision_label,
+        },
+    )
+
+
+def _hit_decision_label(score: float, image_kind: str | None, is_reference: bool, match_type: str) -> str:
+    if match_type == "same_design_variant":
+        return "confirmed_same_design_variant"
+    if not is_reference and image_kind == "product_photo" and score >= 0.9:
+        return "confirmed_exact"
+    if not is_reference and image_kind == "product_photo" and score >= 0.62:
+        return "likely_same_design"
+    if score >= 0.18:
+        return "similar_style"
+    return "no_confident_match"
+
+
+def _response_decision_label(
+    primary: ImageMatchResult,
+    same_design_items: list[InventoryItemRecord],
+    requested_color: str | None,
+    in_stock_requested: list[InventoryItemRecord],
+) -> str:
+    if requested_color and in_stock_requested:
+        return "confirmed_same_design_variant"
+    if requested_color and same_design_items:
+        return "similar_style"
+    if primary.decision_label == "confirmed_exact":
+        return "confirmed_exact"
+    if primary.decision_label in {"likely_same_design", "confirmed_same_design_variant"}:
+        return primary.decision_label
+    if primary.score < 0.16:
+        return "no_confident_match"
+    return "similar_style"
+
+
+def _same_design_items(catalog: dict[str, InventoryItemRecord], group_key: str | None) -> list[InventoryItemRecord]:
+    if not group_key:
+        return []
+    normalized = _normalize_identity(group_key)
+    items = [
+        item for item in catalog.values()
+        if normalized in {
+            _normalize_identity(item.attributes.get("variant_group_id")),
+            _normalize_identity(item.attributes.get("variant_group_name")),
+            _normalize_identity(item.attributes.get("design_id")),
+        }
+    ]
+    return sorted(items, key=lambda item: (item.stock <= 0, _unique_color(item) or "", item.name.casefold()))
+
+
+def _normalize_identity(value: str | None) -> str:
+    return (value or "").casefold().replace(" ", "-").replace("_", "-")
+
+
+def _result_from_item(
+    item: InventoryItemRecord,
+    primary: ImageMatchResult,
+    decision_label: str,
+) -> ImageMatchResult:
+    image = primary_image_asset(item)
+    attrs = item.attributes or {}
+    score = primary.score if item.product_id == primary.product_id else max(0.01, primary.score - 0.03)
+    return ImageMatchResult(
+        product_id=item.product_id,
+        name=item.name,
+        score=round(score, 4),
+        match_type="same_design_variant",
+        reasons=("same catalog design/variant group",),
+        price=item.price,
+        currency=item.currency,
+        stock=item.stock,
+        image_url=primary_image_url(item),
+        decision_label=decision_label if item.product_id != primary.product_id else primary.decision_label,
+        variant_group_id=attrs.get("variant_group_id") or attrs.get("variant_group_name") or attrs.get("design_id"),
+        design_id=attrs.get("design_id"),
+        color=attrs.get("color") or attrs.get("color_family"),
+        size=attrs.get("size") or attrs.get("size_options"),
+        image_kind=image.kind if image else None,
+        is_reference=bool(image.is_reference) if image else False,
+        score_breakdown={
+            "visual_score": primary.score,
+            "variant_group_bonus": 1.0,
+            "stock": item.stock,
+            "category": item.category or attrs.get("category_key") or "",
+        },
+    )
+
+
+def _merge_hits(*groups: list[ImageMatchResult]) -> list[ImageMatchResult]:
+    by_id: dict[str, ImageMatchResult] = {}
+    for group in groups:
+        for hit in group:
+            existing = by_id.get(hit.product_id)
+            if existing is None or _decision_sort_key(hit) > _decision_sort_key(existing):
+                by_id[hit.product_id] = hit
+    merged = list(by_id.values())
+    merged.sort(key=lambda hit: _decision_sort_key(hit), reverse=True)
+    return merged
+
+
+def _apply_requested_color_priority(
+    hits: list[ImageMatchResult],
+    requested_color: str | None,
+) -> list[ImageMatchResult]:
+    if not requested_color:
+        return hits
+    return sorted(hits, key=lambda hit: (_color_value_matches(hit.color, requested_color), *list(_decision_sort_key(hit))), reverse=True)
+
+
+def _decision_sort_key(hit: ImageMatchResult) -> tuple[float, float, float]:
+    label_weight = {
+        "confirmed_exact": 5.0,
+        "confirmed_same_design_variant": 4.0,
+        "likely_same_design": 3.0,
+        "similar_style": 2.0,
+        "no_confident_match": 0.0,
+    }.get(hit.decision_label, 1.0)
+    stock_weight = 1.0 if hit.stock > 0 else 0.0
+    truth_weight = 1.0 if not hit.is_reference else 0.0
+    return (label_weight, stock_weight + truth_weight, hit.score)
+
+
+def _build_decision_answer(
+    *,
+    primary: ImageMatchResult,
+    hits: list[ImageMatchResult],
+    decision_label: str,
+    same_design_items: list[InventoryItemRecord],
+    requested_color: str | None,
+    requested_color_items: list[InventoryItemRecord],
+    in_stock_requested: list[InventoryItemRecord],
+    available_colors: tuple[str, ...],
+) -> str:
+    price = f"BDT {primary.price:,.0f}" if isinstance(primary.price, (int, float)) else "price not set"
+    if decision_label == "confirmed_exact":
+        color_line = _available_color_sentence(available_colors)
+        return (
+            f"Yes, this looks like **{primary.name}** ({price}, {primary.stock} in stock)."
+            + (f" {color_line}" if color_line else "")
+        )
+    if requested_color and in_stock_requested:
+        names = ", ".join(f"{item.name} ({item.stock} in stock)" for item in in_stock_requested[:3])
+        return f"Yes, same design e **{requested_color}** option available: {names}."
+    if requested_color and requested_color_items and not in_stock_requested:
+        color_line = _available_color_sentence(available_colors)
+        return (
+            f"Same design e **{requested_color}** catalog e ache, but currently stock e nei. "
+            f"{color_line or 'Similar options niche dilam.'}"
+        )
+    if requested_color and same_design_items and not requested_color_items:
+        color_line = _available_color_sentence(available_colors)
+        return (
+            f"Same design ta peyechi, but **{requested_color}** color currently catalog e nei. "
+            f"{color_line or 'Closest similar options niche dilam.'}"
+        )
+    if decision_label in {"confirmed_same_design_variant", "likely_same_design"}:
+        color_line = _available_color_sentence(available_colors)
+        return (
+            f"Ei design er closest match **{primary.name}** ({price}, {primary.stock} in stock)."
+            + (f" {color_line}" if color_line else "")
+        )
+    similar = [hit for hit in hits if hit.stock > 0][:3]
+    if similar:
+        names = ", ".join(f"{hit.name} ({'BDT ' + format(hit.price, ',.0f') if hit.price else 'price N/A'})" for hit in similar)
+        return f"Exact same confirm korte parchi na, but closest similar options: {names}."
+    return "Ei screenshot er exact product confident bhabe pachchi na. Color, size, ba category bolle ami aro narrow kore dekhate pari."
+
+
+def _available_color_sentence(colors: tuple[str, ...]) -> str:
+    if not colors:
+        return ""
+    return "Available colors: " + ", ".join(colors[:8]) + "."
+
+
+def _unique_color(item: InventoryItemRecord) -> str:
+    return (item.attributes.get("color") or item.attributes.get("color_family") or "").strip().casefold()
+
+
+def _color_matches(item: InventoryItemRecord, requested_color: str) -> bool:
+    return _color_value_matches(item.attributes.get("color"), requested_color) or _color_value_matches(
+        item.attributes.get("color_family"), requested_color
+    )
+
+
+def _color_value_matches(value: str | None, requested_color: str) -> bool:
+    if not value:
+        return False
+    normalized_value = normalize_color(value) or value.casefold()
+    normalized_requested = normalize_color(requested_color) or requested_color.casefold()
+    return normalized_requested in normalized_value or normalized_value in normalized_requested
 
 
 def _infer_category_from_text(text: str) -> str | None:

@@ -1,132 +1,124 @@
-INFO:     Started server process [382402]
+INFO:     Started server process [457045]
 INFO:     Waiting for application startup.
-2026-05-13 15:03:10,798 | INFO | app.main | FastAPI app started
+2026-05-14 00:45:47,009 | INFO | app.main | FastAPI app started
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:4837 (Press CTRL+C to quit)
-INFO:     127.0.0.1:49700 - "GET /inventory/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49714 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49722 - "HEAD /frontend/chat.html HTTP/1.1" 200 OK
-INFO:     27.147.145.26:43092 - "GET /docs HTTP/1.1" 200 OK
-INFO:     27.147.145.26:43092 - "GET /openapi.json HTTP/1.1" 200 OK
-INFO:     27.147.145.26:51096 - "GET /docs HTTP/1.1" 200 OK
-INFO:     27.147.145.26:51096 - "GET /openapi.json HTTP/1.1" 200 OK
-INFO:     27.147.145.26:51112 - "GET /frontend/chat.html HTTP/1.1" 200 OK
-INFO:     27.147.145.26:35312 - "GET /frontend/chat.css HTTP/1.1" 200 OK
-INFO:     27.147.145.26:51112 - "GET /frontend/chat.js?v=20260510-catalog-key HTTP/1.1" 200 OK
-INFO:     27.147.145.26:51112 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
-INFO:     27.147.145.26:35312 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     27.147.145.26:51112 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
-INFO:     27.147.145.26:51112 - "GET /health HTTP/1.1" 200 OK
-INFO:     27.147.145.26:51112 - "GET /inventory/items HTTP/1.1" 200 OK
-INFO:     27.147.145.26:53716 - "GET /frontend/chat.html HTTP/1.1" 200 OK
-INFO:     27.147.145.26:53718 - "GET /frontend/chat.css HTTP/1.1" 200 OK
-INFO:     27.147.145.26:53718 - "GET /frontend/chat.js?v=20260510-catalog-key HTTP/1.1" 200 OK
-INFO:     27.147.145.26:53718 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
-INFO:     27.147.145.26:53718 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
-INFO:     27.147.145.26:53718 - "GET /health HTTP/1.1" 200 OK
-INFO:     27.147.145.26:53718 - "GET /inventory/items HTTP/1.1" 200 OK
-INFO:     27.147.145.26:53716 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-2026-05-13 16:45:40,508 | INFO | app.inventory.clip_matcher | Loading CLIP model: openai/clip-vit-base-patch32
-2026-05-13 16:45:40,951 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32/tree/main/additional_chat_templates?recursive=false&expand=false "HTTP/1.1 404 Not Found"
-2026-05-13 16:45:41,238 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/processor_config.json "HTTP/1.1 404 Not Found"
-Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-2026-05-13 16:45:41,238 | WARNING | huggingface_hub.utils._http | Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-2026-05-13 16:45:41,536 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/chat_template.json "HTTP/1.1 404 Not Found"
-2026-05-13 16:45:41,822 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/chat_template.jinja "HTTP/1.1 404 Not Found"
-2026-05-13 16:45:42,091 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/audio_tokenizer_config.json "HTTP/1.1 404 Not Found"
-2026-05-13 16:45:42,358 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/processor_config.json "HTTP/1.1 404 Not Found"
-2026-05-13 16:45:42,638 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/preprocessor_config.json "HTTP/1.1 307 Temporary Redirect"
-2026-05-13 16:45:42,684 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/openai/clip-vit-base-patch32/3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268/preprocessor_config.json "HTTP/1.1 200 OK"
-2026-05-13 16:45:42,976 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/processor_config.json "HTTP/1.1 404 Not Found"
-2026-05-13 16:45:43,274 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/preprocessor_config.json "HTTP/1.1 307 Temporary Redirect"
-2026-05-13 16:45:43,297 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/openai/clip-vit-base-patch32/3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268/preprocessor_config.json "HTTP/1.1 200 OK"
-2026-05-13 16:45:43,589 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
-2026-05-13 16:45:43,617 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/openai/clip-vit-base-patch32/3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268/config.json "HTTP/1.1 200 OK"
-2026-05-13 16:45:43,915 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/tokenizer_config.json "HTTP/1.1 307 Temporary Redirect"
-2026-05-13 16:45:43,935 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/openai/clip-vit-base-patch32/3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268/tokenizer_config.json "HTTP/1.1 200 OK"
-2026-05-13 16:45:44,214 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32/tree/main/additional_chat_templates?recursive=false&expand=false "HTTP/1.1 404 Not Found"
-2026-05-13 16:45:44,491 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32/tree/main?recursive=true&expand=false "HTTP/1.1 200 OK"
-2026-05-13 16:45:44,926 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
-2026-05-13 16:45:44,970 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/openai/clip-vit-base-patch32/3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268/config.json "HTTP/1.1 200 OK"
-2026-05-13 16:45:45,256 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/model.safetensors "HTTP/1.1 404 Not Found"
-2026-05-13 16:45:45,546 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/model.safetensors.index.json "HTTP/1.1 404 Not Found"
-2026-05-13 16:45:45,859 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/pytorch_model.bin "HTTP/1.1 302 Found"
-2026-05-13 16:45:46,161 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/model.safetensors "HTTP/1.1 404 Not Found"
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights: 100%|██████████| 398/398 [00:00<00:00, 28172.02it/s]
-[1mCLIPModel LOAD REPORT[0m from: openai/clip-vit-base-patch32
-Key                                  | Status     |  | 
--------------------------------------+------------+--+-
-vision_model.embeddings.position_ids | UNEXPECTED |  | 
-text_model.embeddings.position_ids   | UNEXPECTED |  | 
-
-Notes:
-- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
-2026-05-13 16:45:46,435 | INFO | app.inventory.clip_matcher | CLIP model loaded successfully
-2026-05-13 16:45:46,441 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32 "HTTP/1.1 200 OK"
-2026-05-13 16:45:46,744 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32/commits/main "HTTP/1.1 200 OK"
-2026-05-13 16:45:47,072 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32/discussions?p=0 "HTTP/1.1 200 OK"
-2026-05-13 16:45:47,376 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32/commits/refs%2Fpr%2F66 "HTTP/1.1 200 OK"
-2026-05-13 16:45:47,659 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/refs%2Fpr%2F66/model.safetensors.index.json "HTTP/1.1 404 Not Found"
-2026-05-13 16:45:47,958 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/refs%2Fpr%2F66/model.safetensors "HTTP/1.1 302 Found"
-2026-05-13 16:45:48,315 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32/xet-read-token/c237dc49a33fc61debc9276459120b7eac67e7ef "HTTP/1.1 200 OK"
-2026-05-13 16:45:48,509 | WARNING | app.inventory.clip_matcher | CLIP batch encode failed at index 0: 'BaseModelOutputWithPooling' object has no attribute 'norm'
-2026-05-13 16:45:48,838 | WARNING | app.inventory.clip_matcher | CLIP batch encode failed at index 32: 'BaseModelOutputWithPooling' object has no attribute 'norm'
-2026-05-13 16:45:48,839 | INFO | app.inventory.clip_matcher | CLIP: precomputed 0 catalog embeddings
-INFO:     27.147.145.26:50336 - "POST /inventory/image-search HTTP/1.1" 500 Internal Server Error
-ERROR:    Exception in ASGI application
-Traceback (most recent call last):
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/uvicorn/protocols/http/httptools_impl.py", line 409, in run_asgi
-    result = await app(  # type: ignore[func-returns-value]
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
-    return await self.app(scope, receive, send)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/fastapi/applications.py", line 1054, in __call__
-    await super().__call__(scope, receive, send)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/applications.py", line 112, in __call__
-    await self.middleware_stack(scope, receive, send)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 187, in __call__
-    raise exc
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 165, in __call__
-    await self.app(scope, receive, _send)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/middleware/cors.py", line 93, in __call__
-    await self.simple_response(scope, receive, send, request_headers=headers)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/middleware/cors.py", line 144, in simple_response
-    await self.app(scope, receive, send)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/middleware/exceptions.py", line 62, in __call__
-    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
-    raise exc
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
-    await app(scope, receive, sender)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/routing.py", line 714, in __call__
-    await self.middleware_stack(scope, receive, send)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/routing.py", line 734, in app
-    await route.handle(scope, receive, send)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/routing.py", line 288, in handle
-    await self.app(scope, receive, send)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/routing.py", line 76, in app
-    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
-    raise exc
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
-    await app(scope, receive, sender)
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/starlette/routing.py", line 73, in app
-    response = await f(request)
-               ^^^^^^^^^^^^^^^^
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 301, in app
-    raw_response = await run_endpoint_function(
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 212, in run_endpoint_function
-    return await dependant.call(**values)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/app/api/routes_inventory.py", line 377, in image_search
-    matcher: CLIPImageMatcher | ImageMatcher = CLIPImageMatcher()
-                                               ^^^^^^^^^^^^^^^^^^
-  File "/home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/clip_matcher.py", line 152, in __init__
-    self._fallback = ImageMatcher()
-                     ^^^^^^^^^^^^^^
-TypeError: ImageMatcher.__init__() missing 1 required positional argument: 'catalog'
-2026-05-13 17:01:22,530 | INFO | httpx | HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
-2026-05-13 17:01:42,695 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=e178903b-ffd6-4d1c-9de4-2f07dcffb82c execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=5 latency_ms=20214.471 fallback_reason=None
-INFO:     27.147.145.26:53978 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55518 - "GET /health HTTP/1.1" 200 OK
+2026-05-14 00:45:56,739 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=9e1eeaab-eeac-4235-a088-92760a8f0585 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=96.894 fallback_reason=None
+INFO:     127.0.0.1:53990 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:45:56,841 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=e3601a9e-5452-4d2f-aa12-eabc732f4474 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=94.547 fallback_reason=None
+INFO:     127.0.0.1:54004 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44108 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44120 - "GET /chat.html HTTP/1.1" 404 Not Found
+INFO:     27.147.145.26:49756 - "GET /frontend/chat.html HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:49756 - "GET /frontend/chat.css?v=20260513-memory-toggle HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:49770 - "GET /frontend/chat.js?v=20260514-humanlike HTTP/1.1" 200 OK
+INFO:     27.147.145.26:49770 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     27.147.145.26:49770 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
+INFO:     27.147.145.26:49770 - "GET /health HTTP/1.1" 200 OK
+INFO:     27.147.145.26:49770 - "GET /inventory/items HTTP/1.1" 200 OK
+2026-05-14 00:50:10,643 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=6b8fdd7c-941b-4311-8ffc-6ee987373dde execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=3 latency_ms=55.949 fallback_reason=None
+INFO:     27.147.145.26:35600 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:50:19,873 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=b34e11fe-c01f-448d-a4a1-232d1ced99d3 execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=3 latency_ms=68.944 fallback_reason=None
+INFO:     27.147.145.26:38314 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:50:30,813 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=f20d474f-8b01-4ebc-89f5-d52a485d0f7a execution_path=inventory_fashion_retail_structured intent=fashion_accessory_match answer_engine=deterministic total_hits=1 latency_ms=97.503 fallback_reason=None
+INFO:     27.147.145.26:43976 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:50:37,259 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=d1d2f62c-8c8e-49f9-bd65-9ff7aafc4106 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=117.016 fallback_reason=None
+INFO:     27.147.145.26:34938 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:50:49,473 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=69ff6b68-941f-46ba-8f82-62e5f41a7b59 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=122.114 fallback_reason=None
+INFO:     27.147.145.26:53534 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:50:56,814 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=6e799b0d-df1e-40de-88d4-04db429a1483 execution_path=inventory_fashion_retail_structured intent=fashion_styling_advice answer_engine=deterministic total_hits=4 latency_ms=165.083 fallback_reason=None
+INFO:     27.147.145.26:41608 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:52:58,929 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=cd94e0c6-15ee-4455-97d1-7acc77f2a49f execution_path=inventory_fashion_retail_structured intent=fashion_compare answer_engine=deterministic total_hits=5 latency_ms=62.445 fallback_reason=None
+INFO:     27.147.145.26:38092 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:53:03,315 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=6e724f7f-976d-41de-b1a5-e3b48ca014ee execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=93.103 fallback_reason=None
+INFO:     27.147.145.26:38092 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:53:13,655 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=e4aee9ac-5dfa-445c-91b3-96e1911f957c execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=1 latency_ms=80.446 fallback_reason=None
+INFO:     27.147.145.26:53254 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     27.147.145.26:58832 - "GET /frontend/chat.html HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:58832 - "GET /frontend/chat.js?v=20260514-humanlike HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:58832 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     27.147.145.26:58832 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
+INFO:     27.147.145.26:58832 - "GET /health HTTP/1.1" 200 OK
+INFO:     27.147.145.26:58832 - "GET /inventory/items HTTP/1.1" 200 OK
+2026-05-14 00:53:37,872 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=94842bc2-11bf-4e21-ab9b-c9ce6dc77f2d execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=2 latency_ms=98.514 fallback_reason=None
+INFO:     27.147.145.26:58842 - "POST /inventory/ask HTTP/1.1" 200 OK
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 31638.94it/s]
+2026-05-14 00:53:49,720 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.029s]
+2026-05-14 00:53:49,728 | INFO | elastic_transport.transport | HEAD http://localhost:9200/inventory-rag [status:200 duration:0.003s]
+2026-05-14 00:53:49,752 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.024s]
+2026-05-14 00:53:49,808 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=56730dd5-f128-4950-9cee-79f7c54f6ba1 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=3851.946 fallback_reason=That does not map cleanly to a supported inventory question I can answer from the current catalog.
+INFO:     27.147.145.26:44180 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     27.147.145.26:41002 - "POST /feedback HTTP/1.1" 200 OK
+2026-05-14 00:55:13,584 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=89d76151-0426-4da7-9616-9848324505e3 execution_path=inventory_fashion_retail_structured intent=fashion_compare answer_engine=deterministic total_hits=2 latency_ms=104.207 fallback_reason=None
+INFO:     27.147.145.26:54750 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:56:15,752 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=9b9418f2-c673-417f-9228-0538694c2000 execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=1 latency_ms=88.457 fallback_reason=None
+INFO:     27.147.145.26:42350 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     27.147.145.26:43800 - "POST /feedback HTTP/1.1" 200 OK
+2026-05-14 00:56:40,966 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=49f81313-b386-4eba-8cdf-c0c1e5257975 execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=1 latency_ms=84.206 fallback_reason=None
+INFO:     27.147.145.26:43800 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:56:50,779 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=85b4dde8-97a6-4c0c-91f5-c01cd414e801 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=122.406 fallback_reason=None
+INFO:     27.147.145.26:40496 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:56:58,554 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.026s]
+2026-05-14 00:56:58,556 | INFO | elastic_transport.transport | HEAD http://localhost:9200/inventory-rag [status:200 duration:0.002s]
+2026-05-14 00:56:58,564 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.007s]
+2026-05-14 00:56:58,613 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=c1280bcc-a053-44dc-a37e-6210e1deb379 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=213.252 fallback_reason=That does not map cleanly to a supported inventory question I can answer from the current catalog.
+INFO:     27.147.145.26:49280 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:57:13,869 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=84cac165-f408-4b2d-b24b-49f40282a192 execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=0 latency_ms=106.716 fallback_reason=None
+INFO:     27.147.145.26:53544 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:57:25,063 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=d412ea43-e8c0-4406-90f0-80f2901c4448 execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=1 latency_ms=78.476 fallback_reason=None
+INFO:     27.147.145.26:46652 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:57:43,637 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=d56d975f-dc0f-452b-8141-4212344c3dd8 execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=2 latency_ms=93.069 fallback_reason=None
+INFO:     27.147.145.26:56388 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:58:08,409 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=0bce8bec-c4d0-41ab-a986-a3bc9112a50f execution_path=inventory_fashion_retail_structured intent=fashion_size_availability answer_engine=deterministic total_hits=1 latency_ms=80.467 fallback_reason=None
+INFO:     27.147.145.26:57552 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:58:19,432 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=fcceea4d-6127-4f35-ac90-06b82982c2c2 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=4 latency_ms=88.018 fallback_reason=None
+INFO:     27.147.145.26:37604 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:58:28,997 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=ce167191-cb42-47b3-af7f-c9d407b86515 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=4 latency_ms=109.941 fallback_reason=None
+INFO:     27.147.145.26:36688 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 00:58:50,823 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=517665c3-0ad4-4863-95f1-fc3813c6d413 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=4 latency_ms=110.838 fallback_reason=None
+INFO:     27.147.145.26:50568 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     27.147.145.26:51618 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+INFO:     27.147.145.26:51618 - "GET /frontend/chat.css?v=20260513-memory-toggle HTTP/1.1" 200 OK
+INFO:     27.147.145.26:51618 - "GET /frontend/chat.js?v=20260514-humanlike HTTP/1.1" 200 OK
+INFO:     27.147.145.26:51618 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     27.147.145.26:51618 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
+INFO:     27.147.145.26:51618 - "GET /health HTTP/1.1" 200 OK
+INFO:     27.147.145.26:51618 - "GET /inventory/items HTTP/1.1" 200 OK
+2026-05-14 11:15:06,763 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=49fe3a88-5582-46b5-b015-bc99f74f1cf5 execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=3 latency_ms=72.263 fallback_reason=None
+INFO:     27.147.145.26:51622 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 11:15:09,845 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=c33e75d6-089f-4b14-b598-b1aa82189857 execution_path=inventory_fashion_retail_structured intent=fashion_variant_color answer_engine=deterministic total_hits=3 latency_ms=78.072 fallback_reason=None
+INFO:     27.147.145.26:51622 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 11:15:11,785 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=e9729030-8636-467f-9106-41cd9117e387 execution_path=inventory_fashion_retail_structured intent=fashion_accessory_match answer_engine=deterministic total_hits=1 latency_ms=78.277 fallback_reason=None
+INFO:     27.147.145.26:51622 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 11:15:25,121 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.011s]
+2026-05-14 11:15:25,124 | INFO | elastic_transport.transport | HEAD http://localhost:9200/inventory-rag [status:200 duration:0.002s]
+2026-05-14 11:15:25,146 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.022s]
+2026-05-14 11:15:25,164 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=68bd16e2-e3d4-41ba-b23f-be4dde57d7f7 execution_path=inventory_ask intent=product_detail answer_engine=deterministic total_hits=1 latency_ms=188.756 fallback_reason=None
+INFO:     27.147.145.26:41710 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     35.237.4.214:49230 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+INFO:     27.147.145.26:48202 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+2026-05-14 11:16:56,987 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=2e26174a-e302-4f60-b0a6-2bae4832501b execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=120.368 fallback_reason=None
+INFO:     27.147.145.26:57618 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     27.147.145.26:48204 - "GET /frontend/chat.css?v=20260513-memory-toggle HTTP/1.1" 200 OK
+INFO:     27.147.145.26:48202 - "GET /frontend/chat.js?v=20260514-humanlike HTTP/1.1" 200 OK
+INFO:     27.147.145.26:48202 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     27.147.145.26:48204 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     27.147.145.26:48204 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
+INFO:     27.147.145.26:48204 - "GET /health HTTP/1.1" 200 OK
+INFO:     27.147.145.26:48204 - "GET /inventory/items HTTP/1.1" 200 OK
+2026-05-14 11:17:00,823 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.013s]
+2026-05-14 11:17:00,831 | INFO | elastic_transport.transport | HEAD http://localhost:9200/inventory-rag [status:200 duration:0.002s]
+2026-05-14 11:17:00,889 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.058s]
+2026-05-14 11:17:00,972 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=fbdac84f-0579-4242-b952-5ea7b8a062d5 execution_path=inventory_ask intent=restock answer_engine=deterministic total_hits=5 latency_ms=304.849 fallback_reason=None
+INFO:     27.147.145.26:57618 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 11:17:09,482 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.021s]
+2026-05-14 11:17:09,491 | INFO | elastic_transport.transport | HEAD http://localhost:9200/inventory-rag [status:200 duration:0.002s]
+2026-05-14 11:17:09,558 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.067s]
+2026-05-14 11:17:09,612 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=74a757d2-f4ed-4069-97a5-b413e323a69f execution_path=inventory_ask intent=product_search answer_engine=deterministic total_hits=0 latency_ms=263.97 fallback_reason=No reliable catalog evidence was found for this request.
+INFO:     27.147.145.26:57610 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 11:17:19,907 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=8547e03f-0422-40b8-9e50-536452a063c2 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=97.655 fallback_reason=None
+INFO:     27.147.145.26:53442 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-14 11:17:32,003 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=277bad96-2e52-4934-b827-aca19131d347 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=1 latency_ms=110.828 fallback_reason=None
+INFO:     27.147.145.26:38702 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     27.147.145.26:47318 - "GET /inventory/items HTTP/1.1" 200 OK

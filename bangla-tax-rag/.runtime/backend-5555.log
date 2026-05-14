@@ -1,0 +1,12 @@
+INFO:     Started server process [457050]
+INFO:     Waiting for application startup.
+2026-05-14 00:45:46,929 | INFO | app.main | FastAPI app started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:5555 (Press CTRL+C to quit)
+INFO:     127.0.0.1:37854 - "GET /frontend/trace.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36680 - "GET /frontend/trace.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:36680 - "GET /frontend/trace.css?v=20260514-es-probe HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:36696 - "GET /frontend/trace.js?v=20260514-es-probe HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:36696 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36696 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36696 - "GET /health HTTP/1.1" 200 OK

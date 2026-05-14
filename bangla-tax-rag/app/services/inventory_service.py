@@ -464,6 +464,11 @@ class InventoryService:
             or storage_description.get("business_signal_path")
         )
 
+    def _vector_store_path(self) -> str | None:
+        if self.vector_store.provider.value != "local":
+            return None
+        return getattr(self.vector_store.config, "local_store_path", None)
+
     def status(self) -> InventoryStatusResponse:
         items = self._load_catalog()
         rag_enabled_count = sum(1 for item in items.values() if item.include_in_rag)
@@ -478,7 +483,7 @@ class InventoryService:
             namespace=self.config.namespace,
             catalog_path=str(self._catalog_path()),
             vector_backend=self.vector_store.provider.value,
-            vector_store_path=getattr(self.vector_store.config, "local_store_path", None),
+            vector_store_path=self._vector_store_path(),
             storage_backend=storage_description.get("backend"),
             storage_path=self._inventory_storage_path(storage_description),
         )
@@ -550,7 +555,7 @@ class InventoryService:
             namespace=self.config.namespace,
             trace_dir=str(Path(self.config.agentic_trace_dir)),
             vector_backend=self.vector_store.provider.value,
-            vector_store_path=getattr(self.vector_store.config, "local_store_path", None),
+            vector_store_path=self._vector_store_path(),
         )
 
     def sync_status(self) -> InventorySyncStatusResponse:
@@ -1293,46 +1298,47 @@ class InventoryService:
         # conversation, the customer's profile, and recent state — and
         # writes a structured plan that downstream layers can lean on.
         intent_plan = None
-        try:
-            from app.inventory.intent_planner import (
-                plan as plan_intent,
-                render_profile_summary,
-                render_state_summary,
-                should_invoke_planner,
-            )
-            from app.inventory.llm_slot_extractor import is_ollama_available
+        if request.answer_engine == "auto":
+            try:
+                from app.inventory.intent_planner import (
+                    plan as plan_intent,
+                    render_profile_summary,
+                    render_state_summary,
+                    should_invoke_planner,
+                )
+                from app.inventory.llm_slot_extractor import is_ollama_available
 
-            consec_failures = (
-                conv_state.consecutive_failures if conv_state is not None else 0
-            )
-            if (
-                is_ollama_available()
-                and should_invoke_planner(
-                    question=request.question,
-                    conversation_history=conversation_history,
-                    consecutive_failures=consec_failures,
+                consec_failures = (
+                    conv_state.consecutive_failures if conv_state is not None else 0
                 )
-            ):
-                profile_summary = ""
-                if session_id:
-                    try:
-                        from app.inventory.identity_store import IdentityStore
-                        store = IdentityStore()
-                        phone = store.get_phone_for_session(session_id)
-                        if phone:
-                            profile_summary = render_profile_summary(
-                                store.get_profile(phone)
-                            )
-                    except Exception:
-                        pass
-                intent_plan = plan_intent(
-                    question=request.question,
-                    conversation_history=conversation_history,
-                    state_summary=render_state_summary(conv_state),
-                    profile_summary=profile_summary,
-                )
-        except Exception as exc:
-            logger.debug("IntentPlanner failed (continuing without plan): %s", exc)
+                if (
+                    is_ollama_available()
+                    and should_invoke_planner(
+                        question=request.question,
+                        conversation_history=conversation_history,
+                        consecutive_failures=consec_failures,
+                    )
+                ):
+                    profile_summary = ""
+                    if session_id:
+                        try:
+                            from app.inventory.identity_store import IdentityStore
+                            store = IdentityStore()
+                            phone = store.get_phone_for_session(session_id)
+                            if phone:
+                                profile_summary = render_profile_summary(
+                                    store.get_profile(phone)
+                                )
+                        except Exception:
+                            pass
+                    intent_plan = plan_intent(
+                        question=request.question,
+                        conversation_history=conversation_history,
+                        state_summary=render_state_summary(conv_state),
+                        profile_summary=profile_summary,
+                    )
+            except Exception as exc:
+                logger.debug("IntentPlanner failed (continuing without plan): %s", exc)
 
         # If the planner — having read the whole conversation — still says
         # it needs to clarify, return that question now and skip the
@@ -1356,6 +1362,7 @@ class InventoryService:
             last_primary_product_id=last_primary_product_id,
             top_k=request.top_k,
             conversation_history=conversation_history,
+            allow_llm_slots=request.answer_engine == "auto",
         )
         if outcome is None:
             return None
@@ -1366,6 +1373,8 @@ class InventoryService:
         # deterministic logic because they have hard correctness rules.
         reasoning_note: str | None = None
         if (
+            request.answer_engine == "auto"
+            and
             outcome.intent == "fashion_search"
             and not outcome.abstained
             and len(outcome.product_ids) > 1
@@ -1471,6 +1480,62 @@ class InventoryService:
             filters=effective_filters,
             outcome=outcome,
         )
+        retrieval_stage_counts = {
+            "fashion_structured_requests": 1,
+            "fashion_structured_matches": outcome.total_matches,
+            "returned_hits": len(response_hits),
+        }
+        retrieval_steps: list[InventoryAgenticStep] = []
+        reasoning_summary = list(outcome.reasoning_steps)
+        if request.debug_retrieval_probe:
+            probe_backend = self.vector_store.provider.value
+            try:
+                probe_response, probe_counts, probe_trace_diagnostics = self._search_with_trace_diagnostics(
+                    InventorySearchRequest(
+                        query_text=request.question,
+                        top_k=request.top_k,
+                        filters=applied_filters.model_copy(deep=True),
+                    )
+                )
+                retrieval_stage_counts = self._merge_retrieval_stage_counts(
+                    retrieval_stage_counts,
+                    probe_counts,
+                )
+                retrieval_stage_counts["returned_hits"] = len(response_hits)
+                retrieval_stage_counts["retrieval_probe_requests"] = (
+                    retrieval_stage_counts.get("retrieval_probe_requests", 0) + 1
+                )
+                retrieval_stage_counts["retrieval_probe_returned_hits"] = probe_response.total_hits
+                retrieval_stage_counts[f"{probe_backend}_probe_requests"] = (
+                    retrieval_stage_counts.get(f"{probe_backend}_probe_requests", 0) + 1
+                )
+                retrieval_stage_counts[f"{probe_backend}_probe_hits"] = probe_response.total_hits
+                probe_hits = probe_response.hits[: min(3, len(probe_response.hits))]
+                retrieval_steps.append(
+                    self._build_trace_step(
+                        step_number=1,
+                        action=f"{probe_backend}_hybrid_retrieval_probe",
+                        query_text=request.question,
+                        applied_filters=applied_filters,
+                        total_hits=probe_response.total_hits,
+                        selected_hits=probe_hits,
+                        rejected_candidates=list(probe_trace_diagnostics.rejected_candidates[:5]),
+                        observation=(
+                            f"{probe_backend} retrieval probe ran for observability. "
+                            "The final answer still used the structured fashion decision because it had exact catalog slots."
+                        ),
+                        retrieval_stage_counts=probe_counts,
+                    )
+                )
+                reasoning_summary.append(
+                    f"Debug retrieval probe ran against {probe_backend} and returned {probe_response.total_hits} hit(s)."
+                )
+            except Exception as exc:
+                logger.warning("Debug retrieval probe failed: %s", exc)
+                retrieval_stage_counts["retrieval_probe_errors"] = (
+                    retrieval_stage_counts.get("retrieval_probe_errors", 0) + 1
+                )
+                reasoning_summary.append(f"Debug retrieval probe failed: {exc}")
         # Build product snippets for the natural answer generator
         product_snippets = [
             {
@@ -1483,20 +1548,34 @@ class InventoryService:
             if pid in catalog
         ]
         # Try Ollama natural answer; fall back to template on failure
-        from app.inventory.llm_slot_extractor import is_ollama_available
         natural = None
         critique_passed = True
         critique_issues: list[str] = []
-        if is_ollama_available() and not outcome.abstained and product_snippets:
+        requested_fashion_answer_engine = self._resolve_inventory_answer_engine(
+            requested_answer_engine=request.answer_engine,
+            confidence_score=outcome.confidence,
+            hits=response_hits,
+            abstention_reason=outcome.abstention_reason,
+        )
+        if requested_fashion_answer_engine == "natural" and not outcome.abstained and product_snippets:
+            from app.inventory.llm_slot_extractor import is_ollama_available
+
+            if not is_ollama_available():
+                requested_fashion_answer_engine = "deterministic"
+        if requested_fashion_answer_engine == "natural" and not outcome.abstained and product_snippets:
             natural = generate_ollama_answer(
                 question=request.question,
                 product_snippets=product_snippets,
                 language_hint=outcome.slots.language,
+                model=self.config.natural_answer_model_name or "qwen3:8b",
+                timeout=self.config.natural_answer_timeout_seconds,
+                temperature=self.config.natural_answer_temperature,
+                num_predict=self.config.natural_answer_max_tokens,
                 fallback=outcome.answer,
             )
             # Self-critique loop: catch hallucinations, ignored constraints, etc.
             # If the critic fails the answer, regenerate ONCE with the fix hint.
-            if natural:
+            if natural and request.answer_engine == "auto":
                 try:
                     from app.inventory.answer_critic import critique_answer
                     critique = critique_answer(
@@ -1517,6 +1596,10 @@ class InventoryService:
                             question=request.question + fix_hint,
                             product_snippets=product_snippets,
                             language_hint=outcome.slots.language,
+                            model=self.config.natural_answer_model_name or "qwen3:8b",
+                            timeout=self.config.natural_answer_timeout_seconds,
+                            temperature=self.config.natural_answer_temperature,
+                            num_predict=self.config.natural_answer_max_tokens,
                             fallback=outcome.answer,
                         )
                         if retry:
@@ -1604,12 +1687,9 @@ class InventoryService:
             requested_answer_engine=request.answer_engine,
             retrieved_hits=response_hits,
             reranked_hits=response_hits,
-            retrieval_stage_counts={
-                "fashion_structured_requests": 1,
-                "fashion_structured_matches": outcome.total_matches,
-                "returned_hits": len(response_hits),
-            },
-            reasoning_summary=list(outcome.reasoning_steps),
+            retrieval_stage_counts=retrieval_stage_counts,
+            retrieval_steps=retrieval_steps,
+            reasoning_summary=reasoning_summary,
         )
         # Conversion funnel telemetry — best-effort
         try:

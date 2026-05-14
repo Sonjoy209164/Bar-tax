@@ -910,6 +910,13 @@ class InventoryAskRequest(BaseModel):
         default=None,
         description="Optional browser/client session ID. Used to load saved customer preferences (budget, colours, sizes) as context.",
     )
+    debug_retrieval_probe: bool = Field(
+        default=False,
+        description=(
+            "Debug/observer mode only. When true, structured inventory answers also run "
+            "a sidecar retrieval probe so traces show vector/BM25 backend activity."
+        ),
+    )
 
     @field_validator("question")
     @classmethod

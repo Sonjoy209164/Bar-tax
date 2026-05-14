@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Inventory Chat</title>
-    <link rel="stylesheet" href="./chat.css" />
+    <link rel="stylesheet" href="./chat.css?v=20260513-memory-toggle" />
     <style>
       /* Image upload */
       .image-upload-area {
@@ -363,7 +363,14 @@
       </header>
 
       <div class="workspace" id="workspace">
-        <section class="chat-panel">
+        <section class="chat-panel" id="chatPanel">
+          <div class="chat-toolbar">
+            <div>
+              <strong>Chat Transcript</strong>
+              <span id="messagesStatus">Visible. Memory still uses the last 8 turns.</span>
+            </div>
+            <button id="messagesToggle" type="button" aria-expanded="true">Hide Messages</button>
+          </div>
           <div class="messages" id="messages" aria-live="polite"></div>
 
           <!-- Order state bars -->
@@ -398,6 +405,10 @@
 
           <!-- Quick chips -->
           <div class="chips" id="chips">
+            <span class="chip-label">Memory test</span>
+            <button type="button" data-question="Lotus Buti Dhakai Jamdani Saree Red ache?">1. Focus red Jamdani</button>
+            <button type="button" data-question="same design blue color e ache?">2. Same design blue?</button>
+            <button type="button" data-question="eta shathe kon bag manabe?">3. Matching bag?</button>
             <span class="chip-label">Try</span>
             <button type="button">do you have White Pearl Earrings?</button>
             <button type="button">white pearl earrings er blue color ache?</button>
@@ -420,6 +431,20 @@
             <button type="button">refund policy ki?</button>
             <button type="button">eta order korte chai</button>
             <button type="button">amar order track korte chai</button>
+            <button type="button">same design green ache?</button>
+            <button type="button">pink three piece er size L ache?</button>
+            <button type="button">white cotton panjabi size L ache?</button>
+            <button type="button">men er formal pant waist 34 ache?</button>
+            <button type="button">ladies black heel size 38 ache?</button>
+            <button type="button">men's brown loafer size 42 ache?</button>
+            <button type="button">men's oud perfume gift er jonno bhalo?</button>
+            <button type="button">unisex citrus fresh perfume ache?</button>
+            <button type="button">dry skin er jonno sunscreen ache?</button>
+            <button type="button">neem face wash ache?</button>
+            <button type="button">red lipstick ache?</button>
+            <button type="button">same design purple ache?</button>
+            <button type="button">tomader ki gaming laptop ache?</button>
+            <button type="button">which products should I restock?</button>
           </div>
 
           <!-- Image upload -->
@@ -468,6 +493,6 @@
         </aside>
       </div>
     </main>
-    <script src="./chat.js?v=20260510-catalog-key"></script>
+    <script src="./chat.js?v=20260514-humanlike"></script>
   </body>
 </html>

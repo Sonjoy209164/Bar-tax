@@ -237,7 +237,15 @@ class InventoryMemoryResolver:
 
     @staticmethod
     def _has_any(text: str, phrases: tuple[str, ...]) -> bool:
-        return any(phrase in text for phrase in phrases)
+        return any(InventoryMemoryResolver._has_phrase(text, phrase) for phrase in phrases)
+
+    @staticmethod
+    def _has_phrase(text: str, phrase: str) -> bool:
+        normalized_phrase = normalize_inventory_text(phrase)
+        if not normalized_phrase:
+            return False
+        pattern = re.escape(normalized_phrase).replace(r"\ ", r"\s+")
+        return bool(re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", text))
 
     @staticmethod
     def _dedupe(product_ids: list[str | None]) -> list[str]:

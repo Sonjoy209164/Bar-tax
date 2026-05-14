@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -27,6 +28,8 @@ Rules you MUST follow:
 5. When recommending products, mention the price and stock count.
 6. Do not repeat the customer's question back to them.
 7. End with a natural follow-up question when the product has that attribute or it is appropriate (e.g., "কোন সাইজ দরকার?" or "Would you like to place an order?").
+8. Do not expose reasoning, hidden notes, JSON, tool names, or internal system details.
+9. Avoid stiff phrases like "matching option(s)" when a normal sales phrase works better.
 """
 
 _PRODUCT_CONTEXT_TEMPLATE = """\
@@ -110,6 +113,8 @@ def generate_ollama_answer(
     ollama_url: str = _OLLAMA_URL,
     model: str = _OLLAMA_MODEL,
     timeout: float = _OLLAMA_TIMEOUT,
+    temperature: float = 0.25,
+    num_predict: int = 400,
     fallback: str = "",
 ) -> str | None:
     """
@@ -122,7 +127,7 @@ def generate_ollama_answer(
         resp = httpx.post(
             f"{ollama_url}/api/chat",
             json={"model": model, "messages": messages, "stream": False,
-                  "options": {"temperature": 0.25, "num_predict": 400}},
+                  "options": {"temperature": temperature, "num_predict": num_predict}},
             timeout=timeout,
         )
         resp.raise_for_status()
@@ -139,6 +144,8 @@ def generate_ollama_answer(
 def parse_natural_answer(raw: str, fallback: str) -> str:
     """Clean up LLM output. Strip any preamble, enforce max length."""
     text = raw.strip()
+    text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+    text = re.sub(r"^\s*(assistant|final answer)\s*:\s*", "", text, flags=re.IGNORECASE).strip()
     # Remove common preambles the LLM might add
     for prefix in ("Sure!", "Of course!", "Certainly!", "Here is", "Here's", "Response:", "Answer:"):
         if text.startswith(prefix):

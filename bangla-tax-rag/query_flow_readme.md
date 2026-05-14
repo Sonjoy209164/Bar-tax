@@ -10,6 +10,49 @@ User query -> frontend -> API -> service router -> retrieval/retail logic -> ans
 
 Use this document when you want to understand, debug, or explain how the bot generates an answer.
 
+## Quick File Links
+
+Use these links while reading so you can jump from explanation to code quickly.
+
+| Area | File |
+| --- | --- |
+| Chat UI logic | [frontend/chat.js](</home/sonjoy/Bar tax/bangla-tax-rag/frontend/chat.js>) |
+| Chat UI page | [frontend/chat.html](</home/sonjoy/Bar tax/bangla-tax-rag/frontend/chat.html>) |
+| Chat UI styles | [frontend/chat.css](</home/sonjoy/Bar tax/bangla-tax-rag/frontend/chat.css>) |
+| App entrypoint | [app/main.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/main.py>) |
+| Inventory API routes | [app/api/routes_inventory.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/api/routes_inventory.py>) |
+| Orders API routes | [app/api/routes_orders.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/api/routes_orders.py>) |
+| Main inventory service | [app/services/inventory_service.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/services/inventory_service.py>) |
+| Fashion retail logic | [app/inventory/fashion_retail.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/fashion_retail.py>) |
+| Memory resolver | [app/inventory/memory.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/memory.py>) |
+| Conversation state | [app/inventory/conversation_state.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/conversation_state.py>) |
+| Coreference resolver | [app/inventory/coreference_resolver.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/coreference_resolver.py>) |
+| Intent planner | [app/inventory/intent_planner.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/intent_planner.py>) |
+| LLM intent classifier | [app/inventory/llm_intent_classifier.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/llm_intent_classifier.py>) |
+| LLM slot extractor | [app/inventory/llm_slot_extractor.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/llm_slot_extractor.py>) |
+| LLM reasoner | [app/inventory/llm_reasoner.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/llm_reasoner.py>) |
+| Preference extraction | [app/inventory/preferences.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/preferences.py>) |
+| Product ontology | [app/inventory/ontology.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/ontology.py>) |
+| Reranker | [app/inventory/reranker.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/reranker.py>) |
+| Decisioning | [app/inventory/decisioning.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/decisioning.py>) |
+| Evidence contract | [app/inventory/evidence_contract.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/evidence_contract.py>) |
+| Answer planner | [app/inventory/planner.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/planner.py>) |
+| Answer verifier | [app/inventory/verifier.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/verifier.py>) |
+| Natural answer writer | [app/inventory/natural_answer.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/natural_answer.py>) |
+| Answer critic | [app/inventory/answer_critic.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/answer_critic.py>) |
+| Inventory storage layer | [app/inventory/storage.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/inventory/storage.py>) |
+| Embedder | [app/retrieval/embedder.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/retrieval/embedder.py>) |
+| Vector store interface | [app/retrieval/vector_store_base.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/retrieval/vector_store_base.py>) |
+| Elasticsearch store | [app/retrieval/elasticsearch_store.py](</home/sonjoy/Bar tax/bangla-tax-rag/app/retrieval/elasticsearch_store.py>) |
+| Config | [config/config.dev.yaml](</home/sonjoy/Bar tax/bangla-tax-rag/config/config.dev.yaml>) |
+| Catalog data | [data/inventory/catalog.jsonl](</home/sonjoy/Bar tax/bangla-tax-rag/data/inventory/catalog.jsonl>) |
+| Business signals | [data/inventory/business_signals.jsonl](</home/sonjoy/Bar tax/bangla-tax-rag/data/inventory/business_signals.jsonl>) |
+| Policy data | [data/inventory/policies.json](</home/sonjoy/Bar tax/bangla-tax-rag/data/inventory/policies.json>) |
+| Orders data | [data/orders/orders_store.jsonl](</home/sonjoy/Bar tax/bangla-tax-rag/data/orders/orders_store.jsonl>) |
+| Feedback data | [data/feedback/feedback.jsonl](</home/sonjoy/Bar tax/bangla-tax-rag/data/feedback/feedback.jsonl>) |
+| Learning roadmap | [learning.md](</home/sonjoy/Bar tax/bangla-tax-rag/learning.md>) |
+| Theory pipeline | [theorypipeline.md](</home/sonjoy/Bar tax/bangla-tax-rag/theorypipeline.md>) |
+
 ## Ownership Phases Covered Here
 
 This README completes the learning material for Phase A to Phase D.

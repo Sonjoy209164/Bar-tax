@@ -95,12 +95,63 @@ h1 {
 .chat-panel {
   min-height: 0;
   display: grid;
-  grid-template-rows: 1fr auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto auto auto auto;
   overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
+}
+
+.chat-toolbar {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.chat-toolbar strong,
+.chat-toolbar span {
+  display: block;
+}
+
+.chat-toolbar strong {
+  font-size: 13px;
+}
+
+.chat-toolbar span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chat-toolbar button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--accent-strong);
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chat-toolbar button:hover {
+  border-color: var(--accent);
+}
+
+.chat-panel.messages-hidden {
+  grid-template-rows: auto auto auto auto auto auto auto;
+}
+
+.chat-panel.messages-hidden .messages {
+  display: none;
 }
 
 .messages {

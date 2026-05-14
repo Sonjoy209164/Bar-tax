@@ -14,13 +14,20 @@ const state = {
   micRecording: false,
   recognition: null,
   catalogOpen: true,
+  messagesVisible: true,
   catalogLoaded: false,
   catalogItems: [],
+  assistantMode: "sales",
+  replyStyle: "detailed",
+  answerEngine: "deterministic",
 };
 
 const el = {
   workspace:       document.querySelector("#workspace"),
+  chatPanel:       document.querySelector("#chatPanel"),
   messages:        document.querySelector("#messages"),
+  messagesToggle:  document.querySelector("#messagesToggle"),
+  messagesStatus:  document.querySelector("#messagesStatus"),
   form:            document.querySelector("#chatForm"),
   input:           document.querySelector("#chatInput"),
   send:            document.querySelector("#sendButton"),
@@ -65,9 +72,10 @@ async function init() {
   bindEvents();
   initVoiceInput();
   setCatalogOpen(true);
+  setMessagesVisible(true);
   addMessage(
     "assistant",
-    "Ready. Ask in Bangla, Banglish, or English — products, styling, delivery, orders, comparisons. Upload a photo to find similar items, or tap 🎤 to speak."
+    "Ready. Ask in Bangla, Banglish, or English — products, styling, delivery, orders, comparisons. I’ll answer naturally from the catalog, and I’ll say when I’m unsure."
   );
   await checkHealth();
   await loadCatalog({ quiet: true });
@@ -101,7 +109,7 @@ function bindEvents() {
   el.chips.addEventListener("click", e => {
     const btn = e.target.closest("button");
     if (!btn) return;
-    el.input.value = btn.textContent.trim();
+    el.input.value = btn.dataset.question || btn.textContent.trim();
     resizeInput();
     el.input.focus();
   });
@@ -110,6 +118,7 @@ function bindEvents() {
   el.confirmOrderBtn.addEventListener("click", () => void sendMessage("yes"));
   el.cancelOrderBtn.addEventListener("click", () => void cancelOrder());
   el.cartToggle.addEventListener("click", toggleCart);
+  el.messagesToggle.addEventListener("click", () => setMessagesVisible(!state.messagesVisible));
   el.micBtn.addEventListener("click", toggleMic);
   el.trackOrderToggle.addEventListener("click", () => el.trackBar.classList.toggle("active"));
   el.trackClose.addEventListener("click", () => el.trackBar.classList.remove("active"));
@@ -129,6 +138,21 @@ function bindEvents() {
     el.input.focus();
     if (window.innerWidth < 920) setCatalogOpen(false);
   });
+}
+
+function setMessagesVisible(visible) {
+  state.messagesVisible = Boolean(visible);
+  el.chatPanel.classList.toggle("messages-hidden", !state.messagesVisible);
+  el.messagesToggle.textContent = state.messagesVisible ? "Hide Messages" : "Show Messages";
+  el.messagesToggle.setAttribute("aria-expanded", String(state.messagesVisible));
+  el.messagesStatus.textContent = state.messagesVisible
+    ? "Visible. Memory still uses the last 8 turns."
+    : "Hidden. Memory still uses the last 8 turns.";
+  if (state.messagesVisible) {
+    requestAnimationFrame(() => {
+      el.messages.scrollTop = el.messages.scrollHeight;
+    });
+  }
 }
 
 // ── Catalog Panel ──────────────────────────────────────────────────────────────
@@ -677,9 +701,9 @@ async function sendMessage(rawText) {
     const payload = {
       question: text,
       top_k: 5,
-      assistant_mode: "support",
-      reply_style: "short",
-      answer_engine: "deterministic",
+      assistant_mode: state.assistantMode,
+      reply_style: state.replyStyle,
+      answer_engine: state.answerEngine,
       conversation_history: state.conversation.slice(-8),
       focused_product_ids: state.focusedProductIds,
       last_answer_plan: state.lastAnswerPlan,

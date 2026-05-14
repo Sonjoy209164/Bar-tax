@@ -376,6 +376,7 @@ class FashionRetailAssistant:
         "formal": ("formal", "ফরমাল"),
         "casual": ("casual", "ক্যাজুয়াল", "ক্যাজুয়াল"),
         "comfortable": ("comfortable", "comfort", "আরামদায়ক", "আরামদায়ক"),
+        "premium": ("premium", "elegant", "festive", "dressy", "classy", "gorgeous", "এলিগেন্ট", "উৎসব"),
     }
     STYLE_ITEM_ALIASES: dict[str, tuple[str, ...]] = {
         "lightweight": ("lightweight", "light weight", "soft", "comfortable", "muslin"),
@@ -384,6 +385,7 @@ class FashionRetailAssistant:
         "formal": ("formal", "office", "interview"),
         "casual": ("casual", "daily", "college"),
         "comfortable": ("comfortable", "comfort", "flat", "sneaker"),
+        "premium": ("premium", "party", "wedding", "eid", "jamdani", "katan", "buti", "zari", "meena", "silk", "georgette", "semi-formal"),
     }
     GENDER_ALIASES: dict[str, tuple[str, ...]] = {
         "men": (
@@ -595,6 +597,7 @@ class FashionRetailAssistant:
         last_primary_product_id: str | None = None,
         top_k: int = 5,
         conversation_history: list[tuple[str, str]] | None = None,
+        allow_llm_slots: bool = True,
     ) -> FashionRetailOutcome | None:
         filters = filters or InventorySearchFilters()
         fashion_items = [item for item in catalog.values() if self.is_fashion_item(item)]
@@ -615,6 +618,7 @@ class FashionRetailAssistant:
             catalog=fashion_items,
             focused_product_ids=effective_focused_product_ids,
             last_primary_product_id=effective_last_primary_product_id,
+            allow_llm=allow_llm_slots,
         )
         if not self.should_handle(question=question, slots=slots, fashion_items=fashion_items):
             return None
@@ -753,6 +757,7 @@ class FashionRetailAssistant:
         catalog: list[InventoryItemRecord],
         focused_product_ids: tuple[str, ...] = (),
         last_primary_product_id: str | None = None,
+        allow_llm: bool = True,
     ) -> FashionRetailSlots:
         # Banglish augmentation + fuzzy typo correction, then normalize
         augmented_question = augment_with_bangla(question)
@@ -847,7 +852,7 @@ class FashionRetailAssistant:
         )
         # LLM-first path: classify intent + slots + confidence in one call.
         # Regex result acts as a safety net for fields the LLM left null.
-        if is_ollama_available():
+        if allow_llm and is_ollama_available():
             classified = classify_intent_llm(question)
             if classified is not None:
                 return self._merge_classified_with_regex(
@@ -1370,8 +1375,8 @@ class FashionRetailAssistant:
 
         if not scored:
             category = slots.category_label.lower() if slots.category_label else "fashion product"
-            answer = f"I do not see an in-catalog {category} matching those exact details yet."
-            follow_up = "Tell me the category, color, size, budget, or occasion and I will narrow it down."
+            answer = f"I could not find an exact in-catalog {category} for those details yet."
+            follow_up = "Tell me the category, color, size, budget, or occasion and I can narrow it down."
             return self._outcome(
                 answer=answer,
                 intent=slots.intent,
@@ -1387,15 +1392,20 @@ class FashionRetailAssistant:
 
         selected = [match.item for match in scored[:top_k]]
         if len(selected) == 1:
-            answer = f"Yes, the closest match is {self._format_option(selected[0])}."
+            answer = f"Yes — {self._format_option(selected[0])}."
         else:
             if relaxed_reason:
                 answer = (
-                    f"I do not see an exact {relaxed_reason}, but these are the closest available option(s): "
+                    f"I don't have an exact {relaxed_reason}; closest available options are: "
                     f"{self._natural_join(self._format_option(item) for item in selected[:3])}."
                 )
             else:
-                answer = f"I found {len(scored)} matching option(s): {self._natural_join(self._format_option(item) for item in selected[:3])}."
+                first_pick = self._format_option(selected[0])
+                answer = (
+                    f"I have a few good options: "
+                    f"{self._natural_join(self._format_option(item) for item in selected[:3])}. "
+                    f"My first pick would be {first_pick}."
+                )
         reasoning_step = (
             "Semantic fallback retrieved candidates after slot filter found nothing."
             if semantic_used
@@ -1503,6 +1513,8 @@ class FashionRetailAssistant:
         if slots.work_type and not self._contains_phrase(self._item_text(item), slots.work_type):
             return False
         if slots.occasion and not self._contains_phrase(self._item_text(item), slots.occasion):
+            return False
+        if slots.style and not self._item_style_matches(item, slots.style):
             return False
         if slots.wants_in_stock and item.stock <= 0 and slots.intent != "fashion_variant_color":
             return False
@@ -2117,8 +2129,15 @@ class FashionRetailAssistant:
             replacements = (
                 ("Yes.", "জি,"),
                 ("Yes,", "জি,"),
+                ("I could not find an exact in-catalog", "আমি ক্যাটালগে ঠিক এমন"),
+                ("I don't have an exact", "ঠিক"),
+                ("; closest available options are:", " পাচ্ছি না। কাছাকাছি অপশনগুলো হলো:"),
+                ("for those details yet", "এখনও পাচ্ছি না"),
+                ("I have a few good options:", "কয়েকটা ভালো অপশন আছে:"),
+                ("My first pick would be", "আমার প্রথম পছন্দ হবে"),
                 ("I found", "আমি পেয়েছি"),
                 ("I do not see", "আমি ক্যাটালগে পাচ্ছি না"),
+                ("these are the closest available options", "নিকটতম স্টকে থাকা অপশনগুলো হলো"),
                 ("We have", "আমাদের কাছে আছে"),
                 ("is available", "স্টকে আছে"),
                 ("available:", "স্টকে আছে:"),
@@ -2154,8 +2173,15 @@ class FashionRetailAssistant:
             replacements = (
                 ("Yes.", "Ji,"),
                 ("Yes,", "Ji,"),
+                ("I could not find an exact in-catalog", "Catalog e exact"),
+                ("I don't have an exact", "Exact"),
+                ("; closest available options are:", " catalog e pacchi na. Closest option gulo:"),
+                ("for those details yet", "ekhon pacchi na"),
+                ("I have a few good options:", "Kichu bhalo option ache:"),
+                ("My first pick would be", "Amar first pick hobe"),
                 ("I found", "Ami peyechi"),
                 ("I do not see", "Ami catalog e pacchi na"),
+                ("these are the closest available options", "closest available option gulo"),
                 ("We have", "Amader kache ache"),
                 ("is available", "available ache"),
                 ("available:", "available ache:"),
@@ -2173,6 +2199,11 @@ class FashionRetailAssistant:
             localized = localized.replace(" in size ", " size ")
             localized = localized.replace(" for ", " er jonno ")
             localized = re.sub(r"(Size\s+([a-z0-9.]+))\s+size\s+\2:", r"\1:", localized, flags=re.IGNORECASE)
+            localized = re.sub(
+                r"^Exact under BDT ([\d,]+) ([^.]+?) catalog e pacchi na\.",
+                r"BDT \1 er moddhe exact \2 catalog e pacchi na.",
+                localized,
+            )
             return localized
         return answer
 

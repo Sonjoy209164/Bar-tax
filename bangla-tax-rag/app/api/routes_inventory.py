@@ -1,11 +1,19 @@
 import json
 from collections.abc import AsyncIterator, Callable
+from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.core.schemas import (
     CustomerProfileResponse,
+    ImageIndexRebuildRequest,
+    ImageIndexRebuildResponse,
+    ImageIndexStatusResponse,
+    ImageSearchCorrectionListResponse,
+    ImageSearchCorrectionRequest,
+    ImageSearchCorrectionResponse,
+    ImageSearchFailureListResponse,
     ImageSearchRequest,
     ImageSearchResponse,
     ImageSearchHit,
@@ -47,7 +55,23 @@ from app.core.schemas import (
 )
 from app.inventory.catalog_audit import audit_catalog, enrich_item_attributes
 from app.inventory.clip_matcher import CLIPImageMatcher
-from app.inventory.image_matcher import ImageMatcher, finalize_image_search
+from app.inventory.conversation_state import get_state_store
+from app.inventory.image_feedback import (
+    ImageSearchCorrection,
+    ImageSearchFailure,
+    list_image_search_corrections,
+    list_image_search_failures,
+    save_image_search_correction,
+    save_image_search_failure,
+)
+from app.inventory.image_index import build_image_index, image_index_status
+from app.inventory.image_matcher import (
+    ImageMatcher,
+    ImageSearchDecision,
+    apply_owner_corrections,
+    finalize_image_search,
+    query_image_id_from_b64,
+)
 from app.inventory.policy import inventory_policy_contract
 from app.inventory.waitlist import WaitlistManager
 from app.inventory.policy_qa import PolicyQAEngine
@@ -368,9 +392,62 @@ async def ask_inventory_stream(request: InventoryAskRequest) -> StreamingRespons
     )
 
 
+def _record_image_search_state(request: ImageSearchRequest, decision: ImageSearchDecision) -> None:
+    if not request.session_id:
+        return
+    primary = decision.hits[0] if decision.hits else None
+    product_ids = [hit.product_id for hit in decision.hits]
+    slots = {
+        "color": decision.requested_color or (primary.color if primary else None),
+        "color_family": decision.requested_color or (primary.color if primary else None),
+        "variant_group_id": primary.variant_group_id if primary else None,
+        "design_id": primary.design_id if primary else None,
+        "category_key": (
+            (primary.score_breakdown or {}).get("category")
+            if primary and primary.score_breakdown
+            else None
+        ),
+    }
+    confidence = max((hit.score for hit in decision.hits), default=0.0)
+    get_state_store().record_turn(
+        session_id=request.session_id,
+        question=request.query_text or "[image upload]",
+        intent="image_search",
+        slots=slots,
+        product_ids=product_ids,
+        primary_product_id=decision.primary_product_id,
+        confidence=confidence,
+        abstained=decision.decision_label == "no_confident_match",
+    )
+
+
+def _log_image_search_failure_if_needed(
+    request: ImageSearchRequest,
+    decision: ImageSearchDecision,
+    query_image_id: str | None,
+) -> None:
+    top_score = max((hit.score for hit in decision.hits), default=0.0)
+    if decision.decision_label != "no_confident_match" and decision.hits and top_score >= 0.22:
+        return
+    reason = "no_confident_match" if decision.decision_label == "no_confident_match" else "low_visual_score"
+    save_image_search_failure(
+        ImageSearchFailure(
+            query_text=request.query_text,
+            session_id=request.session_id,
+            query_image_id=query_image_id,
+            decision_label=decision.decision_label,
+            primary_product_id=decision.primary_product_id,
+            top_product_ids=[hit.product_id for hit in decision.hits[:5]],
+            reason=reason,
+            score_breakdown=decision.score_breakdown,
+        )
+    )
+
+
 @router.post("/image-search", response_model=ImageSearchResponse)
 async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
     catalog = get_inventory_service().load_catalog()
+    query_image_id = request.query_image_id or query_image_id_from_b64(request.image_b64)
     raw_top_k = min(max(request.top_k * 4, 12), 20)
     if CLIPImageMatcher.is_available():
         from app.inventory.clip_matcher import precompute_catalog_embeddings
@@ -395,6 +472,12 @@ async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
             budget_max=request.budget_max,
             top_k=raw_top_k,
         )
+    results = apply_owner_corrections(
+        catalog=catalog,
+        results=results,
+        query_image_id=query_image_id,
+        corrections=list_image_search_corrections(limit=1000),
+    )
     decision = finalize_image_search(
         catalog=catalog,
         results=results,
@@ -402,6 +485,11 @@ async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
         requested_color=request.color_hint,
         top_k=request.top_k,
     )
+    try:
+        _record_image_search_state(request, decision)
+        _log_image_search_failure_if_needed(request, decision, query_image_id)
+    except Exception:
+        pass
     hits = [
         ImageSearchHit(
             product_id=r.product_id,
@@ -427,6 +515,7 @@ async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
     return ImageSearchResponse(
         status="success",
         answer=decision.answer,
+        query_image_id=query_image_id,
         hits=hits,
         total=len(hits),
         decision_label=decision.decision_label,
@@ -437,6 +526,53 @@ async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
         available_colors=list(decision.available_colors),
         score_breakdown=decision.score_breakdown,
     )
+
+
+@router.get("/image-index/status", response_model=ImageIndexStatusResponse)
+async def get_image_index_status() -> ImageIndexStatusResponse:
+    catalog = get_inventory_service().load_catalog()
+    return ImageIndexStatusResponse(**image_index_status(catalog).to_dict())
+
+
+@router.post("/image-index/rebuild", response_model=ImageIndexRebuildResponse)
+async def rebuild_image_index(request: ImageIndexRebuildRequest) -> ImageIndexRebuildResponse:
+    catalog = get_inventory_service().load_catalog()
+    records = build_image_index(
+        catalog,
+        force=request.force,
+        include_embeddings=request.include_embeddings,
+    )
+    status_data = image_index_status(catalog).to_dict()
+    return ImageIndexRebuildResponse(rebuilt_count=len(records), **status_data)
+
+
+@router.get("/image-search/failures", response_model=ImageSearchFailureListResponse)
+async def read_image_search_failures(limit: int = 50) -> ImageSearchFailureListResponse:
+    failures = list_image_search_failures(limit=limit)
+    return ImageSearchFailureListResponse(status="success", total=len(failures), failures=failures)
+
+
+@router.get("/image-search/corrections", response_model=ImageSearchCorrectionListResponse)
+async def read_image_search_corrections(limit: int = 50) -> ImageSearchCorrectionListResponse:
+    corrections = list_image_search_corrections(limit=limit)
+    return ImageSearchCorrectionListResponse(status="success", total=len(corrections), corrections=corrections)
+
+
+@router.post("/image-search/corrections", response_model=ImageSearchCorrectionResponse)
+async def create_image_search_correction(
+    request: ImageSearchCorrectionRequest,
+) -> ImageSearchCorrectionResponse:
+    correction = ImageSearchCorrection(
+        query_image_id=request.query_image_id,
+        correction_type=request.correction_type,
+        correct_product_id=request.correct_product_id,
+        wrong_product_id=request.wrong_product_id,
+        notes=request.notes,
+        session_id=request.session_id,
+        query_text=request.query_text,
+    )
+    save_image_search_correction(correction)
+    return ImageSearchCorrectionResponse(status="success", correction=asdict(correction))
 
 
 @router.post("/sync/import", response_model=POSSyncResponse)

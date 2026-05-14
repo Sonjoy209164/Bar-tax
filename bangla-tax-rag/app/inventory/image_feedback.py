@@ -19,6 +19,7 @@ _LOCK = threading.Lock()
 class ImageSearchFailure:
     query_text: str
     session_id: str | None
+    query_image_id: str | None
     decision_label: str | None
     primary_product_id: str | None
     top_product_ids: list[str]

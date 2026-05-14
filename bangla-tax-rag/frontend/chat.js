@@ -700,6 +700,14 @@ async function sendImageSearch(queryText) {
     renderImageResults(thinking, response);
     renderImageMeta(thinking, response);
     addFeedbackRow(thinking, displayText, response.answer || "", "image_search", feedbackContextFromResponse(response));
+    state.conversation.push({ role: "user", content: displayText });
+    state.conversation.push({ role: "assistant", content: response.answer || "" });
+    state.focusedProductIds = Array.from(new Set([
+      response.primary_product_id,
+      ...(response.same_design_variant_ids || []),
+      ...(response.similar_product_ids || []),
+      ...((response.hits || []).map(hit => hit.product_id)),
+    ].filter(Boolean))).slice(0, 8);
   } catch (error) {
     thinking.querySelector(".body").textContent = `Image search failed: ${error.message}`;
   } finally {
@@ -725,6 +733,7 @@ async function sendMessage(rawText) {
   try {
     const payload = {
       question: text,
+      session_id: state.sessionId,
       top_k: 5,
       assistant_mode: state.assistantMode,
       reply_style: state.replyStyle,
@@ -896,6 +905,7 @@ function renderImageMeta(node, response) {
   const parts = [`image-search`, `${response?.total || 0} result(s)`];
   if (response?.decision_label) parts.push(labelText(response.decision_label));
   if (response?.requested_color) parts.push(`requested: ${response.requested_color}`);
+  if (response?.query_image_id) parts.push(`image: ${response.query_image_id}`);
   meta.textContent = parts.join(" · ");
   node.appendChild(meta);
 }

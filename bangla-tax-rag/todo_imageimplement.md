@@ -87,7 +87,36 @@ This is not only a CLIP/image-search feature. It is a product-identity system. T
     - `tests/test_image_matching.py`
     - `scripts/run_image_search_eval.py`
 
-- [ ] Still future work: real product-photo import workflow, object/background crop, separate image-vector Elasticsearch index, DINOv2/SigLIP pattern channel, owner correction UI, and full multi-shop isolation.
+- [x] Added real product-photo import workflow.
+  - Purpose: daily product photo updates can be imported from local folders safely.
+  - File:
+    - `scripts/import_product_images.py`
+
+- [x] Added image preprocessing/cache layer.
+  - Purpose: normalize, crop, grayscale, and inspect product/query image assets before indexing.
+  - File:
+    - `app/inventory/image_preprocessing.py`
+
+- [x] Added image index manifest and rebuild/status APIs.
+  - Purpose: engineers can prove whether image assets are indexed and stale.
+  - Files:
+    - `app/inventory/image_index.py`
+    - `scripts/reindex_image_embeddings.py`
+    - `app/api/routes_inventory.py`
+
+- [x] Added owner correction/failure logging loop.
+  - Purpose: owner-confirmed mappings can override weak visual similarity, and failures are saved for review.
+  - Files:
+    - `app/inventory/image_feedback.py`
+    - `app/api/routes_inventory.py`
+
+- [x] Added image-search memory handoff.
+  - Purpose: after an uploaded image, follow-up text like "white ache?" can resolve against the previous product/design group.
+  - Files:
+    - `app/api/routes_inventory.py`
+    - `frontend/chat.js`
+
+- [ ] Still future work: production-grade object detection/segmentation, separate Elasticsearch image-vector documents, DINOv2/SigLIP pattern channel, owner correction review UI, and full multi-shop isolation.
 
 ## Strategic Design Rule
 

@@ -331,3 +331,4 @@ INFO:     27.147.145.26:37248 - "GET /frontend/assets/demo_catalog/hf-48311-pita
 INFO:     27.147.145.26:37248 - "GET /frontend/assets/demo_catalog/hf-39524-peter-england-unisex-orange-sleeve-bag/primary.jpg HTTP/1.1" 200 OK
 INFO:     27.147.145.26:37248 - "GET /frontend/assets/demo_catalog/hf-39386-peter-england-men-party-blue-jeans/primary.jpg HTTP/1.1" 200 OK
 INFO:     27.147.145.26:37248 - "GET /frontend/assets/demo_catalog/hf-35913-peperone-women-black-white-handbag/primary.jpg HTTP/1.1" 200 OK
+WARNING:  Invalid HTTP request received.

@@ -1449,6 +1449,7 @@ class OrderResponse(BaseModel):
 class ImageSearchRequest(BaseModel):
     query_text: str = ""
     image_b64: str | None = None
+    query_image_id: str | None = None
     session_id: str | None = None
     category_hint: str | None = None
     color_hint: str | None = None
@@ -1479,6 +1480,7 @@ class ImageSearchHit(BaseModel):
 class ImageSearchResponse(BaseModel):
     status: str
     answer: str
+    query_image_id: str | None = None
     hits: list[ImageSearchHit] = Field(default_factory=list)
     total: int = 0
     decision_label: str | None = None
@@ -1488,6 +1490,63 @@ class ImageSearchResponse(BaseModel):
     requested_color: str | None = None
     available_colors: list[str] = Field(default_factory=list)
     score_breakdown: dict[str, Any] | None = None
+
+
+class ImageIndexStatusResponse(BaseModel):
+    status: str
+    index_path: str
+    catalog_count: int
+    image_asset_count: int
+    indexed_count: int
+    ready: bool
+    missing_product_ids: list[str] = Field(default_factory=list)
+    stale_product_ids: list[str] = Field(default_factory=list)
+    model_available: bool | None = None
+
+
+class ImageIndexRebuildRequest(BaseModel):
+    force: bool = False
+    include_embeddings: bool = True
+
+
+class ImageIndexRebuildResponse(BaseModel):
+    status: str
+    rebuilt_count: int
+    index_path: str
+    catalog_count: int
+    image_asset_count: int
+    indexed_count: int
+    ready: bool
+    missing_product_ids: list[str] = Field(default_factory=list)
+    stale_product_ids: list[str] = Field(default_factory=list)
+    model_available: bool | None = None
+
+
+class ImageSearchFailureListResponse(BaseModel):
+    status: str
+    total: int
+    failures: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ImageSearchCorrectionRequest(BaseModel):
+    query_image_id: str
+    correction_type: Literal["exact_product", "same_design", "similar", "no_match"]
+    correct_product_id: str | None = None
+    wrong_product_id: str | None = None
+    notes: str = ""
+    session_id: str | None = None
+    query_text: str | None = None
+
+
+class ImageSearchCorrectionResponse(BaseModel):
+    status: str
+    correction: dict[str, Any]
+
+
+class ImageSearchCorrectionListResponse(BaseModel):
+    status: str
+    total: int
+    corrections: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

@@ -70,6 +70,99 @@ def _deterministic_image_hash(image_bytes: bytes) -> str:
     return hashlib.sha256(image_bytes).hexdigest()[:16]
 
 
+def query_image_id_from_b64(image_b64: str | None) -> str | None:
+    if not image_b64:
+        return None
+    payload = image_b64
+    if "," in payload and payload.startswith("data:image/"):
+        payload = payload.split(",", 1)[1]
+    try:
+        return "upload_" + _deterministic_image_hash(base64.b64decode(payload + "=="))
+    except Exception:
+        return "upload_" + hashlib.sha256(image_b64.encode("utf-8")).hexdigest()[:16]
+
+
+def apply_owner_corrections(
+    *,
+    catalog: dict[str, InventoryItemRecord],
+    results: list[ImageMatchResult],
+    query_image_id: str | None,
+    corrections: list[dict[str, Any]],
+) -> list[ImageMatchResult]:
+    """Let owner-confirmed mappings override raw visual similarity.
+
+    Visual embeddings are probabilistic. A correction record is business truth:
+    if the owner maps an upload to a product/design, ranking should respect it.
+    """
+
+    if not query_image_id:
+        return results
+    matching = [
+        correction for correction in corrections
+        if correction.get("query_image_id") == query_image_id
+    ]
+    if not matching:
+        return results
+
+    correction = matching[-1]
+    correction_type = str(correction.get("correction_type") or "")
+    wrong_product_id = correction.get("wrong_product_id")
+    filtered = [
+        result for result in results
+        if not wrong_product_id or result.product_id != wrong_product_id
+    ]
+    if correction_type == "no_match":
+        return filtered if wrong_product_id else []
+
+    correct_product_id = correction.get("correct_product_id")
+    if not correct_product_id or correct_product_id not in catalog:
+        return filtered
+
+    item = catalog[correct_product_id]
+    image = primary_image_asset(item)
+    attrs = item.attributes or {}
+    score_by_type = {
+        "exact_product": 0.995,
+        "same_design": 0.92,
+        "similar": 0.78,
+    }
+    label_by_type = {
+        "exact_product": "confirmed_exact",
+        "same_design": "confirmed_same_design_variant",
+        "similar": "similar_style",
+    }
+    match_type_by_type = {
+        "exact_product": "owner_confirmed_exact",
+        "same_design": "owner_confirmed_same_design",
+        "similar": "owner_confirmed_similar",
+    }
+    corrected = ImageMatchResult(
+        product_id=item.product_id,
+        name=item.name,
+        score=score_by_type.get(correction_type, 0.78),
+        match_type=match_type_by_type.get(correction_type, "owner_confirmed"),
+        reasons=("owner correction", str(correction.get("notes") or correction_type)),
+        price=item.price,
+        currency=item.currency,
+        stock=item.stock,
+        image_url=primary_image_url(item),
+        decision_label=label_by_type.get(correction_type, "similar_style"),
+        variant_group_id=attrs.get("variant_group_id") or attrs.get("variant_group_name") or attrs.get("design_id"),
+        design_id=attrs.get("design_id"),
+        color=attrs.get("color") or attrs.get("color_family"),
+        size=attrs.get("size") or attrs.get("size_options"),
+        image_kind=image.kind if image else None,
+        is_reference=bool(image.is_reference) if image else False,
+        score_breakdown={
+            "owner_correction": True,
+            "correction_type": correction_type,
+            "visual_score": score_by_type.get(correction_type, 0.78),
+        },
+    )
+    remaining = [result for result in filtered if result.product_id != correct_product_id]
+    return [corrected, *remaining]
+
+
 def _color_histogram_score(pixels_a: list[int], pixels_b: list[int]) -> float:
     if not pixels_a or not pixels_b:
         return 0.5
@@ -402,6 +495,12 @@ def _enrich_hit(hit: ImageMatchResult, catalog: dict[str, InventoryItemRecord]) 
 
 
 def _hit_decision_label(score: float, image_kind: str | None, is_reference: bool, match_type: str) -> str:
+    if match_type == "owner_confirmed_exact":
+        return "confirmed_exact"
+    if match_type == "owner_confirmed_same_design":
+        return "confirmed_same_design_variant"
+    if match_type == "owner_confirmed_similar":
+        return "similar_style"
     if match_type == "same_design_variant":
         return "confirmed_same_design_variant"
     if not is_reference and image_kind == "product_photo" and score >= 0.9:

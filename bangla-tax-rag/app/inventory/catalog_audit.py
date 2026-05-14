@@ -9,6 +9,7 @@ _CATALOG_PATH = Path("data/inventory/catalog.jsonl")
 
 _REQUIRED_ATTRIBUTES = ("category_key", "color", "fabric")
 _RECOMMENDED_ATTRIBUTES = ("work_type", "design_id", "size", "occasion")
+_IMAGE_IDENTITY_ATTRIBUTES = ("design_id", "variant_group_id", "color", "color_family")
 _REQUIRED_FIELDS = ("sku", "name", "price", "stock", "category")
 
 
@@ -16,7 +17,7 @@ _REQUIRED_FIELDS = ("sku", "name", "price", "stock", "category")
 class AuditIssue:
     product_id: str
     name: str
-    issue_type: str   # "missing_required_field", "missing_required_attr", "missing_recommended_attr", "zero_price", "negative_stock"
+    issue_type: str
     detail: str
 
 
@@ -91,7 +92,10 @@ def audit_catalog(catalog_path: Path = _CATALOG_PATH) -> CatalogAuditReport:
     if not raw_items:
         return report
 
-    attr_counts: dict[str, int] = {a: 0 for a in _REQUIRED_ATTRIBUTES + _RECOMMENDED_ATTRIBUTES}
+    attr_counts: dict[str, int] = {
+        a: 0
+        for a in _REQUIRED_ATTRIBUTES + _RECOMMENDED_ATTRIBUTES + _IMAGE_IDENTITY_ATTRIBUTES
+    }
     prices: list[float] = []
 
     for item in raw_items:
@@ -136,6 +140,47 @@ def audit_catalog(catalog_path: Path = _CATALOG_PATH) -> CatalogAuditReport:
                 attr_counts[attr] += 1
             else:
                 report.issues.append(AuditIssue(pid, name, "missing_recommended_attr", f"attributes['{attr}'] missing — search quality degraded"))
+
+        images = item.get("images") or []
+        if images:
+            for attr in _IMAGE_IDENTITY_ATTRIBUTES:
+                if attrs.get(attr):
+                    if attr not in _REQUIRED_ATTRIBUTES and attr not in _RECOMMENDED_ATTRIBUTES:
+                        attr_counts[attr] += 1
+                else:
+                    report.issues.append(
+                        AuditIssue(
+                            pid,
+                            name,
+                            "missing_image_identity_attr",
+                            f"visual product missing attributes['{attr}'] — image search confidence degraded",
+                        )
+                    )
+            if all(bool(image.get("is_reference")) for image in images):
+                report.issues.append(
+                    AuditIssue(
+                        pid,
+                        name,
+                        "reference_image_only",
+                        "all images are reference/demo images; exact visual match must be disabled",
+                    )
+                )
+            for image in images:
+                if not image.get("image_id"):
+                    report.issues.append(AuditIssue(pid, name, "missing_image_id", "image asset missing image_id"))
+                if not image.get("local_path") and not image.get("url"):
+                    report.issues.append(AuditIssue(pid, name, "missing_image_source", "image asset missing local_path/url"))
+                if image.get("role") not in {"primary", "alternate", "detail", "reference"}:
+                    report.issues.append(AuditIssue(pid, name, "invalid_image_role", f"invalid image role: {image.get('role')}"))
+        else:
+            report.issues.append(
+                AuditIssue(
+                    pid,
+                    name,
+                    "missing_image_asset",
+                    "product has no image asset; screenshot search cannot match it",
+                )
+            )
 
         # Category/brand counts
         cat = (item.get("category") or "").strip()

@@ -7,8 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from app.core.schemas import InventoryItemRecord
-from app.inventory.image_matcher import primary_image_asset, primary_image_url
+from app.core.schemas import InventoryImageAsset, InventoryItemRecord
 from app.inventory.image_preprocessing import preprocess_image_source
 
 
@@ -72,7 +71,7 @@ def build_image_index(
     """
 
     path = Path(index_path)
-    existing = {record.product_id: record for record in read_image_index(path)}
+    existing = {_record_key(record.product_id, record.image_id): record for record in read_image_index(path)}
     records: list[ImageIndexRecord] = []
 
     encoder = None
@@ -88,63 +87,63 @@ def build_image_index(
             model_available = False
 
     for item in catalog.values():
-        image = primary_image_asset(item)
-        image_source = primary_image_url(item)
-        if image is None or not image_source:
-            continue
-        existing_record = existing.get(item.product_id)
-        signature = _source_signature(item, image_source)
-        if not force and existing_record and existing_record.vector_checksum == signature:
-            records.append(existing_record)
-            continue
+        for image, image_source in _iter_image_sources(item):
+            existing_record = existing.get(_record_key(item.product_id, image.image_id))
+            signature = _source_signature(item, image, image_source)
+            if not force and existing_record and existing_record.vector_checksum == signature:
+                records.append(existing_record)
+                continue
 
-        error: str | None = None
-        embedding_status = "not_requested"
-        vector_dimensions: int | None = None
-        try:
-            preprocess = preprocess_image_source(source=image_source, image_id=image.image_id).to_dict()
-        except Exception as exc:
-            preprocess = {}
-            error = f"preprocess_failed: {exc}"
-
-        if encoder and not error:
+            error: str | None = None
+            embedding_status = "not_requested"
+            vector_dimensions: int | None = None
             try:
-                vector = encoder(preprocess.get("crop_path") or image_source)
-                if vector:
-                    vector_dimensions = len(vector)
-                    embedding_status = "ready"
-                else:
-                    embedding_status = "unavailable"
+                preprocess = preprocess_image_source(
+                    source=image_source,
+                    image_id=f"{item.product_id}-{image.image_id}",
+                ).to_dict()
             except Exception as exc:
-                embedding_status = "failed"
-                error = f"embedding_failed: {exc}"
-        elif include_embeddings:
-            embedding_status = "model_unavailable" if model_available is False else "unavailable"
+                preprocess = {}
+                error = f"preprocess_failed: {exc}"
 
-        attrs = item.attributes or {}
-        records.append(
-            ImageIndexRecord(
-                product_id=item.product_id,
-                image_id=image.image_id,
-                image_source=image_source,
-                image_role=image.role,
-                image_kind=image.kind,
-                is_reference=image.is_reference,
-                category=item.category or attrs.get("category_key"),
-                color=attrs.get("color"),
-                color_family=attrs.get("color_family"),
-                design_id=attrs.get("design_id"),
-                variant_group_id=attrs.get("variant_group_id") or attrs.get("variant_group_name") or attrs.get("design_id"),
-                stock=item.stock,
-                price=item.price,
-                preprocess=preprocess,
-                embedding_status=embedding_status,
-                embedding_model="openai/clip-vit-base-patch32" if include_embeddings else None,
-                vector_dimensions=vector_dimensions,
-                vector_checksum=signature,
-                error=error,
+            if encoder and not error:
+                try:
+                    vector = encoder(preprocess.get("crop_path") or image_source)
+                    if vector:
+                        vector_dimensions = len(vector)
+                        embedding_status = "ready"
+                    else:
+                        embedding_status = "unavailable"
+                except Exception as exc:
+                    embedding_status = "failed"
+                    error = f"embedding_failed: {exc}"
+            elif include_embeddings:
+                embedding_status = "model_unavailable" if model_available is False else "unavailable"
+
+            attrs = item.attributes or {}
+            records.append(
+                ImageIndexRecord(
+                    product_id=item.product_id,
+                    image_id=image.image_id,
+                    image_source=image_source,
+                    image_role=image.role,
+                    image_kind=image.kind,
+                    is_reference=image.is_reference,
+                    category=item.category or attrs.get("category_key"),
+                    color=attrs.get("color"),
+                    color_family=attrs.get("color_family"),
+                    design_id=attrs.get("design_id"),
+                    variant_group_id=attrs.get("variant_group_id") or attrs.get("variant_group_name") or attrs.get("design_id"),
+                    stock=item.stock,
+                    price=item.price,
+                    preprocess=preprocess,
+                    embedding_status=embedding_status,
+                    embedding_model="openai/clip-vit-base-patch32" if include_embeddings else None,
+                    vector_dimensions=vector_dimensions,
+                    vector_checksum=signature,
+                    error=error,
+                )
             )
-        )
 
     write_image_index(records, path)
     return records
@@ -157,27 +156,25 @@ def image_index_status(
 ) -> ImageIndexStatus:
     path = Path(index_path)
     records = read_image_index(path)
-    indexed_by_product = {record.product_id: record for record in records}
-    image_products = {
-        item.product_id
-        for item in catalog.values()
-        if primary_image_asset(item) is not None and primary_image_url(item)
-    }
-    missing = sorted(image_products - set(indexed_by_product))
-    stale: list[str] = []
+    indexed_by_asset = {_record_key(record.product_id, record.image_id): record for record in records}
+    image_assets: dict[str, tuple[InventoryItemRecord, InventoryImageAsset, str]] = {}
     for item in catalog.values():
-        record = indexed_by_product.get(item.product_id)
-        source = primary_image_url(item)
-        if not record or not source:
+        for image, source in _iter_image_sources(item):
+            image_assets[_record_key(item.product_id, image.image_id)] = (item, image, source)
+    missing = sorted(set(image_assets) - set(indexed_by_asset))
+    stale: list[str] = []
+    for key, (item, image, source) in image_assets.items():
+        record = indexed_by_asset.get(key)
+        if not record:
             continue
-        if record.vector_checksum != _source_signature(item, source):
-            stale.append(item.product_id)
-    ready = bool(image_products) and not missing and not stale
+        if record.vector_checksum != _source_signature(item, image, source):
+            stale.append(key)
+    ready = bool(image_assets) and not missing and not stale
     return ImageIndexStatus(
         status="success",
         index_path=path.as_posix(),
         catalog_count=len(catalog),
-        image_asset_count=len(image_products),
+        image_asset_count=len(image_assets),
         indexed_count=len(records),
         ready=ready,
         missing_product_ids=missing,
@@ -213,10 +210,29 @@ def write_image_index(records: Iterable[ImageIndexRecord], path: str | Path = IM
     temp_path.replace(index_path)
 
 
-def _source_signature(item: InventoryItemRecord, image_source: str) -> str:
+def _record_key(product_id: str, image_id: str) -> str:
+    return f"{product_id}::{image_id}"
+
+
+def _iter_image_sources(item: InventoryItemRecord) -> Iterable[tuple[InventoryImageAsset, str]]:
+    for image in item.images:
+        source = _image_source(image)
+        if source:
+            yield image, source
+
+
+def _image_source(image: InventoryImageAsset) -> str | None:
+    return image.local_path or image.url
+
+
+def _source_signature(item: InventoryItemRecord, image: InventoryImageAsset, image_source: str) -> str:
     path = Path(image_source)
     parts = [
         item.product_id,
+        image.image_id,
+        image.role,
+        image.kind,
+        str(image.is_reference),
         item.updated_at or "",
         image_source,
     ]

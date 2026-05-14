@@ -17,9 +17,10 @@ _clip_processor = None
 _MODEL_NAME = "openai/clip-vit-base-patch32"
 _HTTP_HEADERS = {"User-Agent": "bangla-tax-rag-image-search/1.0"}
 
-# In-memory cache: product_id → embedding vector
+# In-memory cache: product_id::image_id/text → embedding vector
 _catalog_embeddings: dict[str, list[float]] = {}
 _catalog_image_urls: dict[str, str] = {}
+_catalog_embedding_product_ids: dict[str, str] = {}
 _catalog_embedding_mtime: float = 0.0
 _catalog_embedding_signature: tuple[tuple[str, str], ...] = ()
 
@@ -57,7 +58,8 @@ def _encode_image_b64(image_b64: str) -> list[float] | None:
     try:
         import torch
         from PIL import Image  # type: ignore[import]
-        raw = base64.b64decode(image_b64)
+        payload = image_b64.split(",", 1)[1] if image_b64.startswith("data:image/") and "," in image_b64 else image_b64
+        raw = base64.b64decode(payload + "==")
         img = Image.open(io.BytesIO(raw)).convert("RGB")
         inputs = processor(images=img, return_tensors="pt")
         with torch.no_grad():
@@ -142,7 +144,7 @@ def precompute_catalog_embeddings(
     Stores results in the in-memory cache.  Returns number of items encoded.
     Only runs if CLIP is available.
     """
-    global _catalog_embeddings, _catalog_image_urls, _catalog_embedding_signature
+    global _catalog_embeddings, _catalog_image_urls, _catalog_embedding_product_ids, _catalog_embedding_signature
     signature = _catalog_signature(catalog)
     if not force and _catalog_embeddings and _catalog_embedding_signature == signature:
         return len(_catalog_embeddings)
@@ -155,25 +157,34 @@ def precompute_catalog_embeddings(
     ids = []
     image_vectors: dict[str, list[float]] = {}
     image_urls: dict[str, str] = {}
+    embedding_product_ids: dict[str, str] = {}
     for item in items:
         if hasattr(item, "name"):
-            image_url = primary_image_url(item)
-            if image_url:
+            pid = item.product_id
+            encoded_any_image = False
+            for image_id, image_url in _image_sources(item):
                 vec = _encode_image_source(image_url)
                 if vec is not None:
-                    pid = item.product_id
-                    image_vectors[pid] = vec
-                    image_urls[pid] = image_url
-                    continue
+                    key = f"{pid}::{image_id}"
+                    image_vectors[key] = vec
+                    image_urls[key] = image_url
+                    embedding_product_ids[key] = pid
+                    encoded_any_image = True
+            if encoded_any_image:
+                continue
             desc = (item.name or "") + " " + (getattr(item, "short_description", "") or "")
             attrs = item.attributes or {}
             for k in ("color", "fabric", "work_type", "occasion"):
                 if attrs.get(k):
                     desc += " " + attrs[k]
+            product_id = item.product_id
         else:
             desc = str(item.get("name", "")) + " " + str(item.get("short_description", ""))
+            product_id = item.get("product_id", "")
         texts.append(desc.strip()[:200])
-        ids.append(item.product_id if hasattr(item, "product_id") else item.get("product_id", ""))
+        text_key = f"{product_id}::text"
+        ids.append(text_key)
+        embedding_product_ids[text_key] = product_id
 
     # Encode in batches of 32
     import torch
@@ -195,14 +206,15 @@ def precompute_catalog_embeddings(
                 elif isinstance(feats, tuple):
                     feats = feats[0]
                 feats = feats / feats.norm(dim=-1, keepdim=True)
-            for pid, vec in zip(batch_ids, feats.tolist()):
-                if pid:
-                    new_cache[pid] = vec
+            for key, vec in zip(batch_ids, feats.tolist()):
+                if key:
+                    new_cache[key] = vec
         except Exception as exc:
             logger.warning("CLIP batch encode failed at index %d: %s", i, exc)
 
     _catalog_embeddings = new_cache
     _catalog_image_urls = image_urls
+    _catalog_embedding_product_ids = embedding_product_ids
     _catalog_embedding_signature = signature
     logger.info("CLIP: precomputed %d catalog embeddings", len(_catalog_embeddings))
     return len(_catalog_embeddings)
@@ -211,11 +223,23 @@ def precompute_catalog_embeddings(
 def _catalog_signature(catalog: dict[str, Any]) -> tuple[tuple[str, str], ...]:
     signature: list[tuple[str, str]] = []
     for product_id, item in sorted(catalog.items()):
-        image_source = primary_image_url(item) or ""
+        image_parts = [f"{image_id}:{source}" for image_id, source in _image_sources(item)]
+        image_source = "|".join(image_parts) or primary_image_url(item) or ""
         updated_at = getattr(item, "updated_at", "") if hasattr(item, "updated_at") else str(item.get("updated_at", ""))
         name = getattr(item, "name", "") if hasattr(item, "name") else str(item.get("name", ""))
         signature.append((str(product_id), f"{image_source}|{updated_at}|{name}"))
     return tuple(signature)
+
+
+def _image_sources(item: Any) -> list[tuple[str, str]]:
+    images = getattr(item, "images", None) or []
+    sources: list[tuple[str, str]] = []
+    for index, image in enumerate(images, start=1):
+        image_id = getattr(image, "image_id", None) or f"image-{index}"
+        source = getattr(image, "local_path", None) or getattr(image, "url", None)
+        if source:
+            sources.append((str(image_id), str(source)))
+    return sources
 
 
 class CLIPImageMatcher:
@@ -258,8 +282,9 @@ class CLIPImageMatcher:
                 top_k=top_k,
             )
 
-        results: list[ImageMatchResult] = []
-        for pid, item_vec in _catalog_embeddings.items():
+        best_by_product: dict[str, ImageMatchResult] = {}
+        for embedding_key, item_vec in _catalog_embeddings.items():
+            pid = _catalog_embedding_product_ids.get(embedding_key) or embedding_key.split("::", 1)[0]
             if catalog and pid not in catalog:
                 continue
             score = _cosine(query_vec, item_vec)
@@ -269,7 +294,7 @@ class CLIPImageMatcher:
                     continue
                 if item.stock == 0:
                     score *= 0.3
-                results.append(ImageMatchResult(
+                result = ImageMatchResult(
                     product_id=pid,
                     name=item.name,
                     score=round(score, 4),
@@ -278,17 +303,26 @@ class CLIPImageMatcher:
                     price=item.price,
                     currency=item.currency,
                     stock=item.stock,
-                    image_url=_catalog_image_urls.get(pid) or primary_image_url(item),
-                ))
+                    image_url=_catalog_image_urls.get(embedding_key) or primary_image_url(item),
+                    score_breakdown={
+                        "embedding_key": embedding_key,
+                        "embedding_type": "image" if embedding_key.endswith("::text") is False else "text_visual_tags",
+                    },
+                )
             else:
-                results.append(ImageMatchResult(
+                result = ImageMatchResult(
                     product_id=pid,
                     name=pid,
                     score=round(score, 4),
                     match_type="visual_similar",
                     reasons=("CLIP visual embedding match",),
-                ))
+                    score_breakdown={"embedding_key": embedding_key},
+                )
+            existing = best_by_product.get(pid)
+            if existing is None or result.score > existing.score:
+                best_by_product[pid] = result
 
+        results = list(best_by_product.values())
         results.sort(key=lambda r: -r.score)
         return results[:top_k]
 

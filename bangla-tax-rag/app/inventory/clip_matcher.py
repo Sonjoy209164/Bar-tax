@@ -266,31 +266,33 @@ def precompute_catalog_embeddings(
         ids.append(text_key)
         embedding_product_ids[text_key] = product_id
 
-    # Encode in batches of 32
-    import torch
-    from transformers import CLIPProcessor, CLIPModel  # already loaded
-    processor = _clip_processor
     new_cache: dict[str, list[float]] = dict(image_vectors)
-    batch_size = 32
-    for i in range(0, len(texts), batch_size):
-        batch_texts = texts[i:i + batch_size]
-        batch_ids = ids[i:i + batch_size]
-        try:
-            inputs = processor(text=batch_texts, return_tensors="pt", padding=True, truncation=True, max_length=77)
-            with torch.no_grad():
-                feats = _clip_model.get_text_features(**inputs)
-                if hasattr(feats, "pooler_output"):
-                    feats = feats.pooler_output
-                elif hasattr(feats, "last_hidden_state"):
-                    feats = feats.last_hidden_state[:, 0]
-                elif isinstance(feats, tuple):
-                    feats = feats[0]
-                feats = feats / feats.norm(dim=-1, keepdim=True)
-            for key, vec in zip(batch_ids, feats.tolist()):
-                if key:
-                    new_cache[key] = vec
-        except Exception as exc:
-            logger.warning("CLIP batch encode failed at index %d: %s", i, exc)
+    # Encode the text fallback in batches of 32 — only when there are products
+    # without usable images, so a fully image-backed catalog never needs torch.
+    if texts:
+        import torch
+
+        processor = _clip_processor
+        batch_size = 32
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            batch_ids = ids[i:i + batch_size]
+            try:
+                inputs = processor(text=batch_texts, return_tensors="pt", padding=True, truncation=True, max_length=77)
+                with torch.no_grad():
+                    feats = _clip_model.get_text_features(**inputs)
+                    if hasattr(feats, "pooler_output"):
+                        feats = feats.pooler_output
+                    elif hasattr(feats, "last_hidden_state"):
+                        feats = feats.last_hidden_state[:, 0]
+                    elif isinstance(feats, tuple):
+                        feats = feats[0]
+                    feats = feats / feats.norm(dim=-1, keepdim=True)
+                for key, vec in zip(batch_ids, feats.tolist()):
+                    if key:
+                        new_cache[key] = vec
+            except Exception as exc:
+                logger.warning("CLIP batch encode failed at index %d: %s", i, exc)
 
     _catalog_embeddings = new_cache
     _catalog_image_urls = image_urls

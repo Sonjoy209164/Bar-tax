@@ -194,6 +194,61 @@ def test_reference_image_never_becomes_confirmed_exact():
     assert decision.hits[0].is_reference is True
 
 
+def test_stronger_visual_reference_beats_weaker_unrelated_product_photo_group():
+    catalog = _active_catalog()
+    raw = [
+        ImageMatchResult(
+            product_id="shirt-ribbed-polo-white",
+            name="Ribbed Open-Collar Knit Polo - White",
+            score=0.6741,
+            match_type="visual_similar",
+            reasons=("weak shirt visual hit",),
+            price=1750.0,
+            currency="BDT",
+            stock=5,
+        ),
+        ImageMatchResult(
+            product_id="jewelry-pearl-necklace-white",
+            name="White Pearl Necklace",
+            score=1.0,
+            match_type="visual_similar",
+            reasons=("strong pearl visual hit",),
+            price=1250.0,
+            currency="BDT",
+            stock=4,
+        ),
+    ]
+
+    decision = finalize_image_search(catalog=catalog, results=raw, query_text="do you have this?", top_k=5)
+
+    assert decision.primary_product_id == "jewelry-pearl-necklace-white"
+    assert decision.hits[0].product_id == "jewelry-pearl-necklace-white"
+    assert "shirt-ribbed-polo-black" not in decision.same_design_variant_ids
+    assert "Ribbed Open-Collar" not in decision.answer
+
+
+def test_low_confidence_product_photo_does_not_expand_same_design_colors():
+    catalog = _active_catalog()
+    raw = [
+        ImageMatchResult(
+            product_id="shirt-ribbed-polo-white",
+            name="Ribbed Open-Collar Knit Polo - White",
+            score=0.67,
+            match_type="visual_similar",
+            reasons=("weak product-photo hit",),
+            price=1750.0,
+            currency="BDT",
+            stock=5,
+        )
+    ]
+
+    decision = finalize_image_search(catalog=catalog, results=raw, query_text="do you have this?", top_k=5)
+
+    assert decision.decision_label == "similar_style"
+    assert decision.same_design_variant_ids == ()
+    assert all(hit.decision_label != "confirmed_same_design_variant" for hit in decision.hits)
+
+
 # ---------------------------------------------------------------------------
 # Gold-set decision-policy regression gate (Phase 13 / 14)
 # ---------------------------------------------------------------------------

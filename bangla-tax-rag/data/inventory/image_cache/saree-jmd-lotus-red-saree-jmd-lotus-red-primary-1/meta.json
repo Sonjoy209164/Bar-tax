@@ -1,0 +1,15 @@
+{
+  "image_id": "saree-jmd-lotus-red-saree-jmd-lotus-red-primary-1",
+  "source": "frontend/assets/demo_catalog/saree-jmd-lotus-red/primary.jpg",
+  "full_path": "data/inventory/image_cache/saree-jmd-lotus-red-saree-jmd-lotus-red-primary-1/full.jpg",
+  "crop_path": "data/inventory/image_cache/saree-jmd-lotus-red-saree-jmd-lotus-red-primary-1/crop.jpg",
+  "gray_path": "data/inventory/image_cache/saree-jmd-lotus-red-saree-jmd-lotus-red-primary-1/gray.jpg",
+  "meta_path": "data/inventory/image_cache/saree-jmd-lotus-red-saree-jmd-lotus-red-primary-1/meta.json",
+  "width": 900,
+  "height": 675,
+  "crop_width": 900,
+  "crop_height": 675,
+  "dominant_color": "grey",
+  "color_family": "grey",
+  "preprocess_version": "image-preprocess-v1"
+}

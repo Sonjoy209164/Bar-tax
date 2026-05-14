@@ -1,0 +1,15 @@
+{
+  "image_id": "hf-47359-baggit-women-brown-handbag-hf-47359-baggit-women-brown-handbag-primary-1",
+  "source": "frontend/assets/demo_catalog/hf-47359-baggit-women-brown-handbag/primary.jpg",
+  "full_path": "data/inventory/image_cache/hf-47359-baggit-women-brown-handbag-hf-47359-baggit-women-brown-handbag-primary-1/full.jpg",
+  "crop_path": "data/inventory/image_cache/hf-47359-baggit-women-brown-handbag-hf-47359-baggit-women-brown-handbag-primary-1/crop.jpg",
+  "gray_path": "data/inventory/image_cache/hf-47359-baggit-women-brown-handbag-hf-47359-baggit-women-brown-handbag-primary-1/gray.jpg",
+  "meta_path": "data/inventory/image_cache/hf-47359-baggit-women-brown-handbag-hf-47359-baggit-women-brown-handbag-primary-1/meta.json",
+  "width": 260,
+  "height": 346,
+  "crop_width": 177,
+  "crop_height": 285,
+  "dominant_color": "brown",
+  "color_family": "brown",
+  "preprocess_version": "image-preprocess-v1"
+}

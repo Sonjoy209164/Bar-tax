@@ -359,7 +359,7 @@ def finalize_image_search(
 
     normalized_color = normalize_color(requested_color) or infer_requested_color(query_text)
     enriched = [_enrich_hit(hit, catalog) for hit in results if hit.product_id in catalog]
-    enriched.sort(key=lambda hit: _decision_sort_key(hit), reverse=True)
+    enriched.sort(key=lambda hit: _primary_selection_key(hit), reverse=True)
 
     if not enriched:
         return ImageSearchDecision(
@@ -378,8 +378,13 @@ def finalize_image_search(
         )
 
     primary = enriched[0]
+    enriched = _prune_visual_outliers(enriched, primary)
     group_key = primary.variant_group_id or primary.design_id
-    same_design_items = _same_design_items(catalog, group_key) if group_key else []
+    same_design_items = (
+        _same_design_items(catalog, group_key)
+        if _allows_same_design_expansion(primary) and group_key
+        else []
+    )
     available_colors = tuple(_unique_color(item) for item in same_design_items if _unique_color(item))
     available_colors = tuple(dict.fromkeys(available_colors))
 
@@ -389,9 +394,16 @@ def finalize_image_search(
     ]
     in_stock_requested = [item for item in requested_color_items if item.stock > 0]
 
-    variant_hits = [_result_from_item(item, primary, "confirmed_same_design_variant") for item in same_design_items]
+    variant_label = (
+        "confirmed_same_design_variant"
+        if primary.decision_label in {"confirmed_exact", "confirmed_same_design_variant", "likely_same_design"}
+        else "similar_style"
+    )
+    variant_hits = [_result_from_item(item, primary, variant_label) for item in same_design_items]
     merged_hits = _merge_hits(enriched, variant_hits)
     merged_hits = _apply_requested_color_priority(merged_hits, normalized_color)
+    if not normalized_color:
+        merged_hits = _ensure_primary_first(merged_hits, primary.product_id)
     decision_label = _response_decision_label(primary, same_design_items, normalized_color, in_stock_requested)
     answer = _build_decision_answer(
         primary=primary,
@@ -505,11 +517,68 @@ def _hit_decision_label(score: float, image_kind: str | None, is_reference: bool
         return "confirmed_same_design_variant"
     if not is_reference and image_kind == "product_photo" and score >= 0.9:
         return "confirmed_exact"
-    if not is_reference and image_kind == "product_photo" and score >= 0.62:
+    if not is_reference and image_kind == "product_photo" and score >= 0.82:
         return "likely_same_design"
     if score >= 0.18:
         return "similar_style"
     return "no_confident_match"
+
+
+def _primary_selection_key(hit: ImageMatchResult) -> tuple[float, float, float]:
+    """Select the visual identity anchor before expanding variant groups.
+
+    Variant/design expansion is powerful, so the primary anchor must be chosen
+    mostly from raw visual confidence. Product-photo truth is a small bonus, not
+    a license to beat a much stronger different-category visual match.
+    """
+
+    owner_bonus = 1.0 if hit.match_type.startswith("owner_confirmed") else 0.0
+    label_bonus = {
+        "confirmed_exact": 0.08,
+        "confirmed_same_design_variant": 0.06,
+        "likely_same_design": 0.035,
+        "similar_style": 0.0,
+        "no_confident_match": -0.2,
+    }.get(hit.decision_label, 0.0)
+    truth_bonus = 0.03 if not hit.is_reference and hit.image_kind == "product_photo" else -0.02 if hit.is_reference else 0.0
+    stock_bonus = 0.01 if hit.stock > 0 else 0.0
+    return (owner_bonus, hit.score + label_bonus + truth_bonus + stock_bonus, hit.score)
+
+
+def _allows_same_design_expansion(primary: ImageMatchResult) -> bool:
+    if primary.match_type.startswith("owner_confirmed"):
+        return True
+    return primary.decision_label in {"confirmed_exact", "confirmed_same_design_variant", "likely_same_design"}
+
+
+def _prune_visual_outliers(
+    hits: list[ImageMatchResult],
+    primary: ImageMatchResult,
+) -> list[ImageMatchResult]:
+    """Drop weak different-category visual neighbors after a strong primary.
+
+    CLIP often returns visually plausible but commercially absurd neighbors
+    when images share color/background. If the top hit is very strong, a much
+    weaker different-category item should not appear as a salesperson-style
+    recommendation.
+    """
+
+    primary_category = _hit_category(primary)
+    if primary.score < 0.85 or not primary_category:
+        return hits
+    pruned: list[ImageMatchResult] = []
+    for hit in hits:
+        if hit.product_id == primary.product_id:
+            pruned.append(hit)
+            continue
+        category = _hit_category(hit)
+        if category == primary_category or hit.score >= primary.score - 0.18:
+            pruned.append(hit)
+    return pruned
+
+
+def _hit_category(hit: ImageMatchResult) -> str:
+    return str((hit.score_breakdown or {}).get("category") or "").strip().casefold()
 
 
 def _response_decision_label(
@@ -603,6 +672,10 @@ def _apply_requested_color_priority(
     if not requested_color:
         return hits
     return sorted(hits, key=lambda hit: (_color_value_matches(hit.color, requested_color), *list(_decision_sort_key(hit))), reverse=True)
+
+
+def _ensure_primary_first(hits: list[ImageMatchResult], primary_product_id: str) -> list[ImageMatchResult]:
+    return sorted(hits, key=lambda hit: (hit.product_id == primary_product_id, *list(_decision_sort_key(hit))), reverse=True)
 
 
 def _decision_sort_key(hit: ImageMatchResult) -> tuple[float, float, float]:

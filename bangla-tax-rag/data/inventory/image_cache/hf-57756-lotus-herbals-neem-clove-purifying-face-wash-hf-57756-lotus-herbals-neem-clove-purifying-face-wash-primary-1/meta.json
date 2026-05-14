@@ -1,0 +1,15 @@
+{
+  "image_id": "hf-57756-lotus-herbals-neem-clove-purifying-face-wash-hf-57756-lotus-herbals-neem-clove-purifying-face-wash-primary-1",
+  "source": "frontend/assets/demo_catalog/hf-57756-lotus-herbals-neem-clove-purifying-face-wash/primary.jpg",
+  "full_path": "data/inventory/image_cache/hf-57756-lotus-herbals-neem-clove-purifying-face-wash-hf-57756-lotus-herbals-neem-clove-purifying-face-wash-primary-1/full.jpg",
+  "crop_path": "data/inventory/image_cache/hf-57756-lotus-herbals-neem-clove-purifying-face-wash-hf-57756-lotus-herbals-neem-clove-purifying-face-wash-primary-1/crop.jpg",
+  "gray_path": "data/inventory/image_cache/hf-57756-lotus-herbals-neem-clove-purifying-face-wash-hf-57756-lotus-herbals-neem-clove-purifying-face-wash-primary-1/gray.jpg",
+  "meta_path": "data/inventory/image_cache/hf-57756-lotus-herbals-neem-clove-purifying-face-wash-hf-57756-lotus-herbals-neem-clove-purifying-face-wash-primary-1/meta.json",
+  "width": 260,
+  "height": 346,
+  "crop_width": 101,
+  "crop_height": 248,
+  "dominant_color": "silver",
+  "color_family": "silver",
+  "preprocess_version": "image-preprocess-v1"
+}

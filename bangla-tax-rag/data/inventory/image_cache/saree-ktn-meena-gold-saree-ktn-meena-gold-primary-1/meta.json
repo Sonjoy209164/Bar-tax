@@ -1,0 +1,15 @@
+{
+  "image_id": "saree-ktn-meena-gold-saree-ktn-meena-gold-primary-1",
+  "source": "frontend/assets/demo_catalog/saree-ktn-meena-gold/primary.jpg",
+  "full_path": "data/inventory/image_cache/saree-ktn-meena-gold-saree-ktn-meena-gold-primary-1/full.jpg",
+  "crop_path": "data/inventory/image_cache/saree-ktn-meena-gold-saree-ktn-meena-gold-primary-1/crop.jpg",
+  "gray_path": "data/inventory/image_cache/saree-ktn-meena-gold-saree-ktn-meena-gold-primary-1/gray.jpg",
+  "meta_path": "data/inventory/image_cache/saree-ktn-meena-gold-saree-ktn-meena-gold-primary-1/meta.json",
+  "width": 900,
+  "height": 648,
+  "crop_width": 900,
+  "crop_height": 648,
+  "dominant_color": "olive",
+  "color_family": "green",
+  "preprocess_version": "image-preprocess-v1"
+}

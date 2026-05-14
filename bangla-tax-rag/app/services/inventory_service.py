@@ -9078,6 +9078,27 @@ class InventoryService:
     ) -> InventorySearchHit | None:
         if not hits:
             return None
+        query_terms = set(self._extract_query_terms(question))
+        normalized_question = self._normalize_search_text(question)
+        explicit_anchor_hits: list[tuple[int, float, InventorySearchHit]] = []
+        for hit in hits:
+            product_type = self.product_ontology.detect_product_type(product=hit)
+            if product_type not in self.product_ontology.CROSS_SELL_COMPATIBILITY:
+                continue
+            hit_tokens = (
+                self._tokenize_search_text(hit.name)
+                | self._tokenize_search_text(hit.sku)
+                | self._tokenize_search_text(hit.category)
+                | self._tokenize_search_text(" ".join(hit.tags))
+            )
+            overlap = len(query_terms.intersection(hit_tokens))
+            normalized_name = self._normalize_search_text(hit.name)
+            exact_name_bonus = 4 if normalized_name and normalized_name in normalized_question else 0
+            if overlap + exact_name_bonus >= 2:
+                explicit_anchor_hits.append((overlap + exact_name_bonus, hit.score, hit))
+        if explicit_anchor_hits:
+            explicit_anchor_hits.sort(key=lambda row: (row[0], row[1], row[2].stock or 0), reverse=True)
+            return explicit_anchor_hits[0][2]
         ranked_hits = self._rank_support_hits(
             question=question,
             hits=hits,

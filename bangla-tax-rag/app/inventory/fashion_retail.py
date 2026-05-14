@@ -1441,6 +1441,11 @@ class FashionRetailAssistant:
             candidates.append((replace(slots, fabric=None), f"{slots.fabric} {slots.category_label or 'item'}"))
         if slots.work_type:
             candidates.append((replace(slots, work_type=None), f"{slots.work_type} work {slots.category_label or 'item'}"))
+        if slots.budget_max is not None and any((slots.occasion, slots.style, slots.fabric, slots.work_type)):
+            candidates.append((
+                replace(slots, occasion=None, style=None, fabric=None, work_type=None),
+                f"occasion/style matching {slots.category_label or 'item'} under BDT {slots.budget_max:,.0f}",
+            ))
         if slots.budget_max is not None:
             candidates.append((replace(slots, budget_max=None), f"under BDT {slots.budget_max:,.0f} {slots.category_label or 'item'}"))
         if slots.category_key:

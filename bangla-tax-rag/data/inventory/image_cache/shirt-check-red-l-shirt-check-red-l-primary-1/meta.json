@@ -1,0 +1,15 @@
+{
+  "image_id": "shirt-check-red-l-shirt-check-red-l-primary-1",
+  "source": "frontend/assets/demo_catalog/shirt-check-red-l/primary.jpg",
+  "full_path": "data/inventory/image_cache/shirt-check-red-l-shirt-check-red-l-primary-1/full.jpg",
+  "crop_path": "data/inventory/image_cache/shirt-check-red-l-shirt-check-red-l-primary-1/crop.jpg",
+  "gray_path": "data/inventory/image_cache/shirt-check-red-l-shirt-check-red-l-primary-1/gray.jpg",
+  "meta_path": "data/inventory/image_cache/shirt-check-red-l-shirt-check-red-l-primary-1/meta.json",
+  "width": 597,
+  "height": 900,
+  "crop_width": 597,
+  "crop_height": 900,
+  "dominant_color": "brown",
+  "color_family": "brown",
+  "preprocess_version": "image-preprocess-v1"
+}

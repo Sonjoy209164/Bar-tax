@@ -1,0 +1,15 @@
+{
+  "image_id": "pant-formal-black-34-pant-formal-black-34-primary-1",
+  "source": "frontend/assets/demo_catalog/pant-formal-black-34/primary.jpg",
+  "full_path": "data/inventory/image_cache/pant-formal-black-34-pant-formal-black-34-primary-1/full.jpg",
+  "crop_path": "data/inventory/image_cache/pant-formal-black-34-pant-formal-black-34-primary-1/crop.jpg",
+  "gray_path": "data/inventory/image_cache/pant-formal-black-34-pant-formal-black-34-primary-1/gray.jpg",
+  "meta_path": "data/inventory/image_cache/pant-formal-black-34-pant-formal-black-34-primary-1/meta.json",
+  "width": 405,
+  "height": 900,
+  "crop_width": 405,
+  "crop_height": 852,
+  "dominant_color": "grey",
+  "color_family": "grey",
+  "preprocess_version": "image-preprocess-v1"
+}

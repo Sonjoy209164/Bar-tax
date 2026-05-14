@@ -1,0 +1,15 @@
+{
+  "image_id": "hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea-hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea-primary-1",
+  "source": "frontend/assets/demo_catalog/hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea/primary.jpg",
+  "full_path": "data/inventory/image_cache/hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea-hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea-primary-1/full.jpg",
+  "crop_path": "data/inventory/image_cache/hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea-hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea-primary-1/crop.jpg",
+  "gray_path": "data/inventory/image_cache/hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea-hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea-primary-1/gray.jpg",
+  "meta_path": "data/inventory/image_cache/hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea-hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea-primary-1/meta.json",
+  "width": 260,
+  "height": 346,
+  "crop_width": 187,
+  "crop_height": 287,
+  "dominant_color": "grey",
+  "color_family": "grey",
+  "preprocess_version": "image-preprocess-v1"
+}

@@ -4,9 +4,13 @@ from app.core.schemas import InventoryItemRecord, InventorySearchFilters
 from app.inventory.fashion_retail import FashionRetailAssistant
 
 
-def _active_catalog() -> dict[str, InventoryItemRecord]:
+ACTIVE_CATALOG_PATH = Path("data/inventory/catalog.jsonl")
+BOUTIQUE_REFERENCE_CATALOG_PATH = Path("data/inventory/backups/catalog_before_hf_demo_20260514_121130.jsonl")
+
+
+def _catalog_from(path: Path) -> dict[str, InventoryItemRecord]:
     items: dict[str, InventoryItemRecord] = {}
-    for line in Path("data/inventory/catalog.jsonl").read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         item = InventoryItemRecord.model_validate_json(line)
@@ -14,8 +18,26 @@ def _active_catalog() -> dict[str, InventoryItemRecord]:
     return items
 
 
-def test_active_catalog_is_clean_boutique_inventory() -> None:
+def _active_catalog() -> dict[str, InventoryItemRecord]:
+    return _catalog_from(ACTIVE_CATALOG_PATH)
+
+
+def _boutique_reference_catalog() -> dict[str, InventoryItemRecord]:
+    return _catalog_from(BOUTIQUE_REFERENCE_CATALOG_PATH)
+
+
+def test_active_catalog_is_image_demo_inventory() -> None:
     catalog = _active_catalog()
+
+    assert len(catalog) == 100
+    assert {item.currency for item in catalog.values()} == {"BDT"}
+    assert not any(item.category in {"Audio", "Computing", "Office"} for item in catalog.values())
+    assert all(item.images for item in catalog.values())
+    assert all((item.images[0].local_path or "").startswith("frontend/assets/demo_catalog/") for item in catalog.values())
+
+
+def test_reference_boutique_catalog_is_clean_boutique_inventory() -> None:
+    catalog = _boutique_reference_catalog()
 
     assert len(catalog) == 47
     assert {item.currency for item in catalog.values()} == {"BDT"}
@@ -25,7 +47,7 @@ def test_active_catalog_is_clean_boutique_inventory() -> None:
 def test_boutique_bot_answers_oily_skin_sunscreen_budget_query() -> None:
     outcome = FashionRetailAssistant().answer(
         question="Do you have oily skin sunscreen under 1000?",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
     )
 
@@ -38,7 +60,7 @@ def test_boutique_bot_answers_oily_skin_sunscreen_budget_query() -> None:
 def test_boutique_bot_answers_banglish_mens_shoe_size() -> None:
     outcome = FashionRetailAssistant().answer(
         question="men er brown loafer size 42 ache?",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
     )
 
@@ -51,7 +73,7 @@ def test_boutique_bot_answers_banglish_mens_shoe_size() -> None:
 def test_boutique_bot_does_not_overmatch_other_size_variants() -> None:
     outcome = FashionRetailAssistant().answer(
         question="white panjabi L available?",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
     )
 
@@ -65,7 +87,7 @@ def test_boutique_bot_does_not_overmatch_other_size_variants() -> None:
 def test_boutique_bot_answers_direct_watch_query_as_search_not_matching() -> None:
     outcome = FashionRetailAssistant().answer(
         question="ladies rose gold watch ache?",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
     )
 
@@ -78,7 +100,7 @@ def test_boutique_bot_answers_direct_watch_query_as_search_not_matching() -> Non
 def test_boutique_bot_reports_out_of_stock_three_piece_variant() -> None:
     outcome = FashionRetailAssistant().answer(
         question="blue floral three piece M available?",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
     )
 
@@ -92,7 +114,7 @@ def test_boutique_bot_reports_out_of_stock_three_piece_variant() -> None:
 def test_boutique_bot_answers_bangla_matching_bag_for_saree() -> None:
     outcome = FashionRetailAssistant().answer(
         question="নেভি কাতান শাড়ির সাথে কোন ব্যাগ মানাবে?",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
     )
 
@@ -107,7 +129,7 @@ def test_boutique_bot_answers_bangla_matching_bag_for_saree() -> None:
 def test_boutique_bot_keeps_same_design_context_for_followup() -> None:
     outcome = FashionRetailAssistant().answer(
         question="ei same design ta green color e ache?",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
         focused_product_ids=("saree-jmd-lotus-red",),
     )
@@ -121,7 +143,7 @@ def test_boutique_bot_keeps_same_design_context_for_followup() -> None:
 def test_boutique_bot_answers_banglish_wedding_saree_request() -> None:
     outcome = FashionRetailAssistant().answer(
         question="amar biye kichu saree dekhan",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
     )
 
@@ -136,7 +158,7 @@ def test_boutique_bot_answers_banglish_wedding_saree_request() -> None:
 def test_boutique_bot_relaxes_eid_budget_saree_without_abstaining() -> None:
     outcome = FashionRetailAssistant().answer(
         question="eid er jonno 5000 er moddhe elegant saree",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
     )
 
@@ -144,14 +166,15 @@ def test_boutique_bot_relaxes_eid_budget_saree_without_abstaining() -> None:
     assert outcome.intent == "fashion_search"
     assert not outcome.abstained
     assert outcome.product_ids
-    assert all(_active_catalog()[product_id].price <= 5000 for product_id in outcome.product_ids)
-    assert all(_active_catalog()[product_id].attributes.get("category_key") == "saree" for product_id in outcome.product_ids)
+    catalog = _boutique_reference_catalog()
+    assert all(catalog[product_id].price <= 5000 for product_id in outcome.product_ids)
+    assert all(catalog[product_id].attributes.get("category_key") == "saree" for product_id in outcome.product_ids)
 
 
 def test_boutique_bot_does_not_let_old_saree_context_override_new_bag_query() -> None:
     outcome = FashionRetailAssistant().answer(
         question="amar office ache amake kichu bag dekhan",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
         conversation_history=[
             ("user", "amar biye kichu saree dekhan"),
@@ -164,13 +187,14 @@ def test_boutique_bot_does_not_let_old_saree_context_override_new_bag_query() ->
     assert outcome.intent == "fashion_search"
     assert outcome.slots.category_key == "bag"
     assert outcome.product_ids[0] == "bag-tote-black-everyday"
-    assert all(_active_catalog()[product_id].attributes.get("category_key") == "bag" for product_id in outcome.product_ids)
+    catalog = _boutique_reference_catalog()
+    assert all(catalog[product_id].attributes.get("category_key") == "bag" for product_id in outcome.product_ids)
 
 
 def test_boutique_bot_enforces_men_filter_for_watch_or_perfume_compare() -> None:
     outcome = FashionRetailAssistant().answer(
         question="3000 taka er moddhe men watch ba perfume ache?",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
     )
 
@@ -185,7 +209,7 @@ def test_boutique_bot_enforces_men_filter_for_watch_or_perfume_compare() -> None
 def test_boutique_bot_routes_bag_and_bangle_matching_to_accessory_engine() -> None:
     outcome = FashionRetailAssistant().answer(
         question="maroon bridal katan er sathe kon bag ar bangle match korbe?",
-        catalog=_active_catalog(),
+        catalog=_boutique_reference_catalog(),
         filters=InventorySearchFilters(),
     )
 

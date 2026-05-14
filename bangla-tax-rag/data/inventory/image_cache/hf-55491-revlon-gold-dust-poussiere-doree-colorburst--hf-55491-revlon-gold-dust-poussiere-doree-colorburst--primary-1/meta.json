@@ -1,0 +1,15 @@
+{
+  "image_id": "hf-55491-revlon-gold-dust-poussiere-doree-colorburst--hf-55491-revlon-gold-dust-poussiere-doree-colorburst--primary-1",
+  "source": "frontend/assets/demo_catalog/hf-55491-revlon-gold-dust-poussiere-doree-colorburst-/primary.jpg",
+  "full_path": "data/inventory/image_cache/hf-55491-revlon-gold-dust-poussiere-doree-colorburst--hf-55491-revlon-gold-dust-poussiere-doree-colorburst--primary-1/full.jpg",
+  "crop_path": "data/inventory/image_cache/hf-55491-revlon-gold-dust-poussiere-doree-colorburst--hf-55491-revlon-gold-dust-poussiere-doree-colorburst--primary-1/crop.jpg",
+  "gray_path": "data/inventory/image_cache/hf-55491-revlon-gold-dust-poussiere-doree-colorburst--hf-55491-revlon-gold-dust-poussiere-doree-colorburst--primary-1/gray.jpg",
+  "meta_path": "data/inventory/image_cache/hf-55491-revlon-gold-dust-poussiere-doree-colorburst--hf-55491-revlon-gold-dust-poussiere-doree-colorburst--primary-1/meta.json",
+  "width": 260,
+  "height": 346,
+  "crop_width": 132,
+  "crop_height": 270,
+  "dominant_color": "grey",
+  "color_family": "grey",
+  "preprocess_version": "image-preprocess-v1"
+}

@@ -241,6 +241,16 @@ function renderCatalogItem(item) {
   const node = document.createElement("article");
   node.className = "catalog-item";
 
+  const catalogImageUrl = firstCatalogImageUrl(item);
+  if (catalogImageUrl) {
+    const img = document.createElement("img");
+    img.className = "catalog-thumb";
+    img.src = resolveCatalogAssetUrl(catalogImageUrl);
+    img.alt = item.name || item.product_id || "Catalog product";
+    img.loading = "lazy";
+    node.appendChild(img);
+  }
+
   const top = document.createElement("div");
   top.className = "catalog-item-top";
   const name = document.createElement("h3");
@@ -316,6 +326,19 @@ function catalogSearchText(item) {
     ...Object.values(item.attributes || {}),
   ];
   return normalizeCatalogText(pieces.filter(Boolean).join(" "));
+}
+
+function firstCatalogImageUrl(item) {
+  const images = Array.isArray(item?.images) ? item.images : [];
+  const primary = images.find(image => image?.role === "primary") || images[0];
+  return primary?.url || primary?.local_path || null;
+}
+
+function resolveCatalogAssetUrl(value) {
+  if (!value || typeof value !== "string") return "";
+  if (/^(https?:|data:|blob:|\/)/i.test(value)) return value;
+  if (value.startsWith("frontend/")) return `/${value}`;
+  return value;
 }
 
 function normalizeCatalogText(text) {
@@ -883,7 +906,7 @@ function renderImageResults(node, response) {
     card.className = "image-result-card";
     if (hit.image_url) {
       const img = document.createElement("img");
-      img.src = hit.image_url;
+      img.src = resolveCatalogAssetUrl(hit.image_url);
       img.alt = hit.name || "Matched product";
       img.loading = "lazy";
       card.appendChild(img);

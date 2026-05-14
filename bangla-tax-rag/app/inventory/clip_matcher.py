@@ -21,6 +21,7 @@ _HTTP_HEADERS = {"User-Agent": "bangla-tax-rag-image-search/1.0"}
 _catalog_embeddings: dict[str, list[float]] = {}
 _catalog_image_urls: dict[str, str] = {}
 _catalog_embedding_mtime: float = 0.0
+_catalog_embedding_signature: tuple[tuple[str, str], ...] = ()
 
 
 def _load_clip():
@@ -141,8 +142,9 @@ def precompute_catalog_embeddings(
     Stores results in the in-memory cache.  Returns number of items encoded.
     Only runs if CLIP is available.
     """
-    global _catalog_embeddings, _catalog_image_urls
-    if not force and _catalog_embeddings:
+    global _catalog_embeddings, _catalog_image_urls, _catalog_embedding_signature
+    signature = _catalog_signature(catalog)
+    if not force and _catalog_embeddings and _catalog_embedding_signature == signature:
         return len(_catalog_embeddings)
     model, _ = _load_clip()
     if model is None:
@@ -201,8 +203,19 @@ def precompute_catalog_embeddings(
 
     _catalog_embeddings = new_cache
     _catalog_image_urls = image_urls
+    _catalog_embedding_signature = signature
     logger.info("CLIP: precomputed %d catalog embeddings", len(_catalog_embeddings))
     return len(_catalog_embeddings)
+
+
+def _catalog_signature(catalog: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    signature: list[tuple[str, str]] = []
+    for product_id, item in sorted(catalog.items()):
+        image_source = primary_image_url(item) or ""
+        updated_at = getattr(item, "updated_at", "") if hasattr(item, "updated_at") else str(item.get("updated_at", ""))
+        name = getattr(item, "name", "") if hasattr(item, "name") else str(item.get("name", ""))
+        signature.append((str(product_id), f"{image_source}|{updated_at}|{name}"))
+    return tuple(signature)
 
 
 class CLIPImageMatcher:

@@ -371,6 +371,40 @@ class ConfigResponse(BaseModel):
     reranker_model_name: str
 
 
+class InventoryImageAsset(BaseModel):
+    image_id: str = Field(..., description="Stable image identifier, usually product_id plus sequence.")
+    url: str | None = Field(default=None, description="Direct HTTP(S) image URL for display or embedding.")
+    local_path: str | None = Field(default=None, description="Optional local image path when assets are stored in the repo/POS.")
+    source_url: str | None = Field(default=None, description="Human-reviewable source page for attribution.")
+    source_name: str | None = Field(default=None, description="Source system or website name.")
+    license: str | None = Field(default=None, description="Image license label when externally sourced.")
+    license_url: str | None = Field(default=None, description="URL for the image license.")
+    attribution: str | None = Field(default=None, description="Creator/owner attribution when required.")
+    role: Literal["primary", "alternate", "detail", "reference"] = Field(default="primary")
+    kind: Literal["product_photo", "supplier_photo", "reference_photo", "generated"] = Field(default="product_photo")
+    is_reference: bool = Field(
+        default=False,
+        description="True when the image is a demo/reference image, not an actual SKU photo.",
+    )
+    visual_tags: list[str] = Field(default_factory=list, description="Color/category/material/pattern tags for visual fallback.")
+    width: int | None = Field(default=None, ge=0)
+    height: int | None = Field(default=None, ge=0)
+
+    @field_validator("image_id")
+    @classmethod
+    def validate_image_id(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("image_id must not be empty")
+        return stripped
+
+    @model_validator(mode="after")
+    def validate_location(self) -> "InventoryImageAsset":
+        if not self.url and not self.local_path:
+            raise ValueError("InventoryImageAsset requires either url or local_path")
+        return self
+
+
 class InventoryItemRecord(BaseModel):
     product_id: str = Field(..., description="Stable product identifier from the inventory system.")
     sku: str = Field(..., description="Human-readable stock keeping unit.")
@@ -385,6 +419,7 @@ class InventoryItemRecord(BaseModel):
     status: str | None = Field(default=None, description="Operational stock status.")
     tags: list[str] = Field(default_factory=list, description="Free-form tags used for search and filtering.")
     attributes: dict[str, str] = Field(default_factory=dict, description="Structured product attributes.")
+    images: list[InventoryImageAsset] = Field(default_factory=list, description="Product or reference images for visual search.")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional opaque metadata from the inventory system.")
     include_in_rag: bool = Field(default=True, description="Whether the product should be indexed for semantic retrieval.")
     updated_at: str | None = Field(default=None, description="Last updated timestamp from the source system.")

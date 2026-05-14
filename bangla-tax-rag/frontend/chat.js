@@ -673,6 +673,7 @@ async function sendImageSearch(queryText) {
       top_k: 5,
     });
     thinking.querySelector(".body").textContent = response.answer || "No similar items found.";
+    renderImageResults(thinking, response);
     renderImageMeta(thinking, response);
     addFeedbackRow(thinking, displayText, response.answer || "", "image_search", feedbackContextFromResponse(response));
   } catch (error) {
@@ -870,6 +871,40 @@ function renderImageMeta(node, response) {
   meta.className = "meta";
   meta.textContent = `image-search · ${response?.total || 0} result(s)`;
   node.appendChild(meta);
+}
+
+function renderImageResults(node, response) {
+  const hits = Array.isArray(response?.hits) ? response.hits.slice(0, 6) : [];
+  if (!hits.length) return;
+  const grid = document.createElement("div");
+  grid.className = "image-results";
+  hits.forEach(hit => {
+    const card = document.createElement("div");
+    card.className = "image-result-card";
+    if (hit.image_url) {
+      const img = document.createElement("img");
+      img.src = hit.image_url;
+      img.alt = hit.name || "Matched product";
+      img.loading = "lazy";
+      card.appendChild(img);
+    }
+    const body = document.createElement("div");
+    body.className = "image-result-body";
+    const name = document.createElement("p");
+    name.className = "image-result-name";
+    name.textContent = hit.name || hit.product_id || "Product";
+    const facts = document.createElement("div");
+    facts.className = "image-result-facts";
+    const price = typeof hit.price === "number" ? `BDT ${hit.price.toLocaleString()}` : "Price N/A";
+    const stock = Number.isFinite(hit.stock) ? `${hit.stock} in stock` : "Stock N/A";
+    const score = typeof hit.score === "number" ? `${Math.round(hit.score * 100)}% visual` : "visual match";
+    facts.textContent = `${price} · ${stock} · ${score}`;
+    body.appendChild(name);
+    body.appendChild(facts);
+    card.appendChild(body);
+    grid.appendChild(card);
+  });
+  node.appendChild(grid);
 }
 
 async function checkHealth() {

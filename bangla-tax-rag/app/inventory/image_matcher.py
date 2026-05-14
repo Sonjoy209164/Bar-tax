@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from app.core.schemas import InventoryItemRecord
+from app.core.schemas import InventoryImageAsset, InventoryItemRecord
 
 
 @dataclass(frozen=True)
@@ -130,14 +130,7 @@ class ImageMatcher:
         results: list[ImageMatchResult] = []
         for score, product_id, match_type, reasons in candidates[:top_k]:
             item = self._catalog[product_id]
-            image_url: str | None = None
-            images = item.metadata.get("images") or item.attributes.get("images")
-            if isinstance(images, list) and images:
-                first = images[0]
-                if isinstance(first, dict):
-                    image_url = first.get("url")
-                elif isinstance(first, str):
-                    image_url = first
+            image_url = primary_image_url(item)
             results.append(
                 ImageMatchResult(
                     product_id=product_id,
@@ -255,4 +248,28 @@ def _infer_category_from_text(text: str) -> str | None:
     for cat, terms in category_hints.items():
         if any(t in text for t in terms):
             return cat
+    return None
+
+
+def primary_image_asset(item: InventoryItemRecord) -> InventoryImageAsset | None:
+    if item.images:
+        for image in item.images:
+            if image.role == "primary":
+                return image
+        return item.images[0]
+    return None
+
+
+def primary_image_url(item: InventoryItemRecord) -> str | None:
+    asset = primary_image_asset(item)
+    if asset is not None:
+        return asset.url or asset.local_path
+    images = item.metadata.get("images") or item.attributes.get("images")
+    if isinstance(images, list) and images:
+        first = images[0]
+        if isinstance(first, dict):
+            value = first.get("url") or first.get("local_path")
+            return str(value) if value else None
+        if isinstance(first, str):
+            return first
     return None

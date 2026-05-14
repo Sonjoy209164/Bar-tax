@@ -191,6 +191,47 @@ h1 {
   font-size: 12px;
 }
 
+.image-results {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.image-result-card {
+  min-width: 0;
+  border: 1px solid #cfe5e1;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.image-result-card img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+  background: #eef2f7;
+}
+
+.image-result-body {
+  padding: 8px;
+}
+
+.image-result-name {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.image-result-facts {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .chips {
   display: flex;
   align-items: center;

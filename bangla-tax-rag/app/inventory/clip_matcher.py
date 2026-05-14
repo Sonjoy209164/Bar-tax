@@ -3,20 +3,23 @@ from __future__ import annotations
 import base64
 import io
 import logging
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from app.inventory.image_matcher import ImageMatchResult, ImageMatcher
+import httpx
+
+from app.inventory.image_matcher import ImageMatchResult, ImageMatcher, primary_image_url
 
 logger = logging.getLogger(__name__)
 
 _clip_model = None
 _clip_processor = None
 _MODEL_NAME = "openai/clip-vit-base-patch32"
+_HTTP_HEADERS = {"User-Agent": "bangla-tax-rag-image-search/1.0"}
 
 # In-memory cache: product_id → embedding vector
 _catalog_embeddings: dict[str, list[float]] = {}
+_catalog_image_urls: dict[str, str] = {}
 _catalog_embedding_mtime: float = 0.0
 
 
@@ -58,11 +61,42 @@ def _encode_image_b64(image_b64: str) -> list[float] | None:
         inputs = processor(images=img, return_tensors="pt")
         with torch.no_grad():
             feat = model.get_image_features(**inputs)
-            feat = feat / feat.norm(dim=-1, keepdim=True)
-        return feat[0].tolist()
+        return _feature_to_vector(feat)
     except Exception as exc:
         logger.warning("CLIP image encode failed: %s", exc)
         return None
+
+
+def _encode_image_bytes(raw: bytes) -> list[float] | None:
+    model, processor = _load_clip()
+    if model is None:
+        return None
+    try:
+        import torch
+        from PIL import Image  # type: ignore[import]
+
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        inputs = processor(images=img, return_tensors="pt")
+        with torch.no_grad():
+            feat = model.get_image_features(**inputs)
+        return _feature_to_vector(feat)
+    except Exception as exc:
+        logger.warning("CLIP catalog image encode failed: %s", exc)
+        return None
+
+
+def _encode_image_source(source: str) -> list[float] | None:
+    try:
+        if source.startswith(("http://", "https://")):
+            resp = httpx.get(source, timeout=8.0, follow_redirects=True, headers=_HTTP_HEADERS)
+            resp.raise_for_status()
+            return _encode_image_bytes(resp.content)
+        path = Path(source)
+        if path.exists():
+            return _encode_image_bytes(path.read_bytes())
+    except Exception as exc:
+        logger.warning("CLIP image source load failed for %s: %s", source, exc)
+    return None
 
 
 def _encode_text(text: str) -> list[float] | None:
@@ -74,8 +108,7 @@ def _encode_text(text: str) -> list[float] | None:
         inputs = processor(text=[text], return_tensors="pt", padding=True, truncation=True, max_length=77)
         with torch.no_grad():
             feat = model.get_text_features(**inputs)
-            feat = feat / feat.norm(dim=-1, keepdim=True)
-        return feat[0].tolist()
+        return _feature_to_vector(feat)
     except Exception as exc:
         logger.warning("CLIP text encode failed: %s", exc)
         return None
@@ -84,6 +117,19 @@ def _encode_text(text: str) -> list[float] | None:
 def _cosine(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     return max(-1.0, min(1.0, dot))  # vectors are already normalized
+
+
+def _feature_to_vector(feature: Any) -> list[float] | None:
+    if hasattr(feature, "pooler_output"):
+        feature = feature.pooler_output
+    elif hasattr(feature, "last_hidden_state"):
+        feature = feature.last_hidden_state[:, 0]
+    elif isinstance(feature, tuple):
+        feature = feature[0]
+    if feature is None:
+        return None
+    feature = feature / feature.norm(dim=-1, keepdim=True)
+    return feature[0].tolist()
 
 
 def precompute_catalog_embeddings(
@@ -95,7 +141,7 @@ def precompute_catalog_embeddings(
     Stores results in the in-memory cache.  Returns number of items encoded.
     Only runs if CLIP is available.
     """
-    global _catalog_embeddings
+    global _catalog_embeddings, _catalog_image_urls
     if not force and _catalog_embeddings:
         return len(_catalog_embeddings)
     model, _ = _load_clip()
@@ -105,8 +151,18 @@ def precompute_catalog_embeddings(
     items = list(catalog.values())
     texts = []
     ids = []
+    image_vectors: dict[str, list[float]] = {}
+    image_urls: dict[str, str] = {}
     for item in items:
         if hasattr(item, "name"):
+            image_url = primary_image_url(item)
+            if image_url:
+                vec = _encode_image_source(image_url)
+                if vec is not None:
+                    pid = item.product_id
+                    image_vectors[pid] = vec
+                    image_urls[pid] = image_url
+                    continue
             desc = (item.name or "") + " " + (getattr(item, "short_description", "") or "")
             attrs = item.attributes or {}
             for k in ("color", "fabric", "work_type", "occasion"):
@@ -121,7 +177,7 @@ def precompute_catalog_embeddings(
     import torch
     from transformers import CLIPProcessor, CLIPModel  # already loaded
     processor = _clip_processor
-    new_cache: dict[str, list[float]] = {}
+    new_cache: dict[str, list[float]] = dict(image_vectors)
     batch_size = 32
     for i in range(0, len(texts), batch_size):
         batch_texts = texts[i:i + batch_size]
@@ -130,6 +186,12 @@ def precompute_catalog_embeddings(
             inputs = processor(text=batch_texts, return_tensors="pt", padding=True, truncation=True, max_length=77)
             with torch.no_grad():
                 feats = _clip_model.get_text_features(**inputs)
+                if hasattr(feats, "pooler_output"):
+                    feats = feats.pooler_output
+                elif hasattr(feats, "last_hidden_state"):
+                    feats = feats.last_hidden_state[:, 0]
+                elif isinstance(feats, tuple):
+                    feats = feats[0]
                 feats = feats / feats.norm(dim=-1, keepdim=True)
             for pid, vec in zip(batch_ids, feats.tolist()):
                 if pid:
@@ -138,6 +200,7 @@ def precompute_catalog_embeddings(
             logger.warning("CLIP batch encode failed at index %d: %s", i, exc)
 
     _catalog_embeddings = new_cache
+    _catalog_image_urls = image_urls
     logger.info("CLIP: precomputed %d catalog embeddings", len(_catalog_embeddings))
     return len(_catalog_embeddings)
 
@@ -149,7 +212,7 @@ class CLIPImageMatcher:
     """
 
     def __init__(self) -> None:
-        self._fallback = ImageMatcher()
+        pass
 
     def search(
         self,
@@ -161,9 +224,9 @@ class CLIPImageMatcher:
         budget_max: float | None = None,
         top_k: int = 5,
     ) -> list[ImageMatchResult]:
-        if catalog and _catalog_embeddings:
+        if catalog:
             # Precompute if not done yet
-            if len(_catalog_embeddings) < len(catalog) // 2:
+            if not _catalog_embeddings or len(_catalog_embeddings) < len(catalog) // 2:
                 precompute_catalog_embeddings(catalog)
 
         query_vec: list[float] | None = None
@@ -174,7 +237,7 @@ class CLIPImageMatcher:
 
         if query_vec is None or not _catalog_embeddings:
             # Fall back to metadata matcher
-            return self._fallback.search(
+            return ImageMatcher(catalog or {}).search(
                 query_text=query_text,
                 image_b64=image_b64 or "",
                 category_hint=category_hint,
@@ -203,6 +266,7 @@ class CLIPImageMatcher:
                     price=item.price,
                     currency=item.currency,
                     stock=item.stock,
+                    image_url=_catalog_image_urls.get(pid) or primary_image_url(item),
                 ))
             else:
                 results.append(ImageMatchResult(

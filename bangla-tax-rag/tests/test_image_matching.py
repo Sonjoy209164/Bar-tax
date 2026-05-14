@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.core.schemas import InventoryItemRecord, InventorySearchFilters
-from app.inventory.image_matcher import ImageMatcher, ImageMatchResult, is_image_search_query
+from app.inventory.image_matcher import ImageMatcher, ImageMatchResult, is_image_search_query, primary_image_url
 
 
 def _active_catalog() -> dict[str, InventoryItemRecord]:
@@ -41,6 +41,15 @@ def test_image_matcher_returns_results_for_category_hint():
     for r in results:
         assert isinstance(r, ImageMatchResult)
         assert r.score > 0.0
+
+
+def test_catalog_items_have_first_class_image_assets():
+    catalog = _active_catalog()
+    assert all(item.images for item in catalog.values())
+    first = catalog["saree-jmd-lotus-red"]
+    assert first.images[0].kind == "reference_photo"
+    assert first.images[0].is_reference is True
+    assert primary_image_url(first)
 
 
 def test_image_matcher_filters_by_budget():

@@ -36,6 +36,9 @@ from app.core.schemas import (
     InventoryExecutionContract,
     InventoryItemRecord,
     InventoryMemoryResolution,
+    ImageSearchHit,
+    ImageSearchRequest,
+    ImageSearchResponse,
     InventoryProductionStatusResponse,
     InventoryRouteRequest,
     InventoryRouteResponse,
@@ -77,6 +80,20 @@ from app.inventory.spec_utils import (
     spec_requirement_satisfied,
 )
 from app.inventory.fashion_retail import FashionRetailAssistant, FashionRetailOutcome
+from app.inventory.image_feedback import (
+    ImageSearchFailure,
+    list_image_search_corrections,
+    save_image_search_failure,
+)
+from app.inventory.image_matcher import (
+    ImageMatchResult,
+    ImageSearchDecision,
+    apply_owner_corrections,
+    finalize_image_search,
+    primary_image_asset,
+    primary_image_url,
+    query_image_id_from_b64,
+)
 from app.inventory.natural_answer import generate_ollama_answer
 from app.inventory.proactive import build_proactive_message
 from app.inventory.policy import (
@@ -908,6 +925,15 @@ class InventoryService:
         started_at = perf_counter()
         trace_id = str(uuid4())
         memory_resolution = InventoryMemoryResolution()
+        if request.image_b64:
+            return self._answer_with_image_search(
+                request=request, trace_id=trace_id, started_at=started_at
+            )
+        image_followup = self._try_image_followup_ask(
+            request=request, trace_id=trace_id, started_at=started_at
+        )
+        if image_followup is not None:
+            return image_followup
         conversational_reply = self._build_conversational_reply(
             question=request.question,
             assistant_mode=request.assistant_mode,
@@ -1126,6 +1152,575 @@ class InventoryService:
             retrieval_steps=retrieval_steps,
         )
         return response
+
+    # ------------------------------------------------------------------
+    # Image search (screenshot -> catalog identity)
+    # ------------------------------------------------------------------
+
+    def image_search(self, request: ImageSearchRequest) -> ImageSearchResponse:
+        """Standalone screenshot search endpoint.
+
+        Visual retrieval (CLIP when available, metadata fallback otherwise) is
+        converted into a business-safe product-identity decision: exact /
+        same-design / similar / no-confident-match. The catalog is the truth;
+        the visual model only proposes candidates.
+        """
+        started_at = perf_counter()
+        trace_id = str(uuid4())
+        catalog = self._load_catalog()
+        query_image_id = request.query_image_id or query_image_id_from_b64(request.image_b64)
+        decision, retrieval_engine = self._run_image_search_decision(
+            catalog=catalog,
+            query_text=request.query_text,
+            image_b64=request.image_b64,
+            query_image_id=query_image_id,
+            category_hint=request.category_hint,
+            color_hint=request.color_hint,
+            budget_max=request.budget_max,
+            top_k=request.top_k,
+        )
+        try:
+            self._record_image_search_turn(
+                session_id=request.session_id,
+                query_text=request.query_text or "[image upload]",
+                decision=decision,
+            )
+            self._log_image_search_failure_if_needed(
+                query_text=request.query_text,
+                session_id=request.session_id,
+                query_image_id=query_image_id,
+                decision=decision,
+            )
+        except Exception as exc:  # pragma: no cover - feedback logging must never break a reply
+            logger.debug("image-search post-processing failed: %s", exc)
+        self._save_image_search_trace(
+            trace_id=trace_id,
+            started_at=started_at,
+            request_query=request.query_text,
+            query_image_id=query_image_id,
+            decision=decision,
+            retrieval_engine=retrieval_engine,
+            execution_path="inventory_image_search",
+        )
+        return ImageSearchResponse(
+            status="success",
+            answer=decision.answer,
+            trace_id=trace_id,
+            query_image_id=query_image_id,
+            hits=[self._image_match_to_image_hit(hit) for hit in decision.hits],
+            total=len(decision.hits),
+            decision_label=decision.decision_label,
+            primary_product_id=decision.primary_product_id,
+            same_design_variant_ids=list(decision.same_design_variant_ids),
+            similar_product_ids=list(decision.similar_product_ids),
+            requested_color=decision.requested_color,
+            available_colors=list(decision.available_colors),
+            score_breakdown=decision.score_breakdown,
+        )
+
+    def _run_image_search_decision(
+        self,
+        *,
+        catalog: dict[str, InventoryItemRecord],
+        query_text: str | None,
+        image_b64: str | None,
+        query_image_id: str | None,
+        category_hint: str | None = None,
+        color_hint: str | None = None,
+        budget_max: float | None = None,
+        top_k: int = 5,
+    ) -> tuple[ImageSearchDecision, str]:
+        """Run visual retrieval, owner corrections, and the decision policy."""
+        from app.inventory.clip_matcher import CLIPImageMatcher
+        from app.inventory.image_matcher import ImageMatcher
+
+        raw_top_k = min(max(top_k * 4, 12), 20)
+        retrieval_engine = "metadata"
+        try:
+            clip_available = CLIPImageMatcher.is_available()
+        except Exception:  # pragma: no cover - model probing must not break retrieval
+            clip_available = False
+
+        if clip_available:
+            from app.inventory.clip_matcher import precompute_catalog_embeddings
+
+            precompute_catalog_embeddings(catalog)
+            results = CLIPImageMatcher().search(
+                query_text=query_text or "",
+                image_b64=image_b64,
+                catalog=catalog,
+                category_hint=category_hint,
+                color_hint=color_hint,
+                budget_max=budget_max,
+                top_k=raw_top_k,
+            )
+            retrieval_engine = "clip"
+        else:
+            results = ImageMatcher(catalog).search(
+                query_text=query_text or "",
+                image_b64=image_b64 or "",
+                category_hint=category_hint,
+                color_hint=color_hint,
+                budget_max=budget_max,
+                top_k=raw_top_k,
+            )
+
+        results = apply_owner_corrections(
+            catalog=catalog,
+            results=results,
+            query_image_id=query_image_id,
+            corrections=list_image_search_corrections(limit=1000),
+        )
+        decision = finalize_image_search(
+            catalog=catalog,
+            results=results,
+            query_text=query_text or "",
+            requested_color=color_hint,
+            top_k=top_k,
+        )
+        return decision, retrieval_engine
+
+    def _answer_with_image_search(
+        self,
+        *,
+        request: InventoryAskRequest,
+        trace_id: str,
+        started_at: float,
+    ) -> InventoryAskResponse:
+        """Answer an /inventory/ask turn that carries an uploaded screenshot."""
+        catalog = self._load_catalog()
+        query_image_id = request.query_image_id or query_image_id_from_b64(request.image_b64)
+        decision, retrieval_engine = self._run_image_search_decision(
+            catalog=catalog,
+            query_text=request.question,
+            image_b64=request.image_b64,
+            query_image_id=query_image_id,
+            top_k=request.top_k,
+        )
+        try:
+            self._record_image_search_turn(
+                session_id=request.session_id,
+                query_text=request.question,
+                decision=decision,
+            )
+            self._log_image_search_failure_if_needed(
+                query_text=request.question,
+                session_id=request.session_id,
+                query_image_id=query_image_id,
+                decision=decision,
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.debug("image-search post-processing failed: %s", exc)
+        response = self._image_decision_to_ask_response(
+            request=request,
+            trace_id=trace_id,
+            decision=decision,
+            catalog=catalog,
+            memory_resolution=InventoryMemoryResolution(),
+        )
+        self._save_image_search_trace(
+            trace_id=trace_id,
+            started_at=started_at,
+            request_query=request.question,
+            query_image_id=query_image_id,
+            decision=decision,
+            retrieval_engine=retrieval_engine,
+            execution_path="inventory_image_search",
+        )
+        return response
+
+    def _try_image_followup_ask(
+        self,
+        *,
+        request: InventoryAskRequest,
+        trace_id: str,
+        started_at: float,
+    ) -> InventoryAskResponse | None:
+        """Resolve a text-only follow-up against the previous image-search result.
+
+        Example: customer uploads a black shirt, bot shows the ribbed polo, then
+        the customer types "white ache?" / "M size ache?" / "ar ki color ache?".
+        The previous variant group is the anchor, so the decision policy is
+        re-run against the remembered product instead of doing a fresh search.
+        """
+        session_id = getattr(request, "session_id", None)
+        if not session_id:
+            return None
+        try:
+            from app.inventory.conversation_state import get_state_store
+
+            state = get_state_store().get(session_id)
+        except Exception:  # pragma: no cover - state store is best-effort
+            return None
+        if state.last_intent != "image_search":
+            return None
+        primary_id = state.last_primary_product_id
+        if not primary_id:
+            return None
+        if not self._is_image_variant_followup(request.question):
+            return None
+        catalog = self._load_catalog()
+        primary_item = catalog.get(primary_id)
+        if primary_item is None:
+            return None
+
+        decision = finalize_image_search(
+            catalog=catalog,
+            results=[self._synthetic_image_hit(primary_item)],
+            query_text=request.question,
+            top_k=request.top_k,
+        )
+        try:
+            self._record_image_search_turn(
+                session_id=session_id,
+                query_text=request.question,
+                decision=decision,
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.debug("image follow-up state save failed: %s", exc)
+        response = self._image_decision_to_ask_response(
+            request=request,
+            trace_id=trace_id,
+            decision=decision,
+            catalog=catalog,
+            memory_resolution=InventoryMemoryResolution(
+                used_memory=True,
+                reason="Resolved follow-up against the previous image-search variant group.",
+                resolved_product_ids=[primary_id],
+            ),
+        )
+        self._save_image_search_trace(
+            trace_id=trace_id,
+            started_at=started_at,
+            request_query=request.question,
+            query_image_id=None,
+            decision=decision,
+            retrieval_engine="image_memory_followup",
+            execution_path="inventory_image_followup",
+        )
+        return response
+
+    def _is_image_variant_followup(self, question: str) -> bool:
+        """True when a text-only turn is a color/size/availability follow-up.
+
+        A question that names a fresh product type (e.g. "red saree ache?") is
+        treated as a new search, not a follow-up, so prior image memory cannot
+        hijack a clearly different request.
+        """
+        from app.inventory.image_matcher import infer_requested_color
+
+        normalized = f" {question.casefold()} "
+        if self.product_ontology.detect_product_type(text=question):
+            return False
+        size_terms = (" m ", " l ", " xl ", " s ", " xxl ", "size", "maap", "মাপ", "সাইজ")
+        availability_terms = (
+            "ache", "available", "stock", "color", "colour", "kalar",
+            "রং", "রঙ", "design", "variant", "ar ki", "অন্য", "same", "eta",
+        )
+        return (
+            bool(infer_requested_color(question))
+            or any(term in normalized for term in size_terms)
+            or any(term in normalized for term in availability_terms)
+        )
+
+    @staticmethod
+    def _synthetic_image_hit(item: InventoryItemRecord) -> ImageMatchResult:
+        """Build a raw visual hit for a remembered product so the decision
+        policy (variant grouping, color resolution) can be re-applied."""
+        image = primary_image_asset(item)
+        attrs = item.attributes or {}
+        return ImageMatchResult(
+            product_id=item.product_id,
+            name=item.name,
+            score=0.97,
+            match_type="visual_similar",
+            reasons=("remembered from previous image search",),
+            price=item.price,
+            currency=item.currency,
+            stock=item.stock,
+            image_url=primary_image_url(item),
+            variant_group_id=(
+                attrs.get("variant_group_id")
+                or attrs.get("variant_group_name")
+                or attrs.get("design_id")
+            ),
+            design_id=attrs.get("design_id"),
+            color=attrs.get("color") or attrs.get("color_family"),
+            size=attrs.get("size"),
+            image_kind=image.kind if image else None,
+            is_reference=bool(image.is_reference) if image else False,
+        )
+
+    def _image_decision_to_ask_response(
+        self,
+        *,
+        request: InventoryAskRequest,
+        trace_id: str,
+        decision: ImageSearchDecision,
+        catalog: dict[str, InventoryItemRecord],
+        memory_resolution: InventoryMemoryResolution,
+    ) -> InventoryAskResponse:
+        hits = [self._image_match_to_search_hit(hit, catalog) for hit in decision.hits]
+        same_design_ids = list(decision.same_design_variant_ids)
+        similar_ids = list(decision.similar_product_ids)
+        abstained = decision.decision_label == "no_confident_match"
+        confidence = round(max((hit.score for hit in decision.hits), default=0.0), 4)
+        recommended: list[str] = []
+        for pid in (
+            [decision.primary_product_id] if decision.primary_product_id else []
+        ) + same_design_ids + similar_ids:
+            if pid and pid not in recommended:
+                recommended.append(pid)
+        answer_plan = InventoryAnswerPlan(
+            intent="image_search",
+            detected_intent="image_search",
+            intent_confidence=confidence,
+            intent_reasons=["Turn was answered from an uploaded screenshot / image memory."],
+            strategy="image_search",
+            primary_product_id=decision.primary_product_id,
+            alternative_product_ids=same_design_ids,
+            cross_sell_product_ids=[],
+            reasoning_steps=[
+                f"Image-search decision: {decision.decision_label}.",
+                f"Requested color: {decision.requested_color or 'not specified'}.",
+                f"Same-design variants: {', '.join(same_design_ids) or 'none'}.",
+                f"Available colors: {', '.join(decision.available_colors) or 'none'}.",
+            ],
+            confidence_breakdown=dict(decision.score_breakdown or {}),
+            metadata_used=["variant_group_id", "design_id", "color", "image_kind"],
+            abstain=abstained,
+            abstention_reason="no_confident_match" if abstained else None,
+        )
+        return InventoryAskResponse(
+            status="success",
+            question=request.question,
+            answer=decision.answer,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+            answer_engine="image_search",
+            confidence_score=confidence,
+            trace_id=trace_id,
+            abstained=abstained,
+            abstention_reason=answer_plan.abstention_reason,
+            total_hits=len(hits),
+            applied_filters=request.filters.model_copy(deep=True),
+            hits=hits,
+            recommended_product_ids=recommended,
+            cross_sell_product_ids=[],
+            follow_up_question=None,
+            answer_plan=answer_plan,
+            memory_resolution=memory_resolution,
+        )
+
+    @staticmethod
+    def _image_match_to_image_hit(hit: ImageMatchResult) -> ImageSearchHit:
+        return ImageSearchHit(
+            product_id=hit.product_id,
+            name=hit.name,
+            score=hit.score,
+            match_type=hit.match_type,
+            reasons=list(hit.reasons),
+            price=hit.price,
+            currency=hit.currency,
+            stock=hit.stock,
+            image_url=hit.image_url,
+            decision_label=hit.decision_label,
+            variant_group_id=hit.variant_group_id,
+            design_id=hit.design_id,
+            color=hit.color,
+            size=hit.size,
+            image_kind=hit.image_kind,
+            is_reference=hit.is_reference,
+            score_breakdown=hit.score_breakdown,
+        )
+
+    @staticmethod
+    def _image_match_to_search_hit(
+        hit: ImageMatchResult,
+        catalog: dict[str, InventoryItemRecord],
+    ) -> InventorySearchHit:
+        item = catalog.get(hit.product_id)
+        return InventorySearchHit(
+            product_id=hit.product_id,
+            sku=item.sku if item else hit.product_id,
+            name=hit.name,
+            category=item.category if item else None,
+            brand=item.brand if item else None,
+            status=item.status if item else None,
+            price=hit.price,
+            currency=hit.currency,
+            stock=hit.stock,
+            tags=list(item.tags) if item else [],
+            updated_at=item.updated_at if item else None,
+            snippet=(item.short_description or item.full_description) if item else None,
+            attributes=dict(item.attributes) if item else {},
+            metadata={
+                "image_url": hit.image_url,
+                "decision_label": hit.decision_label,
+                "match_type": hit.match_type,
+                "variant_group_id": hit.variant_group_id,
+                "design_id": hit.design_id,
+                "color": hit.color,
+                "size": hit.size,
+                "image_kind": hit.image_kind,
+                "is_reference": hit.is_reference,
+                "match_reasons": list(hit.reasons),
+            },
+            evidence_scores=dict(hit.score_breakdown or {}),
+            score=hit.score,
+        )
+
+    @staticmethod
+    def _record_image_search_turn(
+        *,
+        session_id: str | None,
+        query_text: str,
+        decision: ImageSearchDecision,
+    ) -> None:
+        if not session_id:
+            return
+        from app.inventory.conversation_state import get_state_store
+
+        primary = decision.hits[0] if decision.hits else None
+        slots = {
+            "color": decision.requested_color or (primary.color if primary else None),
+            "color_family": decision.requested_color or (primary.color if primary else None),
+            "variant_group_id": primary.variant_group_id if primary else None,
+            "design_id": primary.design_id if primary else None,
+            "category_key": (
+                (primary.score_breakdown or {}).get("category")
+                if primary and primary.score_breakdown
+                else None
+            ),
+        }
+        confidence = max((hit.score for hit in decision.hits), default=0.0)
+        get_state_store().record_turn(
+            session_id=session_id,
+            question=query_text or "[image upload]",
+            intent="image_search",
+            slots=slots,
+            product_ids=[hit.product_id for hit in decision.hits],
+            primary_product_id=decision.primary_product_id,
+            confidence=confidence,
+            abstained=decision.decision_label == "no_confident_match",
+        )
+
+    @staticmethod
+    def _log_image_search_failure_if_needed(
+        *,
+        query_text: str | None,
+        session_id: str | None,
+        query_image_id: str | None,
+        decision: ImageSearchDecision,
+    ) -> None:
+        top_score = max((hit.score for hit in decision.hits), default=0.0)
+        if decision.decision_label != "no_confident_match" and decision.hits and top_score >= 0.22:
+            return
+        reason = (
+            "no_confident_match"
+            if decision.decision_label == "no_confident_match"
+            else "low_visual_score"
+        )
+        save_image_search_failure(
+            ImageSearchFailure(
+                query_text=query_text or "",
+                session_id=session_id,
+                query_image_id=query_image_id,
+                decision_label=decision.decision_label,
+                primary_product_id=decision.primary_product_id,
+                top_product_ids=[hit.product_id for hit in decision.hits[:5]],
+                reason=reason,
+                score_breakdown=decision.score_breakdown,
+            )
+        )
+
+    def _save_image_search_trace(
+        self,
+        *,
+        trace_id: str,
+        started_at: float,
+        request_query: str | None,
+        query_image_id: str | None,
+        decision: ImageSearchDecision,
+        retrieval_engine: str,
+        execution_path: str,
+    ) -> None:
+        latency_ms = round((perf_counter() - started_at) * 1000, 3)
+        abstained = decision.decision_label == "no_confident_match"
+        confidence = max((hit.score for hit in decision.hits), default=0.0)
+        image_trace = {
+            "query_image_id": query_image_id,
+            "retrieval_engine": retrieval_engine,
+            "decision_label": decision.decision_label,
+            "primary_product_id": decision.primary_product_id,
+            "requested_color": decision.requested_color,
+            "available_colors": list(decision.available_colors),
+            "same_design_variant_ids": list(decision.same_design_variant_ids),
+            "similar_product_ids": list(decision.similar_product_ids),
+            "retrieved_product_ids": [hit.product_id for hit in decision.hits],
+            "score_breakdown": decision.score_breakdown,
+            "hits": [
+                {
+                    "product_id": hit.product_id,
+                    "name": hit.name,
+                    "score": hit.score,
+                    "decision_label": hit.decision_label,
+                    "match_type": hit.match_type,
+                    "image_kind": hit.image_kind,
+                    "is_reference": hit.is_reference,
+                    "variant_group_id": hit.variant_group_id,
+                    "color": hit.color,
+                    "stock": hit.stock,
+                    "reasons": list(hit.reasons),
+                }
+                for hit in decision.hits
+            ],
+        }
+        payload = {
+            "trace_id": trace_id,
+            "request_id": trace_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "question": request_query or "[image upload]",
+            "assistant_mode": "sales",
+            "reply_style": "short",
+            "answer_engine": "image_search",
+            "execution_path": execution_path,
+            "latency_ms": latency_ms,
+            "fallback_reason": None,
+            "intent": "image_search",
+            "route_decision": {"execution_path": execution_path, "retrieval_engine": retrieval_engine},
+            "retrieval_stage_counts": {"image_hits": len(decision.hits)},
+            "preferences": {"requested_color": decision.requested_color},
+            "retrieved_product_ids": [hit.product_id for hit in decision.hits],
+            "reranked_product_ids": [hit.product_id for hit in decision.hits],
+            "recommended_product_ids": (
+                [decision.primary_product_id] if decision.primary_product_id else []
+            ),
+            "cross_sell_product_ids": [],
+            "total_hits": len(decision.hits),
+            "confidence_score": confidence,
+            "abstained": abstained,
+            "abstention_reason": "no_confident_match" if abstained else None,
+            "reasoning_summary": [
+                f"Visual retrieval engine: {retrieval_engine}.",
+                f"Decision policy label: {decision.decision_label}.",
+            ],
+            "image_search": image_trace,
+            "final_answer": decision.answer,
+        }
+        try:
+            self.chat_trace_store.save(payload)
+        except Exception as exc:  # pragma: no cover - trace persistence is best-effort
+            logger.debug("image-search trace save failed: %s", exc)
+        logger.info(
+            "inventory_image_search_trace trace_id=%s execution_path=%s engine=%s decision=%s hits=%s latency_ms=%s",
+            trace_id,
+            execution_path,
+            retrieval_engine,
+            decision.decision_label,
+            len(decision.hits),
+            latency_ms,
+        )
 
     @staticmethod
     def _build_profile_context_turn(session_id: str | None) -> tuple[str, str] | None:

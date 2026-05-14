@@ -945,6 +945,14 @@ class InventoryAskRequest(BaseModel):
         default=None,
         description="Optional browser/client session ID. Used to load saved customer preferences (budget, colours, sizes) as context.",
     )
+    image_b64: str | None = Field(
+        default=None,
+        description="Optional base64-encoded screenshot. When present, the question is answered as an image search.",
+    )
+    query_image_id: str | None = Field(
+        default=None,
+        description="Optional stable id for the uploaded image; derived from image_b64 when omitted.",
+    )
     debug_retrieval_probe: bool = Field(
         default=False,
         description=(
@@ -1384,6 +1392,10 @@ class InventoryChatTraceResponse(BaseModel):
     reasoning_summary: list[str] = Field(default_factory=list)
     missing_facts: list[str] = Field(default_factory=list)
     retrieval_steps: list[InventoryAgenticStep] = Field(default_factory=list)
+    image_search: dict[str, Any] | None = Field(
+        default=None,
+        description="Stage-by-stage image-search trace when the turn was answered from a screenshot.",
+    )
     final_answer: str
 
 
@@ -1480,6 +1492,7 @@ class ImageSearchHit(BaseModel):
 class ImageSearchResponse(BaseModel):
     status: str
     answer: str
+    trace_id: str | None = None
     query_image_id: str | None = None
     hits: list[ImageSearchHit] = Field(default_factory=list)
     total: int = 0

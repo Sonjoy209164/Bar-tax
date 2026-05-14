@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,14 +16,46 @@ logger = logging.getLogger(__name__)
 _clip_model = None
 _clip_processor = None
 _MODEL_NAME = "openai/clip-vit-base-patch32"
+_MODEL_VERSION = "clip-vit-base-patch32-v1"
+# Bump when the channel layout / preprocessing changes so stale vectors are rebuilt.
+EMBEDDING_VERSION = "image-embedding-v2"
 _HTTP_HEADERS = {"User-Agent": "bangla-tax-rag-image-search/1.0"}
 
-# In-memory cache: product_id::image_id/text → embedding vector
+# Channel suffixes appended to the embedding key.
+#   {pid}::{image_id}             -> full_visual   (color + shape + category)
+#   {pid}::{image_id}::pattern    -> pattern_visual (grayscale, color-invariant design)
+#   {pid}::text                   -> text_visual_tags (name/attribute fallback)
+_PATTERN_SUFFIX = "::pattern"
+
+# In-memory cache: embedding_key → embedding vector
 _catalog_embeddings: dict[str, list[float]] = {}
 _catalog_image_urls: dict[str, str] = {}
 _catalog_embedding_product_ids: dict[str, str] = {}
 _catalog_embedding_mtime: float = 0.0
 _catalog_embedding_signature: tuple[tuple[str, str], ...] = ()
+
+
+def embedding_metadata() -> dict[str, str]:
+    """Version stamp every embedding so a model/preprocess change forces a rebuild."""
+    try:
+        from app.inventory.image_preprocessing import PREPROCESS_VERSION
+    except Exception:  # pragma: no cover - defensive only
+        PREPROCESS_VERSION = "unknown"
+    return {
+        "model_name": _MODEL_NAME,
+        "model_version": _MODEL_VERSION,
+        "preprocess_version": PREPROCESS_VERSION,
+        "embedding_version": EMBEDDING_VERSION,
+        "embedding_created_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def _embedding_type_for_key(embedding_key: str) -> str:
+    if embedding_key.endswith(_PATTERN_SUFFIX):
+        return "pattern_visual"
+    if embedding_key.endswith("::text"):
+        return "text_visual_tags"
+    return "full_visual"
 
 
 def _load_clip():
@@ -88,15 +121,53 @@ def _encode_image_bytes(raw: bytes) -> list[float] | None:
         return None
 
 
-def _encode_image_source(source: str) -> list[float] | None:
+def _encode_image_bytes_grayscale(raw: bytes) -> list[float] | None:
+    """Encode the grayscale version of an image.
+
+    CLIP overweights color and category; a grayscale embedding isolates the
+    design/pattern so the same design in a different color still matches.
+    """
+    model, processor = _load_clip()
+    if model is None:
+        return None
+    try:
+        import torch
+        from PIL import Image, ImageOps  # type: ignore[import]
+
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        img = ImageOps.grayscale(img).convert("RGB")
+        inputs = processor(images=img, return_tensors="pt")
+        with torch.no_grad():
+            feat = model.get_image_features(**inputs)
+        return _feature_to_vector(feat)
+    except Exception as exc:
+        logger.warning("CLIP grayscale image encode failed: %s", exc)
+        return None
+
+
+def _encode_image_b64_grayscale(image_b64: str) -> list[float] | None:
+    try:
+        payload = (
+            image_b64.split(",", 1)[1]
+            if image_b64.startswith("data:image/") and "," in image_b64
+            else image_b64
+        )
+        return _encode_image_bytes_grayscale(base64.b64decode(payload + "=="))
+    except Exception as exc:
+        logger.warning("CLIP grayscale b64 decode failed: %s", exc)
+        return None
+
+
+def _encode_image_source(source: str, *, grayscale: bool = False) -> list[float] | None:
+    encoder = _encode_image_bytes_grayscale if grayscale else _encode_image_bytes
     try:
         if source.startswith(("http://", "https://")):
             resp = httpx.get(source, timeout=8.0, follow_redirects=True, headers=_HTTP_HEADERS)
             resp.raise_for_status()
-            return _encode_image_bytes(resp.content)
+            return encoder(resp.content)
         path = Path(source)
         if path.exists():
-            return _encode_image_bytes(path.read_bytes())
+            return encoder(path.read_bytes())
     except Exception as exc:
         logger.warning("CLIP image source load failed for %s: %s", source, exc)
     return None
@@ -170,6 +241,15 @@ def precompute_catalog_embeddings(
                     image_urls[key] = image_url
                     embedding_product_ids[key] = pid
                     encoded_any_image = True
+                    # Pattern channel: grayscale embedding for color-invariant
+                    # same-design matching. Strictly additive — failure here
+                    # never blocks the full-visual channel.
+                    pattern_vec = _encode_image_source(image_url, grayscale=True)
+                    if pattern_vec is not None:
+                        pattern_key = f"{key}{_PATTERN_SUFFIX}"
+                        image_vectors[pattern_key] = pattern_vec
+                        image_urls[pattern_key] = image_url
+                        embedding_product_ids[pattern_key] = pid
             if encoded_any_image:
                 continue
             desc = (item.name or "") + " " + (getattr(item, "short_description", "") or "")
@@ -266,8 +346,11 @@ class CLIPImageMatcher:
             precompute_catalog_embeddings(catalog)
 
         query_vec: list[float] | None = None
+        query_pattern_vec: list[float] | None = None
         if image_b64:
             query_vec = _encode_image_b64(image_b64)
+            # Color-invariant design channel for same-design/different-color hits.
+            query_pattern_vec = _encode_image_b64_grayscale(image_b64)
         if query_vec is None and query_text:
             query_vec = _encode_text(query_text)
 
@@ -287,7 +370,14 @@ class CLIPImageMatcher:
             pid = _catalog_embedding_product_ids.get(embedding_key) or embedding_key.split("::", 1)[0]
             if catalog and pid not in catalog:
                 continue
-            score = _cosine(query_vec, item_vec)
+            embedding_type = _embedding_type_for_key(embedding_key)
+            # The pattern channel is only meaningful against a grayscale query.
+            channel_query = (
+                query_pattern_vec if embedding_type == "pattern_visual" else query_vec
+            )
+            if channel_query is None:
+                continue
+            score = _cosine(channel_query, item_vec)
             if catalog:
                 item = catalog[pid]
                 if budget_max and item.price and item.price > budget_max:
@@ -299,14 +389,16 @@ class CLIPImageMatcher:
                     name=item.name,
                     score=round(score, 4),
                     match_type="visual_similar",
-                    reasons=("CLIP visual embedding match",),
+                    reasons=(f"CLIP {embedding_type} match",),
                     price=item.price,
                     currency=item.currency,
                     stock=item.stock,
                     image_url=_catalog_image_urls.get(embedding_key) or primary_image_url(item),
                     score_breakdown={
                         "embedding_key": embedding_key,
-                        "embedding_type": "image" if embedding_key.endswith("::text") is False else "text_visual_tags",
+                        "embedding_type": embedding_type,
+                        "embedding_version": EMBEDDING_VERSION,
+                        "model_name": _MODEL_NAME,
                     },
                 )
             else:
@@ -315,8 +407,11 @@ class CLIPImageMatcher:
                     name=pid,
                     score=round(score, 4),
                     match_type="visual_similar",
-                    reasons=("CLIP visual embedding match",),
-                    score_breakdown={"embedding_key": embedding_key},
+                    reasons=(f"CLIP {embedding_type} match",),
+                    score_breakdown={
+                        "embedding_key": embedding_key,
+                        "embedding_type": embedding_type,
+                    },
                 )
             existing = best_by_product.get(pid)
             if existing is None or result.score > existing.score:

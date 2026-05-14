@@ -29,6 +29,9 @@ const el = {
   payloadView: document.querySelector("#payloadView"),
   routeView: document.querySelector("#routeView"),
   memoryView: document.querySelector("#memoryView"),
+  imageSearchPanel: document.querySelector("#imageSearchPanel"),
+  imageSearchView: document.querySelector("#imageSearchView"),
+  imageSearchHits: document.querySelector("#imageSearchHits"),
   retrievalCounts: document.querySelector("#retrievalCounts"),
   retrievedIds: document.querySelector("#retrievedIds"),
   rerankedIds: document.querySelector("#rerankedIds"),
@@ -197,6 +200,7 @@ function renderResponseAndTrace(response, trace, requestMs) {
     preferences: merged.preferences || answerPlan.preferences,
   });
 
+  renderImageSearch(merged.image_search);
   renderCounts(merged.retrieval_stage_counts || {});
   renderList(el.retrievedIds, merged.retrieved_product_ids || []);
   renderList(el.rerankedIds, merged.reranked_product_ids || []);
@@ -212,6 +216,50 @@ function renderResponseAndTrace(response, trace, requestMs) {
 
   el.rawResponse.textContent = pretty(response);
   el.rawTrace.textContent = pretty(trace || {});
+}
+
+function renderImageSearch(imageSearch) {
+  if (!el.imageSearchPanel) return;
+  if (!imageSearch || !Object.keys(imageSearch).length) {
+    el.imageSearchPanel.style.display = "none";
+    el.imageSearchView.innerHTML = "";
+    el.imageSearchHits.innerHTML = "";
+    return;
+  }
+  el.imageSearchPanel.style.display = "";
+  renderKv(el.imageSearchView, {
+    retrieval_engine: imageSearch.retrieval_engine,
+    decision_label: imageSearch.decision_label,
+    primary_product_id: imageSearch.primary_product_id,
+    query_image_id: imageSearch.query_image_id,
+    requested_color: imageSearch.requested_color,
+    available_colors: imageSearch.available_colors,
+    same_design_variant_ids: imageSearch.same_design_variant_ids,
+    similar_product_ids: imageSearch.similar_product_ids,
+    retrieved_product_ids: imageSearch.retrieved_product_ids,
+    score_breakdown: imageSearch.score_breakdown,
+  });
+  const hits = Array.isArray(imageSearch.hits) ? imageSearch.hits : [];
+  if (!hits.length) {
+    el.imageSearchHits.innerHTML = `<p class="muted-text">No image hits recorded.</p>`;
+    return;
+  }
+  el.imageSearchHits.innerHTML = hits.map(hit => {
+    const reasons = Array.isArray(hit.reasons) ? hit.reasons.join(", ") : "";
+    const refFlag = hit.is_reference ? " · reference image" : "";
+    return `
+      <div class="evidence-card">
+        <h3>${escapeHtml(String(hit.name || hit.product_id || "-"))}</h3>
+        <p><strong>${escapeHtml(String(hit.decision_label || hit.match_type || "-"))}</strong>
+           · score ${escapeHtml(String(hit.score ?? "-"))}
+           · ${escapeHtml(String(hit.image_kind || "unknown"))}${escapeHtml(refFlag)}</p>
+        <p>variant_group: ${escapeHtml(String(hit.variant_group_id || "-"))}
+           · color: ${escapeHtml(String(hit.color || "-"))}
+           · stock: ${escapeHtml(String(hit.stock ?? "-"))}</p>
+        ${reasons ? `<p class="muted-text">${escapeHtml(reasons)}</p>` : ""}
+      </div>
+    `;
+  }).join("");
 }
 
 function renderBadges(response, trace, verification) {
@@ -542,6 +590,8 @@ function clearOutputs(options = {}) {
   [
     el.routeView,
     el.memoryView,
+    el.imageSearchView,
+    el.imageSearchHits,
     el.retrievalCounts,
     el.catalogEvidence,
     el.rejectedCandidates,
@@ -549,7 +599,8 @@ function clearOutputs(options = {}) {
     el.evidenceView,
     el.verificationView,
     el.notesView,
-  ].forEach(node => { node.innerHTML = ""; });
+  ].forEach(node => { if (node) node.innerHTML = ""; });
+  if (el.imageSearchPanel) el.imageSearchPanel.style.display = "none";
   el.statusBadges.innerHTML = "";
   el.whySummary.textContent = "Run a query to see the short diagnosis.";
   el.whySummary.className = "why-box muted";

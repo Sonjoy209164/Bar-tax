@@ -16,7 +16,6 @@ from app.core.schemas import (
     ImageSearchFailureListResponse,
     ImageSearchRequest,
     ImageSearchResponse,
-    ImageSearchHit,
     InventoryAgenticRequest,
     InventoryAgenticResponse,
     InventoryAgenticStatusResponse,
@@ -54,24 +53,13 @@ from app.core.schemas import (
     PolicyQAResponse,
 )
 from app.inventory.catalog_audit import audit_catalog, enrich_item_attributes
-from app.inventory.clip_matcher import CLIPImageMatcher
-from app.inventory.conversation_state import get_state_store
 from app.inventory.image_feedback import (
     ImageSearchCorrection,
-    ImageSearchFailure,
     list_image_search_corrections,
     list_image_search_failures,
     save_image_search_correction,
-    save_image_search_failure,
 )
 from app.inventory.image_index import build_image_index, image_index_status
-from app.inventory.image_matcher import (
-    ImageMatcher,
-    ImageSearchDecision,
-    apply_owner_corrections,
-    finalize_image_search,
-    query_image_id_from_b64,
-)
 from app.inventory.policy import inventory_policy_contract
 from app.inventory.waitlist import WaitlistManager
 from app.inventory.policy_qa import PolicyQAEngine
@@ -392,140 +380,20 @@ async def ask_inventory_stream(request: InventoryAskRequest) -> StreamingRespons
     )
 
 
-def _record_image_search_state(request: ImageSearchRequest, decision: ImageSearchDecision) -> None:
-    if not request.session_id:
-        return
-    primary = decision.hits[0] if decision.hits else None
-    product_ids = [hit.product_id for hit in decision.hits]
-    slots = {
-        "color": decision.requested_color or (primary.color if primary else None),
-        "color_family": decision.requested_color or (primary.color if primary else None),
-        "variant_group_id": primary.variant_group_id if primary else None,
-        "design_id": primary.design_id if primary else None,
-        "category_key": (
-            (primary.score_breakdown or {}).get("category")
-            if primary and primary.score_breakdown
-            else None
-        ),
-    }
-    confidence = max((hit.score for hit in decision.hits), default=0.0)
-    get_state_store().record_turn(
-        session_id=request.session_id,
-        question=request.query_text or "[image upload]",
-        intent="image_search",
-        slots=slots,
-        product_ids=product_ids,
-        primary_product_id=decision.primary_product_id,
-        confidence=confidence,
-        abstained=decision.decision_label == "no_confident_match",
-    )
-
-
-def _log_image_search_failure_if_needed(
-    request: ImageSearchRequest,
-    decision: ImageSearchDecision,
-    query_image_id: str | None,
-) -> None:
-    top_score = max((hit.score for hit in decision.hits), default=0.0)
-    if decision.decision_label != "no_confident_match" and decision.hits and top_score >= 0.22:
-        return
-    reason = "no_confident_match" if decision.decision_label == "no_confident_match" else "low_visual_score"
-    save_image_search_failure(
-        ImageSearchFailure(
-            query_text=request.query_text,
-            session_id=request.session_id,
-            query_image_id=query_image_id,
-            decision_label=decision.decision_label,
-            primary_product_id=decision.primary_product_id,
-            top_product_ids=[hit.product_id for hit in decision.hits[:5]],
-            reason=reason,
-            score_breakdown=decision.score_breakdown,
-        )
-    )
-
-
 @router.post("/image-search", response_model=ImageSearchResponse)
 async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
-    catalog = get_inventory_service().load_catalog()
-    query_image_id = request.query_image_id or query_image_id_from_b64(request.image_b64)
-    raw_top_k = min(max(request.top_k * 4, 12), 20)
-    if CLIPImageMatcher.is_available():
-        from app.inventory.clip_matcher import precompute_catalog_embeddings
-        precompute_catalog_embeddings(catalog)
-        matcher: CLIPImageMatcher | ImageMatcher = CLIPImageMatcher()
-        results = matcher.search(
-            query_text=request.query_text,
-            image_b64=request.image_b64,
-            catalog=catalog,
-            category_hint=request.category_hint,
-            color_hint=request.color_hint,
-            budget_max=request.budget_max,
-            top_k=raw_top_k,
-        )
-    else:
-        matcher = ImageMatcher(catalog)
-        results = matcher.search(
-            query_text=request.query_text,
-            image_b64=request.image_b64,
-            category_hint=request.category_hint,
-            color_hint=request.color_hint,
-            budget_max=request.budget_max,
-            top_k=raw_top_k,
-        )
-    results = apply_owner_corrections(
-        catalog=catalog,
-        results=results,
-        query_image_id=query_image_id,
-        corrections=list_image_search_corrections(limit=1000),
-    )
-    decision = finalize_image_search(
-        catalog=catalog,
-        results=results,
-        query_text=request.query_text,
-        requested_color=request.color_hint,
-        top_k=request.top_k,
-    )
     try:
-        _record_image_search_state(request, decision)
-        _log_image_search_failure_if_needed(request, decision, query_image_id)
-    except Exception:
-        pass
-    hits = [
-        ImageSearchHit(
-            product_id=r.product_id,
-            name=r.name,
-            score=r.score,
-            match_type=r.match_type,
-            reasons=list(r.reasons),
-            price=r.price,
-            currency=r.currency,
-            stock=r.stock,
-            image_url=r.image_url,
-            decision_label=r.decision_label,
-            variant_group_id=r.variant_group_id,
-            design_id=r.design_id,
-            color=r.color,
-            size=r.size,
-            image_kind=r.image_kind,
-            is_reference=r.is_reference,
-            score_breakdown=r.score_breakdown,
-        )
-        for r in decision.hits
-    ]
-    return ImageSearchResponse(
-        status="success",
-        answer=decision.answer,
-        query_image_id=query_image_id,
-        hits=hits,
-        total=len(hits),
-        decision_label=decision.decision_label,
-        primary_product_id=decision.primary_product_id,
-        same_design_variant_ids=list(decision.same_design_variant_ids),
-        similar_product_ids=list(decision.similar_product_ids),
-        requested_color=decision.requested_color,
-        available_colors=list(decision.available_colors),
-        score_breakdown=decision.score_breakdown,
-    )
+        return get_inventory_service().image_search(request)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "invalid_image_search_request", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "image_search_failed", "message": str(exc)},
+        ) from exc
 
 
 @router.get("/image-index/status", response_model=ImageIndexStatusResponse)

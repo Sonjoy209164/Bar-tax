@@ -36,6 +36,7 @@ class ImageIndexRecord:
     vector_dimensions: int | None = None
     vector_checksum: str | None = None
     error: str | None = None
+    embedding_metadata: dict[str, Any] = field(default_factory=dict)
     index_version: str = IMAGE_INDEX_VERSION
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
@@ -97,6 +98,7 @@ def build_image_index(
             error: str | None = None
             embedding_status = "not_requested"
             vector_dimensions: int | None = None
+            embedding_meta: dict[str, Any] = {}
             try:
                 preprocess = preprocess_image_source(
                     source=image_source,
@@ -112,6 +114,12 @@ def build_image_index(
                     if vector:
                         vector_dimensions = len(vector)
                         embedding_status = "ready"
+                        try:
+                            from app.inventory.clip_matcher import embedding_metadata
+
+                            embedding_meta = embedding_metadata()
+                        except Exception:  # pragma: no cover - metadata is best-effort
+                            embedding_meta = {}
                     else:
                         embedding_status = "unavailable"
                 except Exception as exc:
@@ -142,6 +150,7 @@ def build_image_index(
                     vector_dimensions=vector_dimensions,
                     vector_checksum=signature,
                     error=error,
+                    embedding_metadata=embedding_meta,
                 )
             )
 

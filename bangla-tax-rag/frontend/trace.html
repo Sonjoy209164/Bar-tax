@@ -266,6 +266,14 @@
         <div id="memoryView" class="kv-list"></div>
       </article>
 
+      <article class="panel wide" id="imageSearchPanel" style="display:none;">
+        <h2>3b. Image Search Pipeline</h2>
+        <p class="panel-note">Stage-by-stage screenshot search: visual retrieval engine, variant/design resolution, the business-safe decision policy, and the catalog-grounded hits.</p>
+        <code class="function-chip">InventoryService.image_search() / finalize_image_search()</code>
+        <div id="imageSearchView" class="kv-list"></div>
+        <div id="imageSearchHits" class="evidence-card-grid"></div>
+      </article>
+
       <article class="panel">
         <h2>4. Retrieval Counts</h2>
         <p class="panel-note">Counts how many candidates came from structured search, dense search, lexical search, and gates.</p>
@@ -352,6 +360,6 @@
     </section>
   </main>
 
-  <script src="./trace.js?v=20260514-es-probe"></script>
+  <script src="./trace.js?v=20260515-image-search"></script>
 </body>
 </html>

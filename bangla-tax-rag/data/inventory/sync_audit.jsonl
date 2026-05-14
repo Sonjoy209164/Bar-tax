@@ -138,3 +138,23 @@
 {"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-09T19:17:06.979957+00:00"}
 {"source": "webhook", "inserted": 0, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 1, "errors": ["SKU not found in catalog: NONEXISTENT-SKU"], "timestamp": "2026-05-09T19:17:06.980255+00:00"}
 {"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-09T19:17:06.981512+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T18:53:06.864532+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T18:53:06.865755+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T18:53:06.866779+00:00"}
+{"source": "csv", "inserted": 0, "updated": 1, "stock_changed": 1, "deactivated": 0, "skipped": 1, "errors": [], "timestamp": "2026-05-14T18:53:06.866946+00:00"}
+{"source": "csv", "inserted": 1, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 1, "errors": [], "timestamp": "2026-05-14T18:53:06.867732+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T18:53:06.868446+00:00"}
+{"source": "webhook", "inserted": 0, "updated": 0, "stock_changed": 1, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T18:53:06.868680+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T18:53:06.869480+00:00"}
+{"source": "webhook", "inserted": 0, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 1, "errors": ["SKU not found in catalog: NONEXISTENT-SKU"], "timestamp": "2026-05-14T18:53:06.869654+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T18:53:06.870365+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T19:01:48.170138+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T19:01:48.170954+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T19:01:48.171711+00:00"}
+{"source": "csv", "inserted": 0, "updated": 1, "stock_changed": 1, "deactivated": 0, "skipped": 1, "errors": [], "timestamp": "2026-05-14T19:01:48.171887+00:00"}
+{"source": "csv", "inserted": 1, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 1, "errors": [], "timestamp": "2026-05-14T19:01:48.172615+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T19:01:48.173293+00:00"}
+{"source": "webhook", "inserted": 0, "updated": 0, "stock_changed": 1, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T19:01:48.173477+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T19:01:48.174199+00:00"}
+{"source": "webhook", "inserted": 0, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 1, "errors": ["SKU not found in catalog: NONEXISTENT-SKU"], "timestamp": "2026-05-14T19:01:48.174343+00:00"}
+{"source": "csv", "inserted": 2, "updated": 0, "stock_changed": 0, "deactivated": 0, "skipped": 0, "errors": [], "timestamp": "2026-05-14T19:01:48.175034+00:00"}

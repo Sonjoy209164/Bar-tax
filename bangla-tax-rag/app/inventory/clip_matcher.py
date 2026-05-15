@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,17 @@ _HTTP_HEADERS = {"User-Agent": "bangla-tax-rag-image-search/1.0"}
 #   {pid}::{image_id}::pattern    -> pattern_visual (grayscale, color-invariant design)
 #   {pid}::text                   -> text_visual_tags (name/attribute fallback)
 _PATTERN_SUFFIX = "::pattern"
+
+# Persisted cache so cold start does not re-encode the whole catalog.
+_CACHE_PATH = Path("data/inventory/clip_embeddings_cache.json")
+
+# A channel counts as "matched" for the agreement gate when its cosine clears
+# this floor. Low enough that genuine fashion neighbours register, high enough
+# that random noise does not.
+_CHANNEL_AGREEMENT_FLOOR = 0.5
+
+# How much of the query is image vs text when the customer sends both.
+_HYBRID_IMAGE_WEIGHT = 0.7
 
 # In-memory cache: embedding_key → embedding vector
 _catalog_embeddings: dict[str, list[float]] = {}
@@ -206,6 +219,85 @@ def _feature_to_vector(feature: Any) -> list[float] | None:
     return feature[0].tolist()
 
 
+def _normalize_vec(values: list[float]) -> list[float]:
+    norm = sum(v * v for v in values) ** 0.5
+    if norm == 0:
+        return values
+    return [v / norm for v in values]
+
+
+def _blend_vectors(a: list[float], b: list[float], weight: float) -> list[float]:
+    """Weighted blend (a * weight + b * (1 - weight)) then renormalize."""
+    if a is None or b is None or len(a) != len(b):
+        return a if a is not None else b
+    blended = [weight * x + (1.0 - weight) * y for x, y in zip(a, b)]
+    return _normalize_vec(blended)
+
+
+def _cache_payload(signature: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+    return {
+        "embedding_version": EMBEDDING_VERSION,
+        "model_name": _MODEL_NAME,
+        "signature": [list(item) for item in signature],
+        "embeddings": _catalog_embeddings,
+        "image_urls": _catalog_image_urls,
+        "product_ids": _catalog_embedding_product_ids,
+    }
+
+
+def _try_load_persisted_cache(
+    signature: tuple[tuple[str, str], ...],
+    *,
+    cache_path: Path = _CACHE_PATH,
+) -> bool:
+    """Populate in-memory cache from disk when the signature still matches.
+
+    Returns True on a cache hit (caller can skip CLIP loading entirely).
+    """
+    global _catalog_embeddings, _catalog_image_urls, _catalog_embedding_product_ids
+    global _catalog_embedding_signature
+    if not cache_path.exists():
+        return False
+    try:
+        with cache_path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception as exc:  # pragma: no cover - corrupt cache must not crash
+        logger.debug("CLIP cache read failed: %s", exc)
+        return False
+    if data.get("embedding_version") != EMBEDDING_VERSION:
+        return False
+    if data.get("model_name") != _MODEL_NAME:
+        return False
+    cached_signature = tuple(tuple(item) for item in data.get("signature") or [])
+    if cached_signature != signature:
+        return False
+    embeddings = data.get("embeddings") or {}
+    if not embeddings:
+        return False
+    _catalog_embeddings = {key: list(vec) for key, vec in embeddings.items()}
+    _catalog_image_urls = dict(data.get("image_urls") or {})
+    _catalog_embedding_product_ids = dict(data.get("product_ids") or {})
+    _catalog_embedding_signature = signature
+    logger.info("CLIP cache hit: loaded %d embeddings from %s", len(_catalog_embeddings), cache_path)
+    return True
+
+
+def _persist_cache(
+    signature: tuple[tuple[str, str], ...],
+    *,
+    cache_path: Path = _CACHE_PATH,
+) -> None:
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8") as handle:
+            json.dump(_cache_payload(signature), handle)
+        tmp.replace(cache_path)
+        logger.info("CLIP cache persisted (%d embeddings) -> %s", len(_catalog_embeddings), cache_path)
+    except Exception as exc:  # pragma: no cover - persisting is best-effort
+        logger.debug("CLIP cache persist failed: %s", exc)
+
+
 def precompute_catalog_embeddings(
     catalog: dict[str, Any],
     force: bool = False,
@@ -218,6 +310,8 @@ def precompute_catalog_embeddings(
     global _catalog_embeddings, _catalog_image_urls, _catalog_embedding_product_ids, _catalog_embedding_signature
     signature = _catalog_signature(catalog)
     if not force and _catalog_embeddings and _catalog_embedding_signature == signature:
+        return len(_catalog_embeddings)
+    if not force and _try_load_persisted_cache(signature):
         return len(_catalog_embeddings)
     model, _ = _load_clip()
     if model is None:
@@ -299,6 +393,7 @@ def precompute_catalog_embeddings(
     _catalog_embedding_product_ids = embedding_product_ids
     _catalog_embedding_signature = signature
     logger.info("CLIP: precomputed %d catalog embeddings", len(_catalog_embeddings))
+    _persist_cache(signature)
     return len(_catalog_embeddings)
 
 
@@ -353,6 +448,13 @@ class CLIPImageMatcher:
             query_vec = _encode_image_b64(image_b64)
             # Color-invariant design channel for same-design/different-color hits.
             query_pattern_vec = _encode_image_b64_grayscale(image_b64)
+            # Hybrid query: when text is also provided, blend it into the image
+            # vector so phrasing like "ei black polo ache?" disambiguates the
+            # image's design intent without overriding the visual signal.
+            if query_text and query_vec is not None:
+                text_vec = _encode_text(query_text)
+                if text_vec is not None:
+                    query_vec = _blend_vectors(query_vec, text_vec, _HYBRID_IMAGE_WEIGHT)
         if query_vec is None and query_text:
             query_vec = _encode_text(query_text)
 
@@ -367,6 +469,10 @@ class CLIPImageMatcher:
                 top_k=top_k,
             )
 
+        # Track which channels matched ("above floor") per product so the
+        # downstream decision policy can demand multi-channel agreement before
+        # claiming an exact match.
+        channels_above_floor: dict[str, set[str]] = {}
         best_by_product: dict[str, ImageMatchResult] = {}
         for embedding_key, item_vec in _catalog_embeddings.items():
             pid = _catalog_embedding_product_ids.get(embedding_key) or embedding_key.split("::", 1)[0]
@@ -380,6 +486,8 @@ class CLIPImageMatcher:
             if channel_query is None:
                 continue
             score = _cosine(channel_query, item_vec)
+            if score >= _CHANNEL_AGREEMENT_FLOOR:
+                channels_above_floor.setdefault(pid, set()).add(embedding_type)
             if catalog:
                 item = catalog[pid]
                 if budget_max and item.price and item.price > budget_max:
@@ -418,6 +526,16 @@ class CLIPImageMatcher:
             existing = best_by_product.get(pid)
             if existing is None or result.score > existing.score:
                 best_by_product[pid] = result
+
+        # Annotate each winning hit with the full set of channels that matched
+        # for its product, so the exact-match gate can require agreement.
+        for pid, hit in list(best_by_product.items()):
+            channels = sorted(channels_above_floor.get(pid, set()))
+            if not channels and hit.score_breakdown:
+                channels = [str(hit.score_breakdown.get("embedding_type") or "full_visual")]
+            updated = dict(hit.score_breakdown or {})
+            updated["matched_channels"] = channels
+            best_by_product[pid] = replace(hit, score_breakdown=updated)
 
         results = list(best_by_product.values())
         results.sort(key=lambda r: -r.score)

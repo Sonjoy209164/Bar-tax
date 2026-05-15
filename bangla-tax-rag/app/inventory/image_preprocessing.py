@@ -128,18 +128,55 @@ def center_crop(image: Image.Image) -> Image.Image:
 
 
 def dominant_color_name(image: Image.Image) -> tuple[str | None, str | None]:
+    """Find the dominant non-background color using PIL's median-cut quantizer.
+
+    Median-cut is a built-in clustering quantizer — same family as k-means and
+    needs no extra dependency. It is far more robust than averaging pixels:
+    averaging a half-white-half-red product image yields pink. Quantizing
+    yields *red and white as separate clusters*, so we can pick the dominant
+    non-background cluster directly.
+    """
     sample = image.copy()
-    sample.thumbnail((80, 80), Image.Resampling.BILINEAR)
-    pixels = list(sample.convert("RGB").getdata())
-    if not pixels:
+    sample.thumbnail((96, 96), Image.Resampling.BILINEAR)
+    sample = sample.convert("RGB")
+    if sample.width == 0 or sample.height == 0:
         return None, None
 
-    filtered = [
-        pixel for pixel in pixels
-        if not (pixel[0] > 238 and pixel[1] > 238 and pixel[2] > 238)
-    ] or pixels
-    avg = tuple(sum(pixel[i] for pixel in filtered) / len(filtered) for i in range(3))
-    name = nearest_color_name(avg)
+    try:
+        quantized = sample.quantize(colors=5, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    except (AttributeError, ValueError):
+        # Older Pillow: fall back to the integer kwarg.
+        quantized = sample.quantize(colors=5)
+    palette = quantized.getpalette() or []
+    counts = quantized.getcolors() or []
+    if not palette or not counts:
+        # Pillow could not build a histogram for some reason — fall back to a
+        # simple non-near-white pixel average so we still return a colour.
+        pixels = list(sample.getdata())
+        filtered = [
+            pixel for pixel in pixels
+            if not (pixel[0] > 238 and pixel[1] > 238 and pixel[2] > 238)
+        ] or pixels
+        if not filtered:
+            return None, None
+        avg = tuple(sum(pixel[i] for pixel in filtered) / len(filtered) for i in range(3))
+        name = nearest_color_name(avg)
+        return name, color_family(name)
+
+    ranked = sorted(counts, reverse=True)
+    fallback_rgb: tuple[int, int, int] | None = None
+    for count, idx in ranked:
+        r, g, b = palette[idx * 3:idx * 3 + 3]
+        if fallback_rgb is None:
+            fallback_rgb = (r, g, b)
+        # Skip near-white "studio background" clusters when something darker
+        # is available; near-white wins only when nothing else exists.
+        if not (r > 238 and g > 238 and b > 238):
+            name = nearest_color_name((r, g, b))
+            return name, color_family(name)
+    if fallback_rgb is None:
+        return None, None
+    name = nearest_color_name(fallback_rgb)
     return name, color_family(name)
 
 

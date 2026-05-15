@@ -379,6 +379,8 @@ def finalize_image_search(
 
     primary = enriched[0]
     enriched = _prune_visual_outliers(enriched, primary)
+    enriched = _apply_exact_match_gate(enriched)
+    primary = enriched[0]
     group_key = primary.variant_group_id or primary.design_id
     same_design_items = (
         _same_design_items(catalog, group_key)
@@ -543,6 +545,84 @@ def _primary_selection_key(hit: ImageMatchResult) -> tuple[float, float, float]:
     truth_bonus = 0.03 if not hit.is_reference and hit.image_kind == "product_photo" else -0.02 if hit.is_reference else 0.0
     stock_bonus = 0.01 if hit.stock > 0 else 0.0
     return (owner_bonus, hit.score + label_bonus + truth_bonus + stock_bonus, hit.score)
+
+
+# Margin needed between top-1 and top-2 before claiming an exact match. CLIP
+# scores are cosine in roughly [0,1]; 0.04 is small enough that genuinely
+# unique matches still pass, large enough to catch two-near-twin false exacts.
+_EXACT_MATCH_TOP_MARGIN = 0.04
+
+
+def _apply_exact_match_gate(enriched: list[ImageMatchResult]) -> list[ImageMatchResult]:
+    """Demote a 'confirmed_exact' primary when the evidence is fragile.
+
+    Three reasons to demote (any one is enough):
+      1. Only the text-tag channel matched — there is no visual signal at all.
+      2. Multiple top candidates are within the margin — no clear winner, so
+         the "exact" claim is unsafe.
+      3. The matched-channels list is populated and contains only the pattern
+         channel without full-visual agreement — the design rhymes, but full
+         visual identity is not confirmed.
+
+    Owner-confirmed matches are exempt: owner ground truth wins by definition.
+    Hits without matched_channels metadata (metadata fallback, or synthesized
+    test hits) get only the margin check, preserving existing behaviour.
+    """
+    if not enriched:
+        return enriched
+    primary = enriched[0]
+    if primary.decision_label != "confirmed_exact":
+        return enriched
+    if primary.match_type.startswith("owner_confirmed"):
+        return enriched
+    breakdown = primary.score_breakdown or {}
+    channels = breakdown.get("matched_channels")
+    if isinstance(channels, list) and channels:
+        channel_set = {str(c) for c in channels}
+        if channel_set == {"text_visual_tags"}:
+            return _downgrade_primary(enriched, "likely_same_design", "no_visual_channel")
+        if channel_set == {"pattern_visual"}:
+            return _downgrade_primary(enriched, "likely_same_design", "pattern_only")
+    if len(enriched) >= 2:
+        runner_up = next(
+            (hit for hit in enriched[1:] if hit.product_id != primary.product_id),
+            None,
+        )
+        if runner_up is not None:
+            margin = primary.score - runner_up.score
+            if margin < _EXACT_MATCH_TOP_MARGIN:
+                return _downgrade_primary(enriched, "likely_same_design", "thin_top_margin")
+    return enriched
+
+
+def _downgrade_primary(
+    enriched: list[ImageMatchResult],
+    new_label: str,
+    reason: str,
+) -> list[ImageMatchResult]:
+    primary = enriched[0]
+    updated_breakdown = dict(primary.score_breakdown or {})
+    updated_breakdown["exact_match_gate"] = f"demoted:{reason}"
+    demoted = ImageMatchResult(
+        product_id=primary.product_id,
+        name=primary.name,
+        score=primary.score,
+        match_type=primary.match_type,
+        reasons=primary.reasons + (f"exact-match gate demoted ({reason})",),
+        price=primary.price,
+        currency=primary.currency,
+        stock=primary.stock,
+        image_url=primary.image_url,
+        decision_label=new_label,
+        variant_group_id=primary.variant_group_id,
+        design_id=primary.design_id,
+        color=primary.color,
+        size=primary.size,
+        image_kind=primary.image_kind,
+        is_reference=primary.is_reference,
+        score_breakdown=updated_breakdown,
+    )
+    return [demoted, *enriched[1:]]
 
 
 def _allows_same_design_expansion(primary: ImageMatchResult) -> bool:

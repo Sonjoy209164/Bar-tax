@@ -954,17 +954,33 @@ function renderImageResults(node, response) {
 function renderImageQuickActions(node, response) {
   const primary = response?.primary_product_id;
   const colors = Array.isArray(response?.available_colors) ? response.available_colors.slice(0, 5) : [];
+  const decision = response?.decision_label;
+  // Backend-suggested next question goes first — it already knows the decision.
+  const suggested = (response?.follow_up_question || "").trim();
+  const requestedSize = (response?.requested_size || "").trim();
   const actions = [];
-  if (colors.length) actions.push(`same design colors: ${colors.join(", ")}`);
+  if (suggested) actions.push(suggested);
+  if (colors.length && decision !== "no_confident_match") {
+    actions.push("Other colors?");
+  }
   if (primary) {
-    actions.push("M size ache?");
-    actions.push("price koto?");
-    actions.push("show similar");
+    // Skip the size chip if the customer just got a size-specific answer.
+    if (!requestedSize) actions.push("M size ache?");
+    actions.push("Price koto?");
+    actions.push("Show similar");
+    if (decision === "confirmed_exact" || decision === "confirmed_same_design_variant") {
+      actions.push("Order this");
+    }
   }
   if (!actions.length) return;
+  // De-duplicate (the suggested question can collide with the defaults).
+  const seen = new Set();
   const row = document.createElement("div");
   row.className = "image-result-actions";
   actions.forEach(text => {
+    const key = text.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = text;

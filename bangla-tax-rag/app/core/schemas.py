@@ -419,6 +419,10 @@ class InventoryItemRecord(BaseModel):
     status: str | None = Field(default=None, description="Operational stock status.")
     tags: list[str] = Field(default_factory=list, description="Free-form tags used for search and filtering.")
     attributes: dict[str, str] = Field(default_factory=dict, description="Structured product attributes.")
+    size_stock: dict[str, int] = Field(
+        default_factory=dict,
+        description="Per-size stock breakdown (e.g. {\"M\": 2, \"L\": 1, \"XL\": 0}). When empty, the answer layer must hedge on size availability.",
+    )
     images: list[InventoryImageAsset] = Field(default_factory=list, description="Product or reference images for visual search.")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional opaque metadata from the inventory system.")
     include_in_rag: bool = Field(default=True, description="Whether the product should be indexed for semantic retrieval.")
@@ -1501,8 +1505,10 @@ class ImageSearchResponse(BaseModel):
     same_design_variant_ids: list[str] = Field(default_factory=list)
     similar_product_ids: list[str] = Field(default_factory=list)
     requested_color: str | None = None
+    requested_size: str | None = None
     available_colors: list[str] = Field(default_factory=list)
     score_breakdown: dict[str, Any] | None = None
+    follow_up_question: str | None = None
 
 
 class ImageIndexStatusResponse(BaseModel):

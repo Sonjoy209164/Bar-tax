@@ -1214,8 +1214,10 @@ class InventoryService:
             same_design_variant_ids=list(decision.same_design_variant_ids),
             similar_product_ids=list(decision.similar_product_ids),
             requested_color=decision.requested_color,
+            requested_size=decision.requested_size,
             available_colors=list(decision.available_colors),
             score_breakdown=decision.score_breakdown,
+            follow_up_question=decision.follow_up_question,
         )
 
     def _run_image_search_decision(
@@ -1507,7 +1509,7 @@ class InventoryService:
             hits=hits,
             recommended_product_ids=recommended,
             cross_sell_product_ids=[],
-            follow_up_question=None,
+            follow_up_question=decision.follow_up_question,
             answer_plan=answer_plan,
             memory_resolution=memory_resolution,
         )

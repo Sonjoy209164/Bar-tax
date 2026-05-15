@@ -41,6 +41,8 @@ class ImageSearchDecision:
     requested_color: str | None
     available_colors: tuple[str, ...]
     score_breakdown: dict[str, Any]
+    requested_size: str | None = None
+    follow_up_question: str | None = None
 
 
 IMAGE_QUERY_PHRASES = (
@@ -396,6 +398,16 @@ def finalize_image_search(
     ]
     in_stock_requested = [item for item in requested_color_items if item.stock > 0]
 
+    # Size availability — pick the colour-resolved record when possible, else
+    # the primary product, so "M size ache?" lands on the right SKU.
+    requested_size = infer_requested_size(query_text)
+    size_subject = (
+        in_stock_requested[0]
+        if in_stock_requested
+        else (requested_color_items[0] if requested_color_items else catalog.get(primary.product_id))
+    )
+    size_availability = _size_availability(size_subject, requested_size)
+
     variant_label = (
         "confirmed_same_design_variant"
         if primary.decision_label in {"confirmed_exact", "confirmed_same_design_variant", "likely_same_design"}
@@ -416,9 +428,11 @@ def finalize_image_search(
         requested_color_items=requested_color_items,
         in_stock_requested=in_stock_requested,
         available_colors=available_colors,
+        size_availability=size_availability,
     )
     same_design_ids = tuple(item.product_id for item in same_design_items if item.product_id != primary.product_id)
     similar_ids = tuple(hit.product_id for hit in merged_hits if hit.product_id not in {primary.product_id, *same_design_ids})
+    follow_up_question = _next_best_question(decision_label, available_colors, size_availability)
     return ImageSearchDecision(
         answer=answer,
         hits=merged_hits[:top_k],
@@ -435,7 +449,10 @@ def finalize_image_search(
             "primary_is_reference": primary.is_reference,
             "same_design_count": len(same_design_items),
             "requested_color": normalized_color,
+            "requested_size": requested_size,
         },
+        requested_size=requested_size,
+        follow_up_question=follow_up_question,
     )
 
 
@@ -466,6 +483,25 @@ def normalize_color(value: str | None) -> str | None:
     if not value:
         return None
     return infer_requested_color(value) or value.strip().casefold()
+
+
+_SIZE_LETTERS = ("XXXL", "XXL", "XL", "XS", "S", "M", "L")
+
+
+def infer_requested_size(text: str) -> str | None:
+    """Pull a letter size (S/M/L/XL/...) out of customer text.
+
+    Conservative: we only match letter sizes as whole tokens so "M" in "M size
+    ache?" hits but "M" inside a word does not. Numeric sizes are deferred —
+    the boutique data is letter-size today.
+    """
+    if not text:
+        return None
+    padded = " " + text.upper().replace("?", " ").replace(",", " ").replace(".", " ").replace("'", " ") + " "
+    for size in _SIZE_LETTERS:  # already ordered longest-first
+        if f" {size} " in padded:
+            return size
+    return None
 
 
 def _enrich_hit(hit: ImageMatchResult, catalog: dict[str, InventoryItemRecord]) -> ImageMatchResult:
@@ -771,6 +807,53 @@ def _decision_sort_key(hit: ImageMatchResult) -> tuple[float, float, float]:
     return (label_weight, stock_weight + truth_weight, hit.score)
 
 
+def _size_availability(
+    item: InventoryItemRecord | None,
+    requested_size: str | None,
+) -> str | None:
+    """Customer-facing size availability line for the chosen subject product.
+
+    Returns a sentence to append to the answer when the customer asked about a
+    size; returns None when no size was asked. Honest hedging when the catalog
+    has only a comma-separated `size` string instead of true `size_stock`.
+    """
+    if not requested_size:
+        return None
+    if item is None:
+        return f"**{requested_size}** size er stock catalog e clear na."
+    # Lazy import to keep cyclic risk out of module load.
+    from app.inventory.catalog_identity import (
+        product_size_stock,
+        product_size_stock_is_authoritative,
+    )
+
+    size_stock = product_size_stock(item)
+    if not size_stock:
+        return f"**{requested_size}** size er stock catalog e clear na — order korar age confirm korte hobe."
+    requested = requested_size.upper()
+    if requested in size_stock:
+        count = size_stock[requested]
+        if count > 0:
+            return f"**{requested}** size ache, stock e {count} pcs."
+        available = ", ".join(s for s, c in size_stock.items() if c > 0) or "kono size currently nei"
+        return f"**{requested}** size currently nei. Available: {available}."
+    if product_size_stock_is_authoritative(item):
+        available = ", ".join(s for s, c in size_stock.items() if c > 0) or "kono size currently nei"
+        return f"**{requested}** size catalog e nai. Available: {available}."
+    return f"**{requested}** size catalog e clear na — order korar age confirm korte hobe."
+
+
+def _reference_image_reason(primary: ImageMatchResult) -> str:
+    """One-line note explaining why an exact-match claim is withheld.
+
+    Customers should not be left wondering why the bot says "closest match"
+    instead of "exact" — name the constraint honestly.
+    """
+    if primary.is_reference or primary.image_kind != "product_photo":
+        return " (Note: the catalog photo is a demo/reference image, so exact SKU cannot be confirmed.)"
+    return ""
+
+
 def _build_decision_answer(
     *,
     primary: ImageMatchResult,
@@ -781,40 +864,89 @@ def _build_decision_answer(
     requested_color_items: list[InventoryItemRecord],
     in_stock_requested: list[InventoryItemRecord],
     available_colors: tuple[str, ...],
+    size_availability: str | None = None,
 ) -> str:
     price = f"BDT {primary.price:,.0f}" if isinstance(primary.price, (int, float)) else "price not set"
+    reference_note = _reference_image_reason(primary)
+    size_suffix = f" {size_availability}" if size_availability else ""
+    next_q = _next_best_question(decision_label, available_colors, size_availability)
+    next_q_suffix = f" {next_q}" if next_q else ""
     if decision_label == "confirmed_exact":
         color_line = _available_color_sentence(available_colors)
         return (
             f"Yes, this looks like **{primary.name}** ({price}, {primary.stock} in stock)."
             + (f" {color_line}" if color_line else "")
+            + size_suffix
+            + next_q_suffix
         )
     if requested_color and in_stock_requested:
         names = ", ".join(f"{item.name} ({item.stock} in stock)" for item in in_stock_requested[:3])
-        return f"Yes, same design e **{requested_color}** option available: {names}."
+        return (
+            f"Yes, same design e **{requested_color}** option available: {names}."
+            + size_suffix
+            + next_q_suffix
+        )
     if requested_color and requested_color_items and not in_stock_requested:
         color_line = _available_color_sentence(available_colors)
         return (
             f"Same design e **{requested_color}** catalog e ache, but currently stock e nei. "
             f"{color_line or 'Similar options niche dilam.'}"
+            + size_suffix
+            + next_q_suffix
         )
     if requested_color and same_design_items and not requested_color_items:
         color_line = _available_color_sentence(available_colors)
         return (
             f"Same design ta peyechi, but **{requested_color}** color currently catalog e nei. "
             f"{color_line or 'Closest similar options niche dilam.'}"
+            + size_suffix
+            + next_q_suffix
         )
     if decision_label in {"confirmed_same_design_variant", "likely_same_design"}:
         color_line = _available_color_sentence(available_colors)
         return (
             f"Ei design er closest match **{primary.name}** ({price}, {primary.stock} in stock)."
             + (f" {color_line}" if color_line else "")
+            + size_suffix
+            + reference_note
+            + next_q_suffix
         )
     similar = [hit for hit in hits if hit.stock > 0][:3]
     if similar:
         names = ", ".join(f"{hit.name} ({'BDT ' + format(hit.price, ',.0f') if hit.price else 'price N/A'})" for hit in similar)
-        return f"Exact same confirm korte parchi na, but closest similar options: {names}."
+        return (
+            f"Exact same confirm korte parchi na, but closest similar options: {names}."
+            + size_suffix
+            + reference_note
+            + next_q_suffix
+        )
     return "Ei screenshot er exact product confident bhabe pachchi na. Color, size, ba category bolle ami aro narrow kore dekhate pari."
+
+
+def _next_best_question(
+    decision_label: str,
+    available_colors: tuple[str, ...],
+    size_availability: str | None,
+) -> str | None:
+    """One natural follow-up question per decision label.
+
+    Skip when a size answer was already given (the customer just got that
+    answer; nudging them about size again is noisy) and when we have nothing
+    confident enough to ask about.
+    """
+    if size_availability:
+        return "Order korte parle bolun, ami size lock kore dichi."
+    if decision_label == "confirmed_exact":
+        if available_colors:
+            return "Other colors dekhabo?"
+        return "Order korbo?"
+    if decision_label == "confirmed_same_design_variant":
+        return "M size check korbo, naki onno color?"
+    if decision_label == "likely_same_design":
+        return "Same design er exact color confirm korbo?"
+    if decision_label == "similar_style":
+        return "Cheaper option, naki onno category dekhabo?"
+    return None
 
 
 def _available_color_sentence(colors: tuple[str, ...]) -> str:

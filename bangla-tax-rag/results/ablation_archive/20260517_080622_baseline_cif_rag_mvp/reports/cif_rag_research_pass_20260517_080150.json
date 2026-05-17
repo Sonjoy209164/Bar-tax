@@ -1,0 +1,2554 @@
+{
+  "run_id": "20260517_080150",
+  "created_at": "2026-05-17T08:01:50.582761+00:00",
+  "eval_path": "/home/sonjoy/Bar tax/bangla-tax-rag/evaluation/cif_counterfactual_commerce_set.jsonl",
+  "catalog_path": "/home/sonjoy/Bar tax/bangla-tax-rag/data/inventory/catalog.jsonl",
+  "metrics": {
+    "cases": 7,
+    "pass_rate": 1.0,
+    "planner_pass_rate": 1.0,
+    "claim_contract_pass_rate": 1.0,
+    "risk_policy_pass_rate": 1.0,
+    "avg_latency_ms": 0.36428571428571427
+  },
+  "rows": [
+    {
+      "case_id": "cif_exact_product_photo",
+      "passed": true,
+      "issues": [],
+      "case": {
+        "case_id": "cif_exact_product_photo",
+        "image_path": "frontend/assets/demo_catalog/shirt-ribbed-polo-black/primary.jpg",
+        "query_text": "eta ache?",
+        "expected_query_family": "exact_product_check",
+        "expected_operations": [
+          "IDENTIFY:product_from_image",
+          "VERIFY:image_trust",
+          "VERIFY:stock_status"
+        ],
+        "expected_claim_types": [
+          "exact_product",
+          "price",
+          "source_trust"
+        ],
+        "expected_decision_label": "confirmed_exact",
+        "expected_safe_to_answer": true,
+        "research_question": "Can CIF-RAG confirm exact product only when product-photo trust is present?"
+      },
+      "response": {
+        "decision_label": "confirmed_exact",
+        "primary_product_id": "shirt-ribbed-polo-black",
+        "cif_rag": {
+          "architecture": "CIF-RAG",
+          "plan": {
+            "query_text": "eta ache?",
+            "query_family": "exact_product_check",
+            "answer_goal": "verify_exact_product_availability",
+            "anchor_source": "image",
+            "requires_image_anchor": true,
+            "requested_color": null,
+            "requested_size": null,
+            "operations": [
+              {
+                "op": "IDENTIFY",
+                "target": "product_from_image",
+                "value": null,
+                "source": "image",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "image_trust",
+                "value": null,
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "product_status",
+                "value": null,
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "stock_status",
+                "value": null,
+                "source": "rule",
+                "required": true
+              }
+            ],
+            "evidence_targets": [
+              "product_id",
+              "image_trust",
+              "stock",
+              "status"
+            ],
+            "risk_notes": []
+          },
+          "claims": {
+            "claims": [
+              {
+                "claim_type": "exact_product",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Product can be claimed as exact same SKU.",
+                "required_evidence": [
+                  "product_id",
+                  "product_photo",
+                  "stock_status"
+                ],
+                "supported": true,
+                "evidence": {
+                  "identity": {
+                    "category_key": "shirt",
+                    "design_id": "vertical-ribbed-open-collar-knit",
+                    "variant_group_id": "ribbed-open-collar-knit-polo",
+                    "color": "black",
+                    "color_family": "black"
+                  },
+                  "business_state": {
+                    "stock": 5,
+                    "status": "Active",
+                    "price": 1750.0,
+                    "currency": "BDT",
+                    "size_stock": {
+                      "M": 2,
+                      "L": 2,
+                      "XL": 1
+                    },
+                    "size_stock_authoritative": true
+                  },
+                  "image_evidence": {
+                    "image_id": "shirt-ribbed-polo-black-primary-1",
+                    "image_kind": "product_photo",
+                    "is_reference": false,
+                    "trust_level": "product_photo",
+                    "can_confirm_exact": true
+                  },
+                  "variant_siblings": [
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive",
+                    "shirt-ribbed-polo-white"
+                  ],
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 1750.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "product_photo",
+                  "image_is_reference": false,
+                  "image_trust_level": "product_photo",
+                  "can_confirm_exact": true
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "unsupported_claims": [],
+            "supported_claims": [
+              {
+                "claim_type": "exact_product",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Product can be claimed as exact same SKU.",
+                "required_evidence": [
+                  "product_id",
+                  "product_photo",
+                  "stock_status"
+                ],
+                "supported": true,
+                "evidence": {
+                  "identity": {
+                    "category_key": "shirt",
+                    "design_id": "vertical-ribbed-open-collar-knit",
+                    "variant_group_id": "ribbed-open-collar-knit-polo",
+                    "color": "black",
+                    "color_family": "black"
+                  },
+                  "business_state": {
+                    "stock": 5,
+                    "status": "Active",
+                    "price": 1750.0,
+                    "currency": "BDT",
+                    "size_stock": {
+                      "M": 2,
+                      "L": 2,
+                      "XL": 1
+                    },
+                    "size_stock_authoritative": true
+                  },
+                  "image_evidence": {
+                    "image_id": "shirt-ribbed-polo-black-primary-1",
+                    "image_kind": "product_photo",
+                    "is_reference": false,
+                    "trust_level": "product_photo",
+                    "can_confirm_exact": true
+                  },
+                  "variant_siblings": [
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive",
+                    "shirt-ribbed-polo-white"
+                  ],
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 1750.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "product_photo",
+                  "image_is_reference": false,
+                  "image_trust_level": "product_photo",
+                  "can_confirm_exact": true
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "claim_evidence_coverage": 1.0
+          },
+          "risk_decision": {
+            "final_label": "confirmed_exact",
+            "risk_level": "low",
+            "safe_to_answer": true,
+            "total_risk_cost": 0,
+            "unsupported_high_risk_claims": [],
+            "issues": [],
+            "recommended_actions": [
+              "answer with current decision label"
+            ]
+          },
+          "primary_product_graph": {
+            "product_id": "shirt-ribbed-polo-black",
+            "found": true,
+            "identity": {
+              "category_key": "shirt",
+              "design_id": "vertical-ribbed-open-collar-knit",
+              "variant_group_id": "ribbed-open-collar-knit-polo",
+              "color": "black",
+              "color_family": "black"
+            },
+            "business_state": {
+              "stock": 5,
+              "status": "Active",
+              "price": 1750.0,
+              "currency": "BDT",
+              "size_stock": {
+                "M": 2,
+                "L": 2,
+                "XL": 1
+              },
+              "size_stock_authoritative": true
+            },
+            "image_evidence": {
+              "image_id": "shirt-ribbed-polo-black-primary-1",
+              "image_kind": "product_photo",
+              "is_reference": false,
+              "trust_level": "product_photo",
+              "can_confirm_exact": true
+            },
+            "variant_siblings": [
+              "shirt-ribbed-polo-grey",
+              "shirt-ribbed-polo-olive",
+              "shirt-ribbed-polo-white"
+            ],
+            "available_colors": [
+              "black",
+              "grey",
+              "olive",
+              "white"
+            ]
+          },
+          "primary_factors": {
+            "product_id": "shirt-ribbed-polo-black",
+            "image_id": "shirt-ribbed-polo-black-primary-1",
+            "category_factor": {
+              "label": "shirt",
+              "score": 0.9,
+              "evidence": [
+                "category_key",
+                "category"
+              ]
+            },
+            "design_factor": {
+              "label": "vertical-ribbed-open-collar-knit",
+              "score": 0.9,
+              "evidence": [
+                "design_id",
+                "variant_group_id"
+              ]
+            },
+            "color_factor": {
+              "label": "black",
+              "score": 0.9,
+              "evidence": [
+                "color",
+                "color_family"
+              ]
+            },
+            "shape_factor": {
+              "label": "polo shirt open collar half sleeve regular",
+              "score": 0.9,
+              "evidence": [
+                "product_type",
+                "neckline",
+                "sleeve",
+                "fit"
+              ]
+            },
+            "texture_factor": {
+              "label": "vertical ribbed knit minimal casual",
+              "score": 0.9,
+              "evidence": [
+                "pattern_type",
+                "work_type",
+                "fabric",
+                "style"
+              ]
+            },
+            "text_factor": {
+              "label": "ribbed open-collar knit polo - black shirt demo boutique m, l, xl ribbed open collar knit polo black casual, summer, travel knit men minimal casual polo shirt vertical ribbed vertical-ribbed-open-collar-knit ribbed-open-collar-knit-polo open collar half sleeve",
+              "score": 0.9,
+              "evidence": [
+                "name",
+                "tags",
+                "visual_tags"
+              ]
+            },
+            "source_trust": "product_photo"
+          }
+        },
+        "latency_ms": 0.57
+      }
+    },
+    {
+      "case_id": "cif_same_design_white",
+      "passed": true,
+      "issues": [],
+      "case": {
+        "case_id": "cif_same_design_white",
+        "image_path": "frontend/assets/demo_catalog/shirt-ribbed-polo-black/primary.jpg",
+        "query_text": "same design white color ache?",
+        "expected_query_family": "same_design_color_intervention",
+        "expected_operations": [
+          "HOLD:design",
+          "INTERVENE:color=white",
+          "VERIFY:variant_exists",
+          "VERIFY:stock_status"
+        ],
+        "expected_claim_types": [
+          "same_design_variant",
+          "color_availability",
+          "price",
+          "source_trust"
+        ],
+        "expected_decision_label": "confirmed_same_design_variant",
+        "expected_safe_to_answer": true,
+        "research_question": "Can CIF-RAG hold design constant and intervene on requested color?"
+      },
+      "response": {
+        "decision_label": "confirmed_same_design_variant",
+        "primary_product_id": "shirt-ribbed-polo-black",
+        "cif_rag": {
+          "architecture": "CIF-RAG",
+          "plan": {
+            "query_text": "same design white color ache?",
+            "query_family": "same_design_color_intervention",
+            "answer_goal": "find_requested_color_variant",
+            "anchor_source": "image",
+            "requires_image_anchor": true,
+            "requested_color": "white",
+            "requested_size": null,
+            "operations": [
+              {
+                "op": "IDENTIFY",
+                "target": "product_from_image",
+                "value": null,
+                "source": "image",
+                "required": true
+              },
+              {
+                "op": "HOLD",
+                "target": "design",
+                "value": null,
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "INTERVENE",
+                "target": "color",
+                "value": "white",
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "variant_exists",
+                "value": null,
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "stock_status",
+                "value": null,
+                "source": "rule",
+                "required": true
+              }
+            ],
+            "evidence_targets": [
+              "variant_group_id",
+              "design_id",
+              "requested_color",
+              "stock"
+            ],
+            "risk_notes": []
+          },
+          "claims": {
+            "claims": [
+              {
+                "claim_type": "same_design_variant",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Same-design variant relationship is supported by catalog identity.",
+                "required_evidence": [
+                  "variant_group_id_or_design_id",
+                  "same_design_variants"
+                ],
+                "supported": true,
+                "evidence": {
+                  "identity": {
+                    "category_key": "shirt",
+                    "design_id": "vertical-ribbed-open-collar-knit",
+                    "variant_group_id": "ribbed-open-collar-knit-polo",
+                    "color": "black",
+                    "color_family": "black"
+                  },
+                  "business_state": {
+                    "stock": 5,
+                    "status": "Active",
+                    "price": 1750.0,
+                    "currency": "BDT",
+                    "size_stock": {
+                      "M": 2,
+                      "L": 2,
+                      "XL": 1
+                    },
+                    "size_stock_authoritative": true
+                  },
+                  "image_evidence": {
+                    "image_id": "shirt-ribbed-polo-black-primary-1",
+                    "image_kind": "product_photo",
+                    "is_reference": false,
+                    "trust_level": "product_photo",
+                    "can_confirm_exact": true
+                  },
+                  "variant_siblings": [
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive",
+                    "shirt-ribbed-polo-white"
+                  ],
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ],
+                  "same_design_variant_ids": [
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive",
+                    "shirt-ribbed-polo-white"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "color_availability",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Requested color availability or absence is grounded in variant group evidence.",
+                "required_evidence": [
+                  "requested_color",
+                  "variant_group_checked",
+                  "stock_status"
+                ],
+                "supported": true,
+                "evidence": {
+                  "requested_color": "white",
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ],
+                  "matching_color_variant_ids": [
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-white"
+                  ],
+                  "requested_color_in_stock": true
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 1750.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "product_photo",
+                  "image_is_reference": false,
+                  "image_trust_level": "product_photo",
+                  "can_confirm_exact": true
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "unsupported_claims": [],
+            "supported_claims": [
+              {
+                "claim_type": "same_design_variant",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Same-design variant relationship is supported by catalog identity.",
+                "required_evidence": [
+                  "variant_group_id_or_design_id",
+                  "same_design_variants"
+                ],
+                "supported": true,
+                "evidence": {
+                  "identity": {
+                    "category_key": "shirt",
+                    "design_id": "vertical-ribbed-open-collar-knit",
+                    "variant_group_id": "ribbed-open-collar-knit-polo",
+                    "color": "black",
+                    "color_family": "black"
+                  },
+                  "business_state": {
+                    "stock": 5,
+                    "status": "Active",
+                    "price": 1750.0,
+                    "currency": "BDT",
+                    "size_stock": {
+                      "M": 2,
+                      "L": 2,
+                      "XL": 1
+                    },
+                    "size_stock_authoritative": true
+                  },
+                  "image_evidence": {
+                    "image_id": "shirt-ribbed-polo-black-primary-1",
+                    "image_kind": "product_photo",
+                    "is_reference": false,
+                    "trust_level": "product_photo",
+                    "can_confirm_exact": true
+                  },
+                  "variant_siblings": [
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive",
+                    "shirt-ribbed-polo-white"
+                  ],
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ],
+                  "same_design_variant_ids": [
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive",
+                    "shirt-ribbed-polo-white"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "color_availability",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Requested color availability or absence is grounded in variant group evidence.",
+                "required_evidence": [
+                  "requested_color",
+                  "variant_group_checked",
+                  "stock_status"
+                ],
+                "supported": true,
+                "evidence": {
+                  "requested_color": "white",
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ],
+                  "matching_color_variant_ids": [
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-white"
+                  ],
+                  "requested_color_in_stock": true
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 1750.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "product_photo",
+                  "image_is_reference": false,
+                  "image_trust_level": "product_photo",
+                  "can_confirm_exact": true
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "claim_evidence_coverage": 1.0
+          },
+          "risk_decision": {
+            "final_label": "confirmed_same_design_variant",
+            "risk_level": "low",
+            "safe_to_answer": true,
+            "total_risk_cost": 0,
+            "unsupported_high_risk_claims": [],
+            "issues": [],
+            "recommended_actions": [
+              "answer with current decision label"
+            ]
+          },
+          "primary_product_graph": {
+            "product_id": "shirt-ribbed-polo-black",
+            "found": true,
+            "identity": {
+              "category_key": "shirt",
+              "design_id": "vertical-ribbed-open-collar-knit",
+              "variant_group_id": "ribbed-open-collar-knit-polo",
+              "color": "black",
+              "color_family": "black"
+            },
+            "business_state": {
+              "stock": 5,
+              "status": "Active",
+              "price": 1750.0,
+              "currency": "BDT",
+              "size_stock": {
+                "M": 2,
+                "L": 2,
+                "XL": 1
+              },
+              "size_stock_authoritative": true
+            },
+            "image_evidence": {
+              "image_id": "shirt-ribbed-polo-black-primary-1",
+              "image_kind": "product_photo",
+              "is_reference": false,
+              "trust_level": "product_photo",
+              "can_confirm_exact": true
+            },
+            "variant_siblings": [
+              "shirt-ribbed-polo-grey",
+              "shirt-ribbed-polo-olive",
+              "shirt-ribbed-polo-white"
+            ],
+            "available_colors": [
+              "black",
+              "grey",
+              "olive",
+              "white"
+            ]
+          },
+          "primary_factors": {
+            "product_id": "shirt-ribbed-polo-black",
+            "image_id": "shirt-ribbed-polo-black-primary-1",
+            "category_factor": {
+              "label": "shirt",
+              "score": 0.9,
+              "evidence": [
+                "category_key",
+                "category"
+              ]
+            },
+            "design_factor": {
+              "label": "vertical-ribbed-open-collar-knit",
+              "score": 0.9,
+              "evidence": [
+                "design_id",
+                "variant_group_id"
+              ]
+            },
+            "color_factor": {
+              "label": "black",
+              "score": 0.9,
+              "evidence": [
+                "color",
+                "color_family"
+              ]
+            },
+            "shape_factor": {
+              "label": "polo shirt open collar half sleeve regular",
+              "score": 0.9,
+              "evidence": [
+                "product_type",
+                "neckline",
+                "sleeve",
+                "fit"
+              ]
+            },
+            "texture_factor": {
+              "label": "vertical ribbed knit minimal casual",
+              "score": 0.9,
+              "evidence": [
+                "pattern_type",
+                "work_type",
+                "fabric",
+                "style"
+              ]
+            },
+            "text_factor": {
+              "label": "ribbed open-collar knit polo - black shirt demo boutique m, l, xl ribbed open collar knit polo black casual, summer, travel knit men minimal casual polo shirt vertical ribbed vertical-ribbed-open-collar-knit ribbed-open-collar-knit-polo open collar half sleeve",
+              "score": 0.9,
+              "evidence": [
+                "name",
+                "tags",
+                "visual_tags"
+              ]
+            },
+            "source_trust": "product_photo"
+          }
+        },
+        "latency_ms": 0.499
+      }
+    },
+    {
+      "case_id": "cif_color_missing_blue",
+      "passed": true,
+      "issues": [],
+      "case": {
+        "case_id": "cif_color_missing_blue",
+        "image_path": "frontend/assets/demo_catalog/shirt-ribbed-polo-white/primary.jpg",
+        "query_text": "blue color ache?",
+        "expected_query_family": "color_availability",
+        "expected_operations": [
+          "INTERVENE:color=blue",
+          "VERIFY:variant_exists",
+          "VERIFY:stock_status"
+        ],
+        "expected_claim_types": [
+          "similar_style",
+          "absence",
+          "price",
+          "source_trust"
+        ],
+        "expected_decision_label": "similar_style",
+        "expected_safe_to_answer": true,
+        "research_question": "Can CIF-RAG support an absence claim after checking the variant group?"
+      },
+      "response": {
+        "decision_label": "similar_style",
+        "primary_product_id": "shirt-ribbed-polo-white",
+        "cif_rag": {
+          "architecture": "CIF-RAG",
+          "plan": {
+            "query_text": "blue color ache?",
+            "query_family": "color_availability",
+            "answer_goal": "verify_requested_color",
+            "anchor_source": "image",
+            "requires_image_anchor": true,
+            "requested_color": "blue",
+            "requested_size": null,
+            "operations": [
+              {
+                "op": "IDENTIFY",
+                "target": "product_from_image",
+                "value": null,
+                "source": "image",
+                "required": true
+              },
+              {
+                "op": "HOLD",
+                "target": "design",
+                "value": null,
+                "source": "rule",
+                "required": false
+              },
+              {
+                "op": "INTERVENE",
+                "target": "color",
+                "value": "blue",
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "variant_exists",
+                "value": null,
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "stock_status",
+                "value": null,
+                "source": "rule",
+                "required": true
+              }
+            ],
+            "evidence_targets": [
+              "color",
+              "variant_group_id",
+              "stock"
+            ],
+            "risk_notes": []
+          },
+          "claims": {
+            "claims": [
+              {
+                "claim_type": "similar_style",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Visually or categorically similar alternatives are available.",
+                "required_evidence": [
+                  "retrieved_hits"
+                ],
+                "supported": true,
+                "evidence": {
+                  "hit_count": 4,
+                  "retrieved_product_ids": [
+                    "shirt-ribbed-polo-white",
+                    "shirt-ribbed-polo-black",
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              },
+              {
+                "claim_type": "absence",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Requested color availability or absence is grounded in variant group evidence.",
+                "required_evidence": [
+                  "requested_color",
+                  "variant_group_checked",
+                  "stock_status"
+                ],
+                "supported": true,
+                "evidence": {
+                  "requested_color": "blue",
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ],
+                  "matching_color_variant_ids": [],
+                  "requested_color_in_stock": false
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 1750.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "product_photo",
+                  "image_is_reference": false,
+                  "image_trust_level": "product_photo",
+                  "can_confirm_exact": true
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "unsupported_claims": [],
+            "supported_claims": [
+              {
+                "claim_type": "similar_style",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Visually or categorically similar alternatives are available.",
+                "required_evidence": [
+                  "retrieved_hits"
+                ],
+                "supported": true,
+                "evidence": {
+                  "hit_count": 4,
+                  "retrieved_product_ids": [
+                    "shirt-ribbed-polo-white",
+                    "shirt-ribbed-polo-black",
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              },
+              {
+                "claim_type": "absence",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Requested color availability or absence is grounded in variant group evidence.",
+                "required_evidence": [
+                  "requested_color",
+                  "variant_group_checked",
+                  "stock_status"
+                ],
+                "supported": true,
+                "evidence": {
+                  "requested_color": "blue",
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ],
+                  "matching_color_variant_ids": [],
+                  "requested_color_in_stock": false
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 1750.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "product_photo",
+                  "image_is_reference": false,
+                  "image_trust_level": "product_photo",
+                  "can_confirm_exact": true
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "claim_evidence_coverage": 1.0
+          },
+          "risk_decision": {
+            "final_label": "similar_style",
+            "risk_level": "low",
+            "safe_to_answer": true,
+            "total_risk_cost": 0,
+            "unsupported_high_risk_claims": [],
+            "issues": [],
+            "recommended_actions": [
+              "answer with current decision label"
+            ]
+          },
+          "primary_product_graph": {
+            "product_id": "shirt-ribbed-polo-white",
+            "found": true,
+            "identity": {
+              "category_key": "shirt",
+              "design_id": "vertical-ribbed-open-collar-knit",
+              "variant_group_id": "ribbed-open-collar-knit-polo",
+              "color": "white",
+              "color_family": "white"
+            },
+            "business_state": {
+              "stock": 5,
+              "status": "Active",
+              "price": 1750.0,
+              "currency": "BDT",
+              "size_stock": {
+                "M": 0,
+                "L": 3,
+                "XL": 2
+              },
+              "size_stock_authoritative": true
+            },
+            "image_evidence": {
+              "image_id": "shirt-ribbed-polo-white-primary-1",
+              "image_kind": "product_photo",
+              "is_reference": false,
+              "trust_level": "product_photo",
+              "can_confirm_exact": true
+            },
+            "variant_siblings": [
+              "shirt-ribbed-polo-black",
+              "shirt-ribbed-polo-grey",
+              "shirt-ribbed-polo-olive"
+            ],
+            "available_colors": [
+              "black",
+              "grey",
+              "olive",
+              "white"
+            ]
+          },
+          "primary_factors": {
+            "product_id": "shirt-ribbed-polo-white",
+            "image_id": "shirt-ribbed-polo-white-primary-1",
+            "category_factor": {
+              "label": "shirt",
+              "score": 0.9,
+              "evidence": [
+                "category_key",
+                "category"
+              ]
+            },
+            "design_factor": {
+              "label": "vertical-ribbed-open-collar-knit",
+              "score": 0.9,
+              "evidence": [
+                "design_id",
+                "variant_group_id"
+              ]
+            },
+            "color_factor": {
+              "label": "white",
+              "score": 0.9,
+              "evidence": [
+                "color",
+                "color_family"
+              ]
+            },
+            "shape_factor": {
+              "label": "polo shirt open collar half sleeve regular",
+              "score": 0.9,
+              "evidence": [
+                "product_type",
+                "neckline",
+                "sleeve",
+                "fit"
+              ]
+            },
+            "texture_factor": {
+              "label": "vertical ribbed knit minimal casual",
+              "score": 0.9,
+              "evidence": [
+                "pattern_type",
+                "work_type",
+                "fabric",
+                "style"
+              ]
+            },
+            "text_factor": {
+              "label": "ribbed open-collar knit polo - white shirt demo boutique m, l, xl ribbed open collar knit polo casual, summer, travel knit men minimal casual polo shirt vertical ribbed vertical-ribbed-open-collar-knit white ribbed-open-collar-knit-polo open collar half sleeve",
+              "score": 0.9,
+              "evidence": [
+                "name",
+                "tags",
+                "visual_tags"
+              ]
+            },
+            "source_trust": "product_photo"
+          }
+        },
+        "latency_ms": 0.402
+      }
+    },
+    {
+      "case_id": "cif_size_available_m",
+      "passed": true,
+      "issues": [],
+      "case": {
+        "case_id": "cif_size_available_m",
+        "image_path": "frontend/assets/demo_catalog/shirt-ribbed-polo-black/primary.jpg",
+        "query_text": "M size ache?",
+        "expected_query_family": "size_availability",
+        "expected_operations": [
+          "VERIFY:size=M",
+          "VERIFY:size_stock"
+        ],
+        "expected_claim_types": [
+          "exact_product",
+          "size_stock",
+          "price",
+          "source_trust"
+        ],
+        "expected_decision_label": "confirmed_exact",
+        "expected_safe_to_answer": true,
+        "research_question": "Can CIF-RAG verify size availability from authoritative size_stock?"
+      },
+      "response": {
+        "decision_label": "confirmed_exact",
+        "primary_product_id": "shirt-ribbed-polo-black",
+        "cif_rag": {
+          "architecture": "CIF-RAG",
+          "plan": {
+            "query_text": "M size ache?",
+            "query_family": "size_availability",
+            "answer_goal": "verify_size_stock",
+            "anchor_source": "image",
+            "requires_image_anchor": true,
+            "requested_color": null,
+            "requested_size": "M",
+            "operations": [
+              {
+                "op": "IDENTIFY",
+                "target": "product_from_image",
+                "value": null,
+                "source": "image",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "size",
+                "value": "M",
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "size_stock",
+                "value": null,
+                "source": "rule",
+                "required": true
+              }
+            ],
+            "evidence_targets": [
+              "size_stock",
+              "stock",
+              "status"
+            ],
+            "risk_notes": []
+          },
+          "claims": {
+            "claims": [
+              {
+                "claim_type": "exact_product",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Product can be claimed as exact same SKU.",
+                "required_evidence": [
+                  "product_id",
+                  "product_photo",
+                  "stock_status"
+                ],
+                "supported": true,
+                "evidence": {
+                  "identity": {
+                    "category_key": "shirt",
+                    "design_id": "vertical-ribbed-open-collar-knit",
+                    "variant_group_id": "ribbed-open-collar-knit-polo",
+                    "color": "black",
+                    "color_family": "black"
+                  },
+                  "business_state": {
+                    "stock": 5,
+                    "status": "Active",
+                    "price": 1750.0,
+                    "currency": "BDT",
+                    "size_stock": {
+                      "M": 2,
+                      "L": 2,
+                      "XL": 1
+                    },
+                    "size_stock_authoritative": true
+                  },
+                  "image_evidence": {
+                    "image_id": "shirt-ribbed-polo-black-primary-1",
+                    "image_kind": "product_photo",
+                    "is_reference": false,
+                    "trust_level": "product_photo",
+                    "can_confirm_exact": true
+                  },
+                  "variant_siblings": [
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive",
+                    "shirt-ribbed-polo-white"
+                  ],
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "size_stock",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Requested size stock is checked against catalog size_stock.",
+                "required_evidence": [
+                  "requested_size",
+                  "size_stock"
+                ],
+                "supported": true,
+                "evidence": {
+                  "product_id": "shirt-ribbed-polo-black",
+                  "size": "M",
+                  "known": true,
+                  "available": true,
+                  "stock": 2,
+                  "reason": "authoritative size_stock checked"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 1750.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "product_photo",
+                  "image_is_reference": false,
+                  "image_trust_level": "product_photo",
+                  "can_confirm_exact": true
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "unsupported_claims": [],
+            "supported_claims": [
+              {
+                "claim_type": "exact_product",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Product can be claimed as exact same SKU.",
+                "required_evidence": [
+                  "product_id",
+                  "product_photo",
+                  "stock_status"
+                ],
+                "supported": true,
+                "evidence": {
+                  "identity": {
+                    "category_key": "shirt",
+                    "design_id": "vertical-ribbed-open-collar-knit",
+                    "variant_group_id": "ribbed-open-collar-knit-polo",
+                    "color": "black",
+                    "color_family": "black"
+                  },
+                  "business_state": {
+                    "stock": 5,
+                    "status": "Active",
+                    "price": 1750.0,
+                    "currency": "BDT",
+                    "size_stock": {
+                      "M": 2,
+                      "L": 2,
+                      "XL": 1
+                    },
+                    "size_stock_authoritative": true
+                  },
+                  "image_evidence": {
+                    "image_id": "shirt-ribbed-polo-black-primary-1",
+                    "image_kind": "product_photo",
+                    "is_reference": false,
+                    "trust_level": "product_photo",
+                    "can_confirm_exact": true
+                  },
+                  "variant_siblings": [
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive",
+                    "shirt-ribbed-polo-white"
+                  ],
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "size_stock",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Requested size stock is checked against catalog size_stock.",
+                "required_evidence": [
+                  "requested_size",
+                  "size_stock"
+                ],
+                "supported": true,
+                "evidence": {
+                  "product_id": "shirt-ribbed-polo-black",
+                  "size": "M",
+                  "known": true,
+                  "available": true,
+                  "stock": 2,
+                  "reason": "authoritative size_stock checked"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 1750.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "shirt-ribbed-polo-black",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "product_photo",
+                  "image_is_reference": false,
+                  "image_trust_level": "product_photo",
+                  "can_confirm_exact": true
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "claim_evidence_coverage": 1.0
+          },
+          "risk_decision": {
+            "final_label": "confirmed_exact",
+            "risk_level": "low",
+            "safe_to_answer": true,
+            "total_risk_cost": 0,
+            "unsupported_high_risk_claims": [],
+            "issues": [],
+            "recommended_actions": [
+              "answer with current decision label"
+            ]
+          },
+          "primary_product_graph": {
+            "product_id": "shirt-ribbed-polo-black",
+            "found": true,
+            "identity": {
+              "category_key": "shirt",
+              "design_id": "vertical-ribbed-open-collar-knit",
+              "variant_group_id": "ribbed-open-collar-knit-polo",
+              "color": "black",
+              "color_family": "black"
+            },
+            "business_state": {
+              "stock": 5,
+              "status": "Active",
+              "price": 1750.0,
+              "currency": "BDT",
+              "size_stock": {
+                "M": 2,
+                "L": 2,
+                "XL": 1
+              },
+              "size_stock_authoritative": true
+            },
+            "image_evidence": {
+              "image_id": "shirt-ribbed-polo-black-primary-1",
+              "image_kind": "product_photo",
+              "is_reference": false,
+              "trust_level": "product_photo",
+              "can_confirm_exact": true
+            },
+            "variant_siblings": [
+              "shirt-ribbed-polo-grey",
+              "shirt-ribbed-polo-olive",
+              "shirt-ribbed-polo-white"
+            ],
+            "available_colors": [
+              "black",
+              "grey",
+              "olive",
+              "white"
+            ]
+          },
+          "primary_factors": {
+            "product_id": "shirt-ribbed-polo-black",
+            "image_id": "shirt-ribbed-polo-black-primary-1",
+            "category_factor": {
+              "label": "shirt",
+              "score": 0.9,
+              "evidence": [
+                "category_key",
+                "category"
+              ]
+            },
+            "design_factor": {
+              "label": "vertical-ribbed-open-collar-knit",
+              "score": 0.9,
+              "evidence": [
+                "design_id",
+                "variant_group_id"
+              ]
+            },
+            "color_factor": {
+              "label": "black",
+              "score": 0.9,
+              "evidence": [
+                "color",
+                "color_family"
+              ]
+            },
+            "shape_factor": {
+              "label": "polo shirt open collar half sleeve regular",
+              "score": 0.9,
+              "evidence": [
+                "product_type",
+                "neckline",
+                "sleeve",
+                "fit"
+              ]
+            },
+            "texture_factor": {
+              "label": "vertical ribbed knit minimal casual",
+              "score": 0.9,
+              "evidence": [
+                "pattern_type",
+                "work_type",
+                "fabric",
+                "style"
+              ]
+            },
+            "text_factor": {
+              "label": "ribbed open-collar knit polo - black shirt demo boutique m, l, xl ribbed open collar knit polo black casual, summer, travel knit men minimal casual polo shirt vertical ribbed vertical-ribbed-open-collar-knit ribbed-open-collar-knit-polo open collar half sleeve",
+              "score": 0.9,
+              "evidence": [
+                "name",
+                "tags",
+                "visual_tags"
+              ]
+            },
+            "source_trust": "product_photo"
+          }
+        },
+        "latency_ms": 0.358
+      }
+    },
+    {
+      "case_id": "cif_size_unavailable_m",
+      "passed": true,
+      "issues": [],
+      "case": {
+        "case_id": "cif_size_unavailable_m",
+        "image_path": "frontend/assets/demo_catalog/shirt-ribbed-polo-white/primary.jpg",
+        "query_text": "M size ache?",
+        "expected_query_family": "size_availability",
+        "expected_operations": [
+          "VERIFY:size=M",
+          "VERIFY:size_stock"
+        ],
+        "expected_claim_types": [
+          "exact_product",
+          "size_stock",
+          "price",
+          "source_trust"
+        ],
+        "expected_decision_label": "confirmed_exact",
+        "expected_safe_to_answer": true,
+        "research_question": "Can CIF-RAG support a size-stock claim even when requested size stock is zero?"
+      },
+      "response": {
+        "decision_label": "confirmed_exact",
+        "primary_product_id": "shirt-ribbed-polo-white",
+        "cif_rag": {
+          "architecture": "CIF-RAG",
+          "plan": {
+            "query_text": "M size ache?",
+            "query_family": "size_availability",
+            "answer_goal": "verify_size_stock",
+            "anchor_source": "image",
+            "requires_image_anchor": true,
+            "requested_color": null,
+            "requested_size": "M",
+            "operations": [
+              {
+                "op": "IDENTIFY",
+                "target": "product_from_image",
+                "value": null,
+                "source": "image",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "size",
+                "value": "M",
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "size_stock",
+                "value": null,
+                "source": "rule",
+                "required": true
+              }
+            ],
+            "evidence_targets": [
+              "size_stock",
+              "stock",
+              "status"
+            ],
+            "risk_notes": []
+          },
+          "claims": {
+            "claims": [
+              {
+                "claim_type": "exact_product",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Product can be claimed as exact same SKU.",
+                "required_evidence": [
+                  "product_id",
+                  "product_photo",
+                  "stock_status"
+                ],
+                "supported": true,
+                "evidence": {
+                  "identity": {
+                    "category_key": "shirt",
+                    "design_id": "vertical-ribbed-open-collar-knit",
+                    "variant_group_id": "ribbed-open-collar-knit-polo",
+                    "color": "white",
+                    "color_family": "white"
+                  },
+                  "business_state": {
+                    "stock": 5,
+                    "status": "Active",
+                    "price": 1750.0,
+                    "currency": "BDT",
+                    "size_stock": {
+                      "M": 0,
+                      "L": 3,
+                      "XL": 2
+                    },
+                    "size_stock_authoritative": true
+                  },
+                  "image_evidence": {
+                    "image_id": "shirt-ribbed-polo-white-primary-1",
+                    "image_kind": "product_photo",
+                    "is_reference": false,
+                    "trust_level": "product_photo",
+                    "can_confirm_exact": true
+                  },
+                  "variant_siblings": [
+                    "shirt-ribbed-polo-black",
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive"
+                  ],
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "size_stock",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Requested size stock is checked against catalog size_stock.",
+                "required_evidence": [
+                  "requested_size",
+                  "size_stock"
+                ],
+                "supported": true,
+                "evidence": {
+                  "product_id": "shirt-ribbed-polo-white",
+                  "size": "M",
+                  "known": true,
+                  "available": false,
+                  "stock": 0,
+                  "reason": "authoritative size_stock checked"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 1750.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "product_photo",
+                  "image_is_reference": false,
+                  "image_trust_level": "product_photo",
+                  "can_confirm_exact": true
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "unsupported_claims": [],
+            "supported_claims": [
+              {
+                "claim_type": "exact_product",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Product can be claimed as exact same SKU.",
+                "required_evidence": [
+                  "product_id",
+                  "product_photo",
+                  "stock_status"
+                ],
+                "supported": true,
+                "evidence": {
+                  "identity": {
+                    "category_key": "shirt",
+                    "design_id": "vertical-ribbed-open-collar-knit",
+                    "variant_group_id": "ribbed-open-collar-knit-polo",
+                    "color": "white",
+                    "color_family": "white"
+                  },
+                  "business_state": {
+                    "stock": 5,
+                    "status": "Active",
+                    "price": 1750.0,
+                    "currency": "BDT",
+                    "size_stock": {
+                      "M": 0,
+                      "L": 3,
+                      "XL": 2
+                    },
+                    "size_stock_authoritative": true
+                  },
+                  "image_evidence": {
+                    "image_id": "shirt-ribbed-polo-white-primary-1",
+                    "image_kind": "product_photo",
+                    "is_reference": false,
+                    "trust_level": "product_photo",
+                    "can_confirm_exact": true
+                  },
+                  "variant_siblings": [
+                    "shirt-ribbed-polo-black",
+                    "shirt-ribbed-polo-grey",
+                    "shirt-ribbed-polo-olive"
+                  ],
+                  "available_colors": [
+                    "black",
+                    "grey",
+                    "olive",
+                    "white"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "size_stock",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Requested size stock is checked against catalog size_stock.",
+                "required_evidence": [
+                  "requested_size",
+                  "size_stock"
+                ],
+                "supported": true,
+                "evidence": {
+                  "product_id": "shirt-ribbed-polo-white",
+                  "size": "M",
+                  "known": true,
+                  "available": false,
+                  "stock": 0,
+                  "reason": "authoritative size_stock checked"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 1750.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "shirt-ribbed-polo-white",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "product_photo",
+                  "image_is_reference": false,
+                  "image_trust_level": "product_photo",
+                  "can_confirm_exact": true
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "claim_evidence_coverage": 1.0
+          },
+          "risk_decision": {
+            "final_label": "confirmed_exact",
+            "risk_level": "low",
+            "safe_to_answer": true,
+            "total_risk_cost": 0,
+            "unsupported_high_risk_claims": [],
+            "issues": [],
+            "recommended_actions": [
+              "answer with current decision label"
+            ]
+          },
+          "primary_product_graph": {
+            "product_id": "shirt-ribbed-polo-white",
+            "found": true,
+            "identity": {
+              "category_key": "shirt",
+              "design_id": "vertical-ribbed-open-collar-knit",
+              "variant_group_id": "ribbed-open-collar-knit-polo",
+              "color": "white",
+              "color_family": "white"
+            },
+            "business_state": {
+              "stock": 5,
+              "status": "Active",
+              "price": 1750.0,
+              "currency": "BDT",
+              "size_stock": {
+                "M": 0,
+                "L": 3,
+                "XL": 2
+              },
+              "size_stock_authoritative": true
+            },
+            "image_evidence": {
+              "image_id": "shirt-ribbed-polo-white-primary-1",
+              "image_kind": "product_photo",
+              "is_reference": false,
+              "trust_level": "product_photo",
+              "can_confirm_exact": true
+            },
+            "variant_siblings": [
+              "shirt-ribbed-polo-black",
+              "shirt-ribbed-polo-grey",
+              "shirt-ribbed-polo-olive"
+            ],
+            "available_colors": [
+              "black",
+              "grey",
+              "olive",
+              "white"
+            ]
+          },
+          "primary_factors": {
+            "product_id": "shirt-ribbed-polo-white",
+            "image_id": "shirt-ribbed-polo-white-primary-1",
+            "category_factor": {
+              "label": "shirt",
+              "score": 0.9,
+              "evidence": [
+                "category_key",
+                "category"
+              ]
+            },
+            "design_factor": {
+              "label": "vertical-ribbed-open-collar-knit",
+              "score": 0.9,
+              "evidence": [
+                "design_id",
+                "variant_group_id"
+              ]
+            },
+            "color_factor": {
+              "label": "white",
+              "score": 0.9,
+              "evidence": [
+                "color",
+                "color_family"
+              ]
+            },
+            "shape_factor": {
+              "label": "polo shirt open collar half sleeve regular",
+              "score": 0.9,
+              "evidence": [
+                "product_type",
+                "neckline",
+                "sleeve",
+                "fit"
+              ]
+            },
+            "texture_factor": {
+              "label": "vertical ribbed knit minimal casual",
+              "score": 0.9,
+              "evidence": [
+                "pattern_type",
+                "work_type",
+                "fabric",
+                "style"
+              ]
+            },
+            "text_factor": {
+              "label": "ribbed open-collar knit polo - white shirt demo boutique m, l, xl ribbed open collar knit polo casual, summer, travel knit men minimal casual polo shirt vertical ribbed vertical-ribbed-open-collar-knit white ribbed-open-collar-knit-polo open collar half sleeve",
+              "score": 0.9,
+              "evidence": [
+                "name",
+                "tags",
+                "visual_tags"
+              ]
+            },
+            "source_trust": "product_photo"
+          }
+        },
+        "latency_ms": 0.344
+      }
+    },
+    {
+      "case_id": "cif_reference_exact_demoted",
+      "passed": true,
+      "issues": [],
+      "case": {
+        "case_id": "cif_reference_exact_demoted",
+        "image_path": "frontend/assets/demo_catalog/saree-jmd-lotus-red/primary.jpg",
+        "query_text": "eta exact ache?",
+        "expected_query_family": "exact_product_check",
+        "expected_operations": [
+          "VERIFY:image_trust",
+          "VERIFY:stock_status"
+        ],
+        "expected_claim_types": [
+          "similar_style",
+          "price",
+          "source_trust"
+        ],
+        "expected_decision_label": "similar_style",
+        "expected_safe_to_answer": true,
+        "forbidden_claim_types": [
+          "exact_product"
+        ],
+        "research_question": "Can CIF-RAG avoid exact-product claims for reference/demo images?"
+      },
+      "response": {
+        "decision_label": "similar_style",
+        "primary_product_id": "saree-jmd-lotus-red",
+        "cif_rag": {
+          "architecture": "CIF-RAG",
+          "plan": {
+            "query_text": "eta exact ache?",
+            "query_family": "exact_product_check",
+            "answer_goal": "verify_exact_product_availability",
+            "anchor_source": "image",
+            "requires_image_anchor": true,
+            "requested_color": null,
+            "requested_size": null,
+            "operations": [
+              {
+                "op": "IDENTIFY",
+                "target": "product_from_image",
+                "value": null,
+                "source": "image",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "image_trust",
+                "value": null,
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "product_status",
+                "value": null,
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "VERIFY",
+                "target": "stock_status",
+                "value": null,
+                "source": "rule",
+                "required": true
+              }
+            ],
+            "evidence_targets": [
+              "product_id",
+              "image_trust",
+              "stock",
+              "status"
+            ],
+            "risk_notes": []
+          },
+          "claims": {
+            "claims": [
+              {
+                "claim_type": "similar_style",
+                "subject_product_id": "saree-jmd-lotus-red",
+                "text": "Visually or categorically similar alternatives are available.",
+                "required_evidence": [
+                  "retrieved_hits"
+                ],
+                "supported": true,
+                "evidence": {
+                  "hit_count": 1,
+                  "retrieved_product_ids": [
+                    "saree-jmd-lotus-red"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "saree-jmd-lotus-red",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 6800.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "saree-jmd-lotus-red",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "reference_photo",
+                  "image_is_reference": true,
+                  "image_trust_level": "reference_photo",
+                  "can_confirm_exact": false
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "unsupported_claims": [],
+            "supported_claims": [
+              {
+                "claim_type": "similar_style",
+                "subject_product_id": "saree-jmd-lotus-red",
+                "text": "Visually or categorically similar alternatives are available.",
+                "required_evidence": [
+                  "retrieved_hits"
+                ],
+                "supported": true,
+                "evidence": {
+                  "hit_count": 1,
+                  "retrieved_product_ids": [
+                    "saree-jmd-lotus-red"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "saree-jmd-lotus-red",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 6800.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "saree-jmd-lotus-red",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "reference_photo",
+                  "image_is_reference": true,
+                  "image_trust_level": "reference_photo",
+                  "can_confirm_exact": false
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "claim_evidence_coverage": 1.0
+          },
+          "risk_decision": {
+            "final_label": "similar_style",
+            "risk_level": "low",
+            "safe_to_answer": true,
+            "total_risk_cost": 0,
+            "unsupported_high_risk_claims": [],
+            "issues": [],
+            "recommended_actions": [
+              "answer with current decision label"
+            ]
+          },
+          "primary_product_graph": {
+            "product_id": "saree-jmd-lotus-red",
+            "found": true,
+            "identity": {
+              "category_key": "saree",
+              "design_id": "lotus-buti-jamdani",
+              "variant_group_id": "lotus-buti-jamdani",
+              "color": "red",
+              "color_family": "red"
+            },
+            "business_state": {
+              "stock": 3,
+              "status": "Active",
+              "price": 6800.0,
+              "currency": "BDT",
+              "size_stock": {},
+              "size_stock_authoritative": false
+            },
+            "image_evidence": {
+              "image_id": "saree-jmd-lotus-red-primary-1",
+              "image_kind": "reference_photo",
+              "is_reference": true,
+              "trust_level": "reference_photo",
+              "can_confirm_exact": false
+            },
+            "variant_siblings": [
+              "saree-jmd-lotus-blue",
+              "saree-jmd-lotus-green"
+            ],
+            "available_colors": [
+              "red",
+              "royal blue",
+              "bottle green"
+            ]
+          },
+          "primary_factors": {
+            "product_id": "saree-jmd-lotus-red",
+            "image_id": "saree-jmd-lotus-red-primary-1",
+            "category_factor": {
+              "label": "saree",
+              "score": 0.9,
+              "evidence": [
+                "category_key",
+                "category"
+              ]
+            },
+            "design_factor": {
+              "label": "lotus-buti-jamdani",
+              "score": 0.9,
+              "evidence": [
+                "design_id",
+                "variant_group_id"
+              ]
+            },
+            "color_factor": {
+              "label": "red",
+              "score": 0.9,
+              "evidence": [
+                "color",
+                "color_family"
+              ]
+            },
+            "shape_factor": {
+              "label": null,
+              "score": 0.0,
+              "evidence": [
+                "product_type",
+                "neckline",
+                "sleeve",
+                "fit"
+              ]
+            },
+            "texture_factor": {
+              "label": "buti jamdani premium",
+              "score": 0.9,
+              "evidence": [
+                "pattern_type",
+                "work_type",
+                "fabric",
+                "style"
+              ]
+            },
+            "text_factor": {
+              "label": "lotus buti dhakai jamdani saree - red saree sonjoy boutique lotus buti jamdani buti jamdani ladies lotus-buti-jamdani premium red wedding, party, eid women eid party wedding",
+              "score": 0.9,
+              "evidence": [
+                "name",
+                "tags",
+                "visual_tags"
+              ]
+            },
+            "source_trust": "reference_photo"
+          }
+        },
+        "latency_ms": 0.209
+      }
+    },
+    {
+      "case_id": "cif_similar_bag_reference",
+      "passed": true,
+      "issues": [],
+      "case": {
+        "case_id": "cif_similar_bag_reference",
+        "image_path": "frontend/assets/demo_catalog/hf-47957-murcia-women-blue-handbag/primary.jpg",
+        "query_text": "similar dekhan",
+        "expected_query_family": "similar_style_search",
+        "expected_operations": [
+          "RELAX:product_id",
+          "VERIFY:stock_status"
+        ],
+        "expected_claim_types": [
+          "similar_style",
+          "price",
+          "source_trust"
+        ],
+        "expected_decision_label": "similar_style",
+        "expected_safe_to_answer": true,
+        "research_question": "Can CIF-RAG represent similar-search as a relaxed identity query?"
+      },
+      "response": {
+        "decision_label": "similar_style",
+        "primary_product_id": "hf-47957-murcia-women-blue-handbag",
+        "cif_rag": {
+          "architecture": "CIF-RAG",
+          "plan": {
+            "query_text": "similar dekhan",
+            "query_family": "similar_style_search",
+            "answer_goal": "recommend_similar_available_items",
+            "anchor_source": "image",
+            "requires_image_anchor": true,
+            "requested_color": null,
+            "requested_size": null,
+            "operations": [
+              {
+                "op": "IDENTIFY",
+                "target": "product_from_image",
+                "value": null,
+                "source": "image",
+                "required": true
+              },
+              {
+                "op": "RELAX",
+                "target": "product_id",
+                "value": null,
+                "source": "rule",
+                "required": true
+              },
+              {
+                "op": "HOLD",
+                "target": "category",
+                "value": null,
+                "source": "rule",
+                "required": false
+              },
+              {
+                "op": "HOLD",
+                "target": "style_or_design",
+                "value": null,
+                "source": "rule",
+                "required": false
+              },
+              {
+                "op": "VERIFY",
+                "target": "stock_status",
+                "value": null,
+                "source": "rule",
+                "required": true
+              }
+            ],
+            "evidence_targets": [
+              "category",
+              "style",
+              "stock"
+            ],
+            "risk_notes": []
+          },
+          "claims": {
+            "claims": [
+              {
+                "claim_type": "similar_style",
+                "subject_product_id": "hf-47957-murcia-women-blue-handbag",
+                "text": "Visually or categorically similar alternatives are available.",
+                "required_evidence": [
+                  "retrieved_hits"
+                ],
+                "supported": true,
+                "evidence": {
+                  "hit_count": 1,
+                  "retrieved_product_ids": [
+                    "hf-47957-murcia-women-blue-handbag"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "hf-47957-murcia-women-blue-handbag",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 2550.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "hf-47957-murcia-women-blue-handbag",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "reference_photo",
+                  "image_is_reference": true,
+                  "image_trust_level": "reference_photo",
+                  "can_confirm_exact": false
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "unsupported_claims": [],
+            "supported_claims": [
+              {
+                "claim_type": "similar_style",
+                "subject_product_id": "hf-47957-murcia-women-blue-handbag",
+                "text": "Visually or categorically similar alternatives are available.",
+                "required_evidence": [
+                  "retrieved_hits"
+                ],
+                "supported": true,
+                "evidence": {
+                  "hit_count": 1,
+                  "retrieved_product_ids": [
+                    "hf-47957-murcia-women-blue-handbag"
+                  ]
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              },
+              {
+                "claim_type": "price",
+                "subject_product_id": "hf-47957-murcia-women-blue-handbag",
+                "text": "Product price is available in catalog.",
+                "required_evidence": [
+                  "price",
+                  "currency"
+                ],
+                "supported": true,
+                "evidence": {
+                  "price": 2550.0,
+                  "currency": "BDT"
+                },
+                "missing_evidence": [],
+                "risk_level": "high"
+              },
+              {
+                "claim_type": "source_trust",
+                "subject_product_id": "hf-47957-murcia-women-blue-handbag",
+                "text": "Image source trust level is known.",
+                "required_evidence": [
+                  "image_trust_level"
+                ],
+                "supported": true,
+                "evidence": {
+                  "image_kind": "reference_photo",
+                  "image_is_reference": true,
+                  "image_trust_level": "reference_photo",
+                  "can_confirm_exact": false
+                },
+                "missing_evidence": [],
+                "risk_level": "medium"
+              }
+            ],
+            "claim_evidence_coverage": 1.0
+          },
+          "risk_decision": {
+            "final_label": "similar_style",
+            "risk_level": "low",
+            "safe_to_answer": true,
+            "total_risk_cost": 0,
+            "unsupported_high_risk_claims": [],
+            "issues": [],
+            "recommended_actions": [
+              "answer with current decision label"
+            ]
+          },
+          "primary_product_graph": {
+            "product_id": "hf-47957-murcia-women-blue-handbag",
+            "found": true,
+            "identity": {
+              "category_key": "bag",
+              "design_id": "murcia-women-handbag",
+              "variant_group_id": "murcia-women-handbag",
+              "color": "blue",
+              "color_family": "blue"
+            },
+            "business_state": {
+              "stock": 6,
+              "status": "Active",
+              "price": 2550.0,
+              "currency": "BDT",
+              "size_stock": {},
+              "size_stock_authoritative": false
+            },
+            "image_evidence": {
+              "image_id": "hf-47957-murcia-women-blue-handbag-primary-1",
+              "image_kind": "reference_photo",
+              "is_reference": true,
+              "trust_level": "reference_photo",
+              "can_confirm_exact": false
+            },
+            "variant_siblings": [],
+            "available_colors": [
+              "blue"
+            ]
+          },
+          "primary_factors": {
+            "product_id": "hf-47957-murcia-women-blue-handbag",
+            "image_id": "hf-47957-murcia-women-blue-handbag-primary-1",
+            "category_factor": {
+              "label": "bag",
+              "score": 0.9,
+              "evidence": [
+                "category_key",
+                "category"
+              ]
+            },
+            "design_factor": {
+              "label": "murcia-women-handbag",
+              "score": 0.9,
+              "evidence": [
+                "design_id",
+                "variant_group_id"
+              ]
+            },
+            "color_factor": {
+              "label": "blue",
+              "score": 0.9,
+              "evidence": [
+                "color",
+                "color_family"
+              ]
+            },
+            "shape_factor": {
+              "label": "Handbags",
+              "score": 0.9,
+              "evidence": [
+                "product_type",
+                "neckline",
+                "sleeve",
+                "fit"
+              ]
+            },
+            "texture_factor": {
+              "label": "casual",
+              "score": 0.9,
+              "evidence": [
+                "pattern_type",
+                "work_type",
+                "fabric",
+                "style"
+              ]
+            },
+            "text_factor": {
+              "label": "murcia women blue handbag bag murcia accessories bags casual handbags blue ladies women one size murcia-women-handbag murcia women handbag ashraq/fashion-product-images-small ashraq fashion-product-images-small",
+              "score": 0.9,
+              "evidence": [
+                "name",
+                "tags",
+                "visual_tags"
+              ]
+            },
+            "source_trust": "reference_photo"
+          }
+        },
+        "latency_ms": 0.168
+      }
+    }
+  ]
+}

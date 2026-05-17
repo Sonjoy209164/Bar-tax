@@ -674,24 +674,6 @@ Current output artifact:
 results/cif_rag_research_pass_20260517_080150.md
 ```
 
-Current ablation archive:
-
-```text
-results/ablation_archive/20260517_080736_baseline_cif_rag_mvp_final/
-```
-
-Archive index:
-
-```text
-results/ablation_archive/README.md
-```
-
-Archive command:
-
-```bash
-.venv/bin/python scripts/archive_ablation_results.py --label baseline_cif_rag_mvp_final
-```
-
 Current targeted verification:
 
 ```text

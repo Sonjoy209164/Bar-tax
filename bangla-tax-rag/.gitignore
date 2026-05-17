@@ -15,4 +15,6 @@ indexes/*
 !indexes/.gitkeep
 results/*
 !results/.gitkeep
+!results/ablation_archive/
+!results/ablation_archive/**
 frontend/config.local.json

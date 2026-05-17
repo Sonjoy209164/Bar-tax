@@ -128,18 +128,6 @@ results/q1_image_research_pass_*.json
 results/q1_image_research_pass_*.md
 ```
 
-For ablation work, archive report snapshots with:
-
-```bash
-.venv/bin/python scripts/archive_ablation_results.py --label baseline_cif_rag_mvp_final
-```
-
-Current archive index:
-
-```text
-results/ablation_archive/README.md
-```
-
 ## Current Limitation
 
 This pipeline is Q1-shaped, but the current dataset is not yet enough for a Q1 paper.

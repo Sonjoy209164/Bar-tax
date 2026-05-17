@@ -109,6 +109,8 @@ def test_image_search_method_returns_trace_and_decision(tmp_path):
     assert trace.execution_path == "inventory_image_search"
     assert trace.image_search is not None
     assert trace.image_search["decision_label"] == response.decision_label
+    assert trace.image_search["cif_rag"]["architecture"] == "CIF-RAG"
+    assert trace.image_search["cif_rag"]["plan"]["operations"]
 
 
 def test_ask_with_image_is_answered_by_image_search(tmp_path):

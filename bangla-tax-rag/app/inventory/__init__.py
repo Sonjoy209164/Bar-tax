@@ -1,5 +1,8 @@
 from app.inventory.catalog_audit import CatalogAuditReport, audit_catalog, enrich_item_attributes
+from app.inventory.cif_engine import CifRagEngine, CifRagResult
 from app.inventory.clip_matcher import CLIPImageMatcher
+from app.inventory.commerce_claims import CommerceClaimCompiler, ClaimContractResult
+from app.inventory.counterfactual_planner import CounterfactualPlan, CounterfactualQueryPlanner
 from app.inventory.customer_profile import CustomerProfile, CustomerProfileManager
 from app.inventory.decisioning import InventoryDecisionScore, InventoryDecisionScorer
 from app.inventory.evidence_contract import InventoryEvidenceContractBuilder
@@ -15,7 +18,9 @@ from app.inventory.policy_qa import PolicyQAEngine, is_policy_question
 from app.inventory.pos_sync import POSSyncEngine, SyncResult
 from app.inventory.preferences import InventoryPreferenceExtractor, InventoryPreferenceProfile, InventorySpecRequirement
 from app.inventory.proactive import build_proactive_message, low_stock_notice, proactive_cross_sell
+from app.inventory.product_factor_graph import ProductFactorGraph
 from app.inventory.reranker import EcommerceReranker, ProductEvidenceScore
+from app.inventory.risk_decision_automaton import RiskCostDecisionAutomaton
 from app.inventory.storage import InventoryMirrorStore, build_inventory_mirror_store
 from app.inventory.tradeoffs import InventoryTradeoffReasoner
 from app.inventory.verifier import InventoryFinalAnswerVerifier
@@ -23,7 +28,13 @@ from app.inventory.waitlist import WaitlistManager
 
 __all__ = [
     "CatalogAuditReport",
+    "CifRagEngine",
+    "CifRagResult",
     "CLIPImageMatcher",
+    "ClaimContractResult",
+    "CommerceClaimCompiler",
+    "CounterfactualPlan",
+    "CounterfactualQueryPlanner",
     "CustomerProfile",
     "CustomerProfileManager",
     "EcommerceReranker",
@@ -49,7 +60,9 @@ __all__ = [
     "POSSyncEngine",
     "PolicyQAEngine",
     "ProductEvidenceScore",
+    "ProductFactorGraph",
     "ProductOntology",
+    "RiskCostDecisionAutomaton",
     "SyncResult",
     "WaitlistManager",
     "audit_catalog",

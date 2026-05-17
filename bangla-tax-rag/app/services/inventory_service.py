@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
+from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -1169,7 +1170,7 @@ class InventoryService:
         trace_id = str(uuid4())
         catalog = self._load_catalog()
         query_image_id = request.query_image_id or query_image_id_from_b64(request.image_b64)
-        decision, retrieval_engine = self._run_image_search_decision(
+        decision, retrieval_engine, cif_trace = self._run_image_search_decision(
             catalog=catalog,
             query_text=request.query_text,
             image_b64=request.image_b64,
@@ -1201,6 +1202,7 @@ class InventoryService:
             decision=decision,
             retrieval_engine=retrieval_engine,
             execution_path="inventory_image_search",
+            cif_trace=cif_trace,
         )
         return ImageSearchResponse(
             status="success",
@@ -1231,7 +1233,7 @@ class InventoryService:
         color_hint: str | None = None,
         budget_max: float | None = None,
         top_k: int = 5,
-    ) -> tuple[ImageSearchDecision, str]:
+    ) -> tuple[ImageSearchDecision, str, dict[str, Any] | None]:
         """Run visual retrieval, owner corrections, and the decision policy."""
         from app.inventory.clip_matcher import CLIPImageMatcher
         from app.inventory.image_matcher import ImageMatcher
@@ -1280,7 +1282,13 @@ class InventoryService:
             requested_color=color_hint,
             top_k=top_k,
         )
-        return decision, retrieval_engine
+        cif_trace = self._build_cif_trace(
+            catalog=catalog,
+            query_text=query_text or "",
+            has_image=bool(image_b64),
+            decision=decision,
+        )
+        return decision, retrieval_engine, cif_trace
 
     def _answer_with_image_search(
         self,
@@ -1292,7 +1300,7 @@ class InventoryService:
         """Answer an /inventory/ask turn that carries an uploaded screenshot."""
         catalog = self._load_catalog()
         query_image_id = request.query_image_id or query_image_id_from_b64(request.image_b64)
-        decision, retrieval_engine = self._run_image_search_decision(
+        decision, retrieval_engine, cif_trace = self._run_image_search_decision(
             catalog=catalog,
             query_text=request.question,
             image_b64=request.image_b64,
@@ -1328,6 +1336,7 @@ class InventoryService:
             decision=decision,
             retrieval_engine=retrieval_engine,
             execution_path="inventory_image_search",
+            cif_trace=cif_trace,
         )
         return response
 
@@ -1372,6 +1381,13 @@ class InventoryService:
             query_text=request.question,
             top_k=request.top_k,
         )
+        cif_trace = self._build_cif_trace(
+            catalog=catalog,
+            query_text=request.question,
+            has_image=False,
+            decision=decision,
+            memory_anchor_product_id=primary_id,
+        )
         try:
             self._record_image_search_turn(
                 session_id=session_id,
@@ -1399,6 +1415,7 @@ class InventoryService:
             decision=decision,
             retrieval_engine="image_memory_followup",
             execution_path="inventory_image_followup",
+            cif_trace=cif_trace,
         )
         return response
 
@@ -1636,6 +1653,28 @@ class InventoryService:
             )
         )
 
+    @staticmethod
+    def _build_cif_trace(
+        *,
+        catalog: dict[str, InventoryItemRecord],
+        query_text: str,
+        has_image: bool,
+        decision: ImageSearchDecision,
+        memory_anchor_product_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        try:
+            from app.inventory.cif_engine import CifRagEngine
+
+            return CifRagEngine(catalog).analyze(
+                query_text=query_text,
+                has_image=has_image,
+                decision=decision,
+                memory_anchor_product_id=memory_anchor_product_id,
+            ).to_trace()
+        except Exception as exc:  # pragma: no cover - CIF tracing must not break chat
+            logger.debug("CIF-RAG trace build failed: %s", exc)
+            return {"architecture": "CIF-RAG", "error": str(exc)}
+
     def _save_image_search_trace(
         self,
         *,
@@ -1646,6 +1685,7 @@ class InventoryService:
         decision: ImageSearchDecision,
         retrieval_engine: str,
         execution_path: str,
+        cif_trace: dict[str, Any] | None = None,
     ) -> None:
         latency_ms = round((perf_counter() - started_at) * 1000, 3)
         abstained = decision.decision_label == "no_confident_match"
@@ -1678,6 +1718,8 @@ class InventoryService:
                 for hit in decision.hits
             ],
         }
+        if cif_trace is not None:
+            image_trace["cif_rag"] = cif_trace
         payload = {
             "trace_id": trace_id,
             "request_id": trace_id,
@@ -1706,6 +1748,10 @@ class InventoryService:
             "reasoning_summary": [
                 f"Visual retrieval engine: {retrieval_engine}.",
                 f"Decision policy label: {decision.decision_label}.",
+                (
+                    "CIF-RAG risk label: "
+                    f"{((cif_trace or {}).get('risk_decision') or {}).get('risk_level', 'unknown')}."
+                ),
             ],
             "image_search": image_trace,
             "final_answer": decision.answer,

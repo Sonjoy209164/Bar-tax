@@ -95,7 +95,7 @@ h1 {
 .chat-panel {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto auto auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto auto auto auto;
   overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -147,7 +147,7 @@ h1 {
 }
 
 .chat-panel.messages-hidden {
-  grid-template-rows: auto auto auto auto auto auto auto;
+  grid-template-rows: auto auto auto auto auto auto auto auto;
 }
 
 .chat-panel.messages-hidden .messages {
@@ -183,6 +183,88 @@ h1 {
   align-self: flex-start;
   background: var(--soft);
   border-color: #cfe5e1;
+}
+
+.image-example-panel {
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  padding: 10px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.image-example-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.image-example-head strong {
+  font-size: 13px;
+}
+
+.image-example-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.image-example-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.image-example-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 7px;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 4px 8px;
+  text-align: left;
+  color: var(--ink);
+}
+
+.image-example-card:hover,
+.image-example-card:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1);
+  outline: none;
+}
+
+.image-example-card img {
+  grid-row: 1 / span 2;
+  width: 54px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #e4e9f1;
+  background: #eef2f7;
+}
+
+.image-example-label {
+  min-width: 0;
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.image-example-question {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .meta {
@@ -408,5 +490,22 @@ textarea:focus {
 
   .message {
     max-width: 94%;
+  }
+
+  .image-example-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .image-example-grid {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+
+  .image-example-card {
+    flex: 0 0 210px;
   }
 }

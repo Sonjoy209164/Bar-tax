@@ -62,6 +62,7 @@ const el = {
   catalogItems:    document.querySelector("#catalogItems"),
   catalogCount:    document.querySelector("#catalogCount"),
   catalogEmpty:    document.querySelector("#catalogEmpty"),
+  imageExamples:   document.querySelector("#imageExamples"),
 };
 
 init();
@@ -114,6 +115,11 @@ function bindEvents() {
     el.input.focus();
   });
   el.imageInput.addEventListener("change", handleImageSelect);
+  el.imageExamples?.addEventListener("click", e => {
+    const card = e.target.closest(".image-example-card");
+    if (!card) return;
+    void useImageExample(card);
+  });
   el.clearImageBtn.addEventListener("click", clearImage);
   el.confirmOrderBtn.addEventListener("click", () => void sendMessage("yes"));
   el.cancelOrderBtn.addEventListener("click", () => void cancelOrder());
@@ -662,6 +668,40 @@ function handleImageSelect(event) {
     el.imageLabel.textContent = file.name.slice(0, 24) + (file.name.length > 24 ? "…" : "");
   };
   reader.readAsDataURL(file);
+}
+
+async function useImageExample(card) {
+  if (state.busy) return;
+  const imagePath = card.dataset.image;
+  const question = card.dataset.question || "";
+  const name = card.dataset.name || "demo-product.jpg";
+  if (!imagePath) return;
+  try {
+    const response = await fetch(imagePath, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const dataUrl = await blobToDataUrl(blob);
+    state.pendingImageB64 = dataUrl.split(",", 2)[1];
+    state.pendingImageName = name;
+    el.imagePreview.src = dataUrl;
+    el.imagePreview.style.display = "block";
+    el.clearImageBtn.style.display = "inline";
+    el.imageLabel.textContent = name;
+    el.input.value = question;
+    resizeInput();
+    el.input.focus();
+  } catch (error) {
+    addMessage("assistant", `Could not load demo image: ${error.message}`);
+  }
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("FileReader failed"));
+    reader.readAsDataURL(blob);
+  });
 }
 
 function clearImage() {

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Inventory Chat</title>
-    <link rel="stylesheet" href="./chat.css?v=20260514-image-decision" />
+    <link rel="stylesheet" href="./chat.css?v=20260515-image-examples" />
     <style>
       /* Image upload */
       .image-upload-area {
@@ -380,6 +380,58 @@
             </div>
             <button id="messagesToggle" type="button" aria-expanded="true">Hide Messages</button>
           </div>
+          <section class="image-example-panel" aria-label="Image search examples">
+            <div class="image-example-head">
+              <strong>Image Search Demos</strong>
+              <span>Tap a product photo, then send the prepared question.</span>
+            </div>
+            <div class="image-example-grid" id="imageExamples">
+              <button
+                type="button"
+                class="image-example-card"
+                data-image="assets/demo_catalog/shirt-ribbed-polo-black/primary.jpg"
+                data-name="ribbed-polo-black.jpg"
+                data-question="Eta ache? M size ache?"
+              >
+                <img src="assets/demo_catalog/shirt-ribbed-polo-black/primary.jpg" alt="Black ribbed polo" loading="lazy" />
+                <span class="image-example-label">Exact + size</span>
+                <span class="image-example-question">Eta ache? M size ache?</span>
+              </button>
+              <button
+                type="button"
+                class="image-example-card"
+                data-image="assets/demo_catalog/shirt-ribbed-polo-white/primary.jpg"
+                data-name="ribbed-polo-white.jpg"
+                data-question="blue color ache?"
+              >
+                <img src="assets/demo_catalog/shirt-ribbed-polo-white/primary.jpg" alt="White ribbed polo" loading="lazy" />
+                <span class="image-example-label">Other color</span>
+                <span class="image-example-question">blue color ache?</span>
+              </button>
+              <button
+                type="button"
+                class="image-example-card"
+                data-image="assets/demo_catalog/saree-jmd-lotus-red/primary.jpg"
+                data-name="red-jamdani-saree.jpg"
+                data-question="eta exact ache? size clear ache?"
+              >
+                <img src="assets/demo_catalog/saree-jmd-lotus-red/primary.jpg" alt="Red Jamdani saree" loading="lazy" />
+                <span class="image-example-label">Reference guard</span>
+                <span class="image-example-question">eta exact ache?</span>
+              </button>
+              <button
+                type="button"
+                class="image-example-card"
+                data-image="assets/demo_catalog/jewelry-pearl-earring-white/primary.jpg"
+                data-name="white-pearl-earring.jpg"
+                data-question="do you have this?"
+              >
+                <img src="assets/demo_catalog/jewelry-pearl-earring-white/primary.jpg" alt="White pearl earring" loading="lazy" />
+                <span class="image-example-label">Category guard</span>
+                <span class="image-example-question">do you have this?</span>
+              </button>
+            </div>
+          </section>
           <div class="messages" id="messages" aria-live="polite"></div>
 
           <!-- Order state bars -->
@@ -502,6 +554,6 @@
         </aside>
       </div>
     </main>
-    <script src="./chat.js?v=20260514-image-full-coding"></script>
+    <script src="./chat.js?v=20260515-image-examples"></script>
   </body>
 </html>

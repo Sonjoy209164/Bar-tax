@@ -50,16 +50,40 @@ The difference is intent routing.
   - File: `app/inventory/polite_boundary.py`
   - Purpose: catches romantic, gift, event, emotional, unsupported, and abusive messages before retrieval.
 
+- [x] Safety-first router pass added.
+  - File: `app/inventory/polite_boundary.py`
+  - Added:
+    - `risk_level`
+    - `allowed_action`
+    - `handoff_recommended`
+    - crisis/self-harm guard
+    - medical/legal/political guard
+    - mild/severe abuse split
+    - vague-shopping handler
+    - random-tech redirect
+    - hard pass-through for product/order/business queries
+
 - [x] The boundary layer is wired into inventory ask flow.
   - File: `app/services/inventory_service.py`
   - Purpose: returns a controlled answer before catalog search when the user is not asking a normal product query.
+
+- [x] High-risk boundary replies are marked as safety abstentions.
+  - File: `app/services/inventory_service.py`
+  - Purpose: traces show the bot refused safely, not that retrieval failed.
 
 - [x] Basic tests exist.
   - File: `tests/test_polite_boundary.py`
   - Purpose: confirms first-pass behavior for romantic, wedding, birthday, gift, and emotional cases.
 
+- [x] Hard-negative tests added.
+  - Product/order/business examples must continue into the normal pipeline:
+    - `amar biyete porar jonno saree under 5000 dekhan`
+    - `date er jonno perfume ache?`
+    - `Dhaka delivery charge koto?`
+    - `which products should I restock?`
+
 - [ ] Production coverage is incomplete.
-  - Missing: richer intent taxonomy, severity levels, repeated abuse state, political handling, medical/legal separation, random tech handling, vague shopping handling, human handoff, analytics, and high-volume evaluation.
+  - Remaining: repeated abuse state, richer template rotation, human handoff workflow, analytics dashboard, high-volume evaluation, and real chat-log tuning.
 
 ## Core Decision Tree
 
@@ -742,4 +766,3 @@ The bot should be friendly enough to keep the customer,
 strict enough to protect the brand,
 and commercially smart enough to convert casual messages into shopping journeys.
 ```
-

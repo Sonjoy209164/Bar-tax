@@ -1,5 +1,51 @@
 # TODO: Polite Boundary And Smart Redirection Layer
 
+## Safety Upgrade Note
+
+The first-pass MVP labels in this file have now been hardened into the production taxonomy described in `todo_notrelated.md`.
+
+Current implementation uses safer labels such as:
+
+- `romantic_off_topic`
+- `occasion_wedding`
+- `gift_recommendation`
+- `emotional_low_mood`
+- `medical_or_health_advice`
+- `legal_advice`
+- `political`
+- `self_harm_or_crisis`
+- `abusive_mild`
+- `abusive_severe`
+- `vague_shopping`
+
+Safety rule now enforced in code:
+
+```text
+real product/order/business query
+  -> normal inventory pipeline
+
+crisis / medical / legal / political / abuse
+  -> safe guardrail response
+
+harmless off-topic / romantic / vague / event
+  -> short friendly redirect toward shopping
+```
+
+The most important protection is:
+
+```text
+Do not steal concrete product queries.
+```
+
+Example that must continue to inventory search:
+
+```text
+amar biyete porar jonno saree under 5000 dekhan
+date er jonno perfume ache?
+Dhaka delivery charge koto?
+which products should I restock?
+```
+
 ## Goal
 
 Build a business-safe conversation layer for the ecommerce bot so it can handle off-topic, joking, emotional, romantic, vague, or event-based messages smoothly.

@@ -121,7 +121,31 @@ _HELP_PHRASES = ["help", "what can you do", "how can you help", "can you help"]
 _IDENTITY_PHRASES = ["who are you", "what are you", "what is your role", "what do you do"]
 _CLOSING_PHRASES = ["bye", "goodbye", "see you", "talk later"]
 _DETAIL_REQUEST_PHRASES = ["tell me about", "details on", "detail on", "more about", "what about"]
-_UNSUPPORTED_PRODUCT_TERMS = ["refrigerator", "refrigerators", "fridge", "freezer", "apartment fridge"]
+_UNSUPPORTED_PRODUCT_TERMS = [
+    "refrigerator",
+    "refrigerators",
+    "fridge",
+    "freezer",
+    "apartment fridge",
+    "laptop",
+    "charger",
+    "phone",
+    "mobile phone",
+    "television",
+    "tv",
+    "camera",
+    "washing machine",
+    "air conditioner",
+    "ac",
+    "fan",
+    "rice",
+    "grocery",
+    "medicine",
+    "book",
+    "bicycle",
+    "bike",
+    "car",
+]
 _OUT_OF_DOMAIN_INVENTORY_PHRASES = ["income tax", "tax rate", "bangladesh tax", "legal question"]
 _FIRST_NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
 _BOOLEAN_TRUE_VALUES = {"1", "true", "yes", "y", "on", "supported", "available", "included"}
@@ -1179,6 +1203,12 @@ class InventoryService:
         if decision is None:
             return None
 
+        guardrail_abstained = decision.risk_level in {"high", "critical"}
+        guardrail_reason = (
+            f"{decision.boundary_type} handled by {decision.allowed_action}"
+            if guardrail_abstained
+            else None
+        )
         plan = InventoryAnswerPlan(
             intent=decision.boundary_type,
             detected_intent=decision.boundary_type,
@@ -1191,6 +1221,9 @@ class InventoryService:
             preferences={
                 **decision.slots,
                 "language": decision.language,
+                "risk_level": decision.risk_level,
+                "allowed_action": decision.allowed_action,
+                "handoff_recommended": decision.handoff_recommended,
                 "recommended_categories": list(decision.recommended_categories),
             },
             product_family="commerce_conversation",
@@ -1198,10 +1231,13 @@ class InventoryService:
             confidence_breakdown={
                 "boundary_confidence": decision.confidence,
                 "boundary_type": decision.boundary_type,
+                "risk_level": decision.risk_level,
+                "allowed_action": decision.allowed_action,
             },
             reasoning_steps=[
                 "Classified the message before retrieval to avoid irrelevant long answers.",
                 "Applied a friendly boundary and redirected toward a shopping path.",
+                "Sensitive or unsafe requests are answered with a safer boundary before commerce.",
                 *decision.reasoning,
             ],
             metadata_used=[
@@ -1209,7 +1245,8 @@ class InventoryService:
                 "polite_boundary.event_categories",
                 "polite_boundary.language_hint",
             ],
-            abstain=False,
+            abstain=guardrail_abstained,
+            abstention_reason=guardrail_reason,
         )
         verification = InventoryAnswerVerification(
             passed=True,
@@ -1226,8 +1263,8 @@ class InventoryService:
             answer_engine="deterministic",
             confidence_score=decision.confidence,
             trace_id=trace_id,
-            abstained=False,
-            abstention_reason=None,
+            abstained=guardrail_abstained,
+            abstention_reason=guardrail_reason,
             total_hits=0,
             applied_filters=request.filters.model_copy(deep=True),
             hits=[],
@@ -1250,12 +1287,15 @@ class InventoryService:
                     slots={
                         **decision.slots,
                         "polite_boundary_type": decision.boundary_type,
+                        "risk_level": decision.risk_level,
+                        "allowed_action": decision.allowed_action,
+                        "handoff_recommended": decision.handoff_recommended,
                         "recommended_categories": list(decision.recommended_categories),
                     },
                     product_ids=[],
                     primary_product_id=None,
                     confidence=decision.confidence,
-                    abstained=False,
+                    abstained=guardrail_abstained,
                     clarification_pending=decision.boundary_type,
                 )
         except Exception as exc:
@@ -1268,7 +1308,10 @@ class InventoryService:
             requested_answer_engine=request.answer_engine,
             retrieved_hits=[],
             reranked_hits=[],
-            retrieval_stage_counts={"polite_boundary_requests": 1},
+            retrieval_stage_counts={
+                "polite_boundary_requests": 1,
+                "polite_boundary_sensitive_guardrails": int(guardrail_abstained),
+            },
             reasoning_summary=list(plan.reasoning_steps),
         )
         return response
@@ -5436,7 +5479,10 @@ class InventoryService:
         elif inventory_like:
             abstention_reason = "I do not have enough grounded catalog evidence to answer that safely yet."
         else:
-            abstention_reason = "That does not map cleanly to a supported inventory question I can answer from the current catalog."
+            abstention_reason = (
+                "That is outside what I can answer from the current catalog. I can still help with "
+                "products, prices, orders, delivery, returns, gifts, or shopping suggestions."
+            )
 
         answer = abstention_reason
         if reply_style == "detailed" and clarification_question and inventory_like:
@@ -6763,7 +6809,7 @@ class InventoryService:
         if out_of_domain_reply is not None:
             return out_of_domain_reply
 
-        unsupported_reply = self._build_unsupported_product_reply(question=question)
+        unsupported_reply = self._build_unsupported_product_reply(question=question, hits=hits)
         if unsupported_reply is not None:
             return unsupported_reply
 
@@ -6941,7 +6987,7 @@ class InventoryService:
         if out_of_domain_reply is not None:
             return out_of_domain_reply
 
-        unsupported_reply = self._build_unsupported_product_reply(question=question)
+        unsupported_reply = self._build_unsupported_product_reply(question=question, hits=hits)
         if unsupported_reply is not None:
             return unsupported_reply
 
@@ -7139,13 +7185,22 @@ class InventoryService:
             verification=verification,
         )
 
-    def _build_unsupported_product_reply(self, *, question: str) -> InventoryReply | None:
+    def _build_unsupported_product_reply(
+        self,
+        *,
+        question: str,
+        hits: list[InventorySearchHit] | None = None,
+    ) -> InventoryReply | None:
+        if hits:
+            return None
         normalized = self._normalize_search_text(question)
         matched_term = next(
             (term for term in _UNSUPPORTED_PRODUCT_TERMS if self._contains_normalized_phrase(normalized, term)),
             None,
         )
         if matched_term is None:
+            return None
+        if self._catalog_supports_product_term(matched_term):
             return None
         plan = self._build_inventory_answer_plan(
             intent="unsupported_product_no_match",
@@ -7158,13 +7213,39 @@ class InventoryService:
         )
         return InventoryReply(
             answer=(
-                f"The current catalog does not show {matched_term}, so I do not have a reliable "
-                f"{matched_term} recommendation or price to give."
+                f"I could not find an exact catalog match for {matched_term}. The current catalog does not show "
+                f"{matched_term}, so I do not have a reliable {matched_term} recommendation or price to give."
             ),
             follow_up_question="Share another product type or SKU and I will check the catalog directly.",
             answer_plan=plan,
             verification=self._verify_answer_plan(answer_plan=plan, hits=[]),
         )
+
+    def _catalog_supports_product_term(self, term: str) -> bool:
+        normalized_term = self._normalize_search_text(term)
+        if not normalized_term:
+            return False
+        try:
+            catalog = self._load_catalog()
+        except Exception:
+            return False
+        for item in catalog.values():
+            searchable = " ".join(
+                part
+                for part in (
+                    item.name,
+                    item.category,
+                    item.brand,
+                    " ".join(item.tags),
+                    item.short_description,
+                    item.full_description,
+                )
+                if part
+            )
+            normalized_searchable = self._normalize_search_text(searchable)
+            if self._contains_normalized_phrase(normalized_searchable, normalized_term):
+                return True
+        return False
 
     def _build_out_of_domain_inventory_reply(self, *, question: str) -> InventoryReply | None:
         normalized = self._normalize_search_text(question)

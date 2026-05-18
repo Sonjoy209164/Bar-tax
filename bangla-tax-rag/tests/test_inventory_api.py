@@ -1930,8 +1930,10 @@ def test_inventory_ask_uses_polite_boundary_for_romantic_joke(tmp_path) -> None:
     )
 
     assert response.total_hits == 0
-    assert response.answer_plan.intent == "romantic_boundary"
+    assert response.answer_plan.intent == "romantic_off_topic"
     assert response.answer_plan.strategy == "polite_boundary_redirect"
+    assert response.answer_plan.preferences["risk_level"] == "low"
+    assert response.answer_plan.preferences["allowed_action"] == "playful_redirect"
     assert "Girlfriend" in response.answer
     assert "perfume" in response.answer
     assert response.follow_up_question
@@ -1950,10 +1952,31 @@ def test_inventory_ask_treats_vague_wedding_as_shopping_occasion(tmp_path) -> No
     )
 
     assert response.total_hits == 0
-    assert response.answer_plan.intent == "event_need"
+    assert response.answer_plan.intent == "occasion_wedding"
     assert response.answer_plan.preferences["occasion"] == "wedding"
+    assert response.answer_plan.preferences["allowed_action"] == "occasion_recommendation"
     assert "saree" in response.answer_plan.preferences["recommended_categories"]
     assert "wedding" in response.answer.casefold()
+
+
+def test_inventory_ask_marks_medical_boundary_as_safety_abstention(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+
+    response = service.ask(
+        InventoryAskRequest(
+            question="amar rash er jonno kon medicine khabo?",
+            assistant_mode="support",
+            reply_style="short",
+            answer_engine="deterministic",
+        )
+    )
+
+    assert response.total_hits == 0
+    assert response.abstained is True
+    assert response.answer_plan.intent == "medical_or_health_advice"
+    assert response.answer_plan.preferences["risk_level"] == "high"
+    assert response.answer_plan.preferences["allowed_action"] == "safe_refusal_redirect"
+    assert "Medical advice" in response.answer
 
 
 @pytest.mark.anyio
@@ -2622,8 +2645,8 @@ async def test_inventory_support_mode_abstains_for_non_inventory_no_match_questi
     assert payload["total_hits"] == 0
     assert payload["hits"] == []
     assert payload["follow_up_question"] is None
-    assert "supported inventory question" in payload["answer"].lower()
-    assert "supported inventory question" in (payload["abstention_reason"] or "").lower()
+    assert "outside what i can answer from the current catalog" in payload["answer"].lower()
+    assert "outside what i can answer from the current catalog" in (payload["abstention_reason"] or "").lower()
     assert payload["answer_plan"]["intent"] == "support_no_match"
     assert payload["answer_plan"]["abstain"] is True
 
@@ -2751,8 +2774,9 @@ async def test_inventory_sales_mode_asks_for_clarification_on_ambiguous_request(
     assert response.status_code == 200
     payload = response.json()
     assert payload["follow_up_question"] is not None
-    assert "i need one more detail" in payload["answer"].lower()
-    assert "budget, premium feel, or immediate availability" in payload["follow_up_question"].lower()
+    assert payload["answer_plan"]["intent"] == "vague_shopping"
+    assert "budget and purpose" in payload["answer"].lower()
+    assert "yourself" in payload["follow_up_question"].lower()
 
 
 @pytest.mark.anyio

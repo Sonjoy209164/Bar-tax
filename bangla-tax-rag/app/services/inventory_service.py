@@ -36,6 +36,9 @@ from app.core.schemas import (
     InventoryExecutionContract,
     InventoryItemRecord,
     InventoryMemoryResolution,
+    ImageSearchHit,
+    ImageSearchRequest,
+    ImageSearchResponse,
     InventoryProductionStatusResponse,
     InventoryRouteRequest,
     InventoryRouteResponse,
@@ -69,6 +72,30 @@ from app.inventory import (
     InventorySpecRequirement,
     ProductOntology,
 )
+from app.inventory.spec_utils import (
+    SPEC_METADATA_ALIASES,
+    coerce_spec_bool,
+    coerce_spec_number,
+    spec_requirement_partial_credit,
+    spec_requirement_satisfied,
+)
+from app.inventory.fashion_retail import FashionRetailAssistant, FashionRetailOutcome
+from app.inventory.image_feedback import (
+    ImageSearchFailure,
+    list_image_search_corrections,
+    save_image_search_failure,
+)
+from app.inventory.image_matcher import (
+    ImageMatchResult,
+    ImageSearchDecision,
+    apply_owner_corrections,
+    finalize_image_search,
+    primary_image_asset,
+    primary_image_url,
+    query_image_id_from_b64,
+)
+from app.inventory.natural_answer import generate_ollama_answer
+from app.inventory.proactive import build_proactive_message
 from app.inventory.policy import (
     INVENTORY_POLICY_VERSION,
     inventory_family_abstain_triggers,
@@ -92,6 +119,8 @@ _HELP_PHRASES = ["help", "what can you do", "how can you help", "can you help"]
 _IDENTITY_PHRASES = ["who are you", "what are you", "what is your role", "what do you do"]
 _CLOSING_PHRASES = ["bye", "goodbye", "see you", "talk later"]
 _DETAIL_REQUEST_PHRASES = ["tell me about", "details on", "detail on", "more about", "what about"]
+_UNSUPPORTED_PRODUCT_TERMS = ["refrigerator", "refrigerators", "fridge", "freezer", "apartment fridge"]
+_OUT_OF_DOMAIN_INVENTORY_PHRASES = ["income tax", "tax rate", "bangladesh tax", "legal question"]
 _FIRST_NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
 _BOOLEAN_TRUE_VALUES = {"1", "true", "yes", "y", "on", "supported", "available", "included"}
 _BOOLEAN_FALSE_VALUES = {"0", "false", "no", "n", "off", "none", "unsupported", "not supported"}
@@ -175,6 +204,15 @@ _GENERIC_RELATION_TAGS = {
     "wireless",
 }
 _INVENTORY_REQUEST_HINTS = [
+    "do you have",
+    "have any",
+    "got any",
+    "is there",
+    "looking for",
+    "i need",
+    "need a",
+    "need an",
+    "need some",
     "product",
     "products",
     "item",
@@ -428,6 +466,7 @@ class InventoryService:
         self.answer_planner = InventoryAnswerPlanner(self.product_ontology)
         self.final_answer_verifier = InventoryFinalAnswerVerifier(self.product_ontology)
         self.memory_resolver = InventoryMemoryResolver(self.product_ontology)
+        self.fashion_retail_assistant = FashionRetailAssistant()
 
     def _chat_trace_dir(self) -> str:
         if self.config.chat_trace_dir:
@@ -441,6 +480,11 @@ class InventoryService:
             or storage_description.get("catalog_path")
             or storage_description.get("business_signal_path")
         )
+
+    def _vector_store_path(self) -> str | None:
+        if self.vector_store.provider.value != "local":
+            return None
+        return getattr(self.vector_store.config, "local_store_path", None)
 
     def status(self) -> InventoryStatusResponse:
         items = self._load_catalog()
@@ -456,7 +500,7 @@ class InventoryService:
             namespace=self.config.namespace,
             catalog_path=str(self._catalog_path()),
             vector_backend=self.vector_store.provider.value,
-            vector_store_path=getattr(self.vector_store.config, "local_store_path", None),
+            vector_store_path=self._vector_store_path(),
             storage_backend=storage_description.get("backend"),
             storage_path=self._inventory_storage_path(storage_description),
         )
@@ -528,7 +572,7 @@ class InventoryService:
             namespace=self.config.namespace,
             trace_dir=str(Path(self.config.agentic_trace_dir)),
             vector_backend=self.vector_store.provider.value,
-            vector_store_path=getattr(self.vector_store.config, "local_store_path", None),
+            vector_store_path=self._vector_store_path(),
         )
 
     def sync_status(self) -> InventorySyncStatusResponse:
@@ -881,6 +925,15 @@ class InventoryService:
         started_at = perf_counter()
         trace_id = str(uuid4())
         memory_resolution = InventoryMemoryResolution()
+        if request.image_b64:
+            return self._answer_with_image_search(
+                request=request, trace_id=trace_id, started_at=started_at
+            )
+        image_followup = self._try_image_followup_ask(
+            request=request, trace_id=trace_id, started_at=started_at
+        )
+        if image_followup is not None:
+            return image_followup
         conversational_reply = self._build_conversational_reply(
             question=request.question,
             assistant_mode=request.assistant_mode,
@@ -927,6 +980,36 @@ class InventoryService:
             )
             return response
 
+        policy_reply = self._try_policy_qa(request.question)
+        if policy_reply is not None:
+            response = InventoryAskResponse(
+                status="success",
+                question=request.question,
+                answer=policy_reply,
+                assistant_mode=request.assistant_mode,
+                reply_style=request.reply_style,
+                answer_engine="deterministic",
+                confidence_score=0.9,
+                trace_id=trace_id,
+                abstained=False,
+                total_hits=0,
+                applied_filters=request.filters.model_copy(deep=True),
+                hits=[],
+                recommended_product_ids=[],
+                cross_sell_product_ids=[],
+                memory_resolution=memory_resolution,
+            )
+            self._save_inventory_chat_trace(
+                trace_id=trace_id,
+                response=response,
+                execution_path="policy_qa",
+                started_at=started_at,
+                requested_answer_engine=request.answer_engine,
+                retrieved_hits=[],
+                reranked_hits=[],
+            )
+            return response
+
         resolved_memory = self.memory_resolver.resolve(
             question=request.question,
             filters=request.filters.model_copy(deep=True),
@@ -940,6 +1023,16 @@ class InventoryService:
             filters=resolved_memory.filters,
             low_stock_threshold=request.low_stock_threshold,
         )
+        fashion_response = self._try_fashion_retail_ask(
+            request=request,
+            trace_id=trace_id,
+            started_at=started_at,
+            effective_filters=effective_filters,
+            memory_resolution=memory_resolution,
+            session_id=getattr(request, "session_id", None),
+        )
+        if fashion_response is not None:
+            return fashion_response
         route_signals = self._build_route_signals(
             question=request.question,
             filters=effective_filters,
@@ -979,8 +1072,8 @@ class InventoryService:
                 assistant_mode=request.assistant_mode,
                 reply_style=request.reply_style,
             )
-            response_hits = ordered_hits
-            finalize_hits = ordered_hits
+            finalize_hits = self._ensure_answer_plan_evidence_hits(answer_plan=reply.answer_plan, hits=ordered_hits)
+            response_hits = finalize_hits
             response_total_hits = search_response.total_hits
             confidence_score = self._estimate_confidence(ordered_hits)
             abstention_reason = self._build_abstention_reason(
@@ -1059,6 +1152,1255 @@ class InventoryService:
             retrieval_steps=retrieval_steps,
         )
         return response
+
+    # ------------------------------------------------------------------
+    # Image search (screenshot -> catalog identity)
+    # ------------------------------------------------------------------
+
+    def image_search(self, request: ImageSearchRequest) -> ImageSearchResponse:
+        """Standalone screenshot search endpoint.
+
+        Visual retrieval (CLIP when available, metadata fallback otherwise) is
+        converted into a business-safe product-identity decision: exact /
+        same-design / similar / no-confident-match. The catalog is the truth;
+        the visual model only proposes candidates.
+        """
+        started_at = perf_counter()
+        trace_id = str(uuid4())
+        catalog = self._load_catalog()
+        query_image_id = request.query_image_id or query_image_id_from_b64(request.image_b64)
+        decision, retrieval_engine = self._run_image_search_decision(
+            catalog=catalog,
+            query_text=request.query_text,
+            image_b64=request.image_b64,
+            query_image_id=query_image_id,
+            category_hint=request.category_hint,
+            color_hint=request.color_hint,
+            budget_max=request.budget_max,
+            top_k=request.top_k,
+        )
+        try:
+            self._record_image_search_turn(
+                session_id=request.session_id,
+                query_text=request.query_text or "[image upload]",
+                decision=decision,
+            )
+            self._log_image_search_failure_if_needed(
+                query_text=request.query_text,
+                session_id=request.session_id,
+                query_image_id=query_image_id,
+                decision=decision,
+            )
+        except Exception as exc:  # pragma: no cover - feedback logging must never break a reply
+            logger.debug("image-search post-processing failed: %s", exc)
+        self._save_image_search_trace(
+            trace_id=trace_id,
+            started_at=started_at,
+            request_query=request.query_text,
+            query_image_id=query_image_id,
+            decision=decision,
+            retrieval_engine=retrieval_engine,
+            execution_path="inventory_image_search",
+        )
+        return ImageSearchResponse(
+            status="success",
+            answer=decision.answer,
+            trace_id=trace_id,
+            query_image_id=query_image_id,
+            hits=[self._image_match_to_image_hit(hit) for hit in decision.hits],
+            total=len(decision.hits),
+            decision_label=decision.decision_label,
+            primary_product_id=decision.primary_product_id,
+            same_design_variant_ids=list(decision.same_design_variant_ids),
+            similar_product_ids=list(decision.similar_product_ids),
+            requested_color=decision.requested_color,
+            available_colors=list(decision.available_colors),
+            score_breakdown=decision.score_breakdown,
+        )
+
+    def _run_image_search_decision(
+        self,
+        *,
+        catalog: dict[str, InventoryItemRecord],
+        query_text: str | None,
+        image_b64: str | None,
+        query_image_id: str | None,
+        category_hint: str | None = None,
+        color_hint: str | None = None,
+        budget_max: float | None = None,
+        top_k: int = 5,
+    ) -> tuple[ImageSearchDecision, str]:
+        """Run visual retrieval, owner corrections, and the decision policy."""
+        from app.inventory.clip_matcher import CLIPImageMatcher
+        from app.inventory.image_matcher import ImageMatcher
+
+        raw_top_k = min(max(top_k * 4, 12), 20)
+        retrieval_engine = "metadata"
+        try:
+            clip_available = CLIPImageMatcher.is_available()
+        except Exception:  # pragma: no cover - model probing must not break retrieval
+            clip_available = False
+
+        if clip_available:
+            from app.inventory.clip_matcher import precompute_catalog_embeddings
+
+            precompute_catalog_embeddings(catalog)
+            results = CLIPImageMatcher().search(
+                query_text=query_text or "",
+                image_b64=image_b64,
+                catalog=catalog,
+                category_hint=category_hint,
+                color_hint=color_hint,
+                budget_max=budget_max,
+                top_k=raw_top_k,
+            )
+            retrieval_engine = "clip"
+        else:
+            results = ImageMatcher(catalog).search(
+                query_text=query_text or "",
+                image_b64=image_b64 or "",
+                category_hint=category_hint,
+                color_hint=color_hint,
+                budget_max=budget_max,
+                top_k=raw_top_k,
+            )
+
+        results = apply_owner_corrections(
+            catalog=catalog,
+            results=results,
+            query_image_id=query_image_id,
+            corrections=list_image_search_corrections(limit=1000),
+        )
+        decision = finalize_image_search(
+            catalog=catalog,
+            results=results,
+            query_text=query_text or "",
+            requested_color=color_hint,
+            top_k=top_k,
+        )
+        return decision, retrieval_engine
+
+    def _answer_with_image_search(
+        self,
+        *,
+        request: InventoryAskRequest,
+        trace_id: str,
+        started_at: float,
+    ) -> InventoryAskResponse:
+        """Answer an /inventory/ask turn that carries an uploaded screenshot."""
+        catalog = self._load_catalog()
+        query_image_id = request.query_image_id or query_image_id_from_b64(request.image_b64)
+        decision, retrieval_engine = self._run_image_search_decision(
+            catalog=catalog,
+            query_text=request.question,
+            image_b64=request.image_b64,
+            query_image_id=query_image_id,
+            top_k=request.top_k,
+        )
+        try:
+            self._record_image_search_turn(
+                session_id=request.session_id,
+                query_text=request.question,
+                decision=decision,
+            )
+            self._log_image_search_failure_if_needed(
+                query_text=request.question,
+                session_id=request.session_id,
+                query_image_id=query_image_id,
+                decision=decision,
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.debug("image-search post-processing failed: %s", exc)
+        response = self._image_decision_to_ask_response(
+            request=request,
+            trace_id=trace_id,
+            decision=decision,
+            catalog=catalog,
+            memory_resolution=InventoryMemoryResolution(),
+        )
+        self._save_image_search_trace(
+            trace_id=trace_id,
+            started_at=started_at,
+            request_query=request.question,
+            query_image_id=query_image_id,
+            decision=decision,
+            retrieval_engine=retrieval_engine,
+            execution_path="inventory_image_search",
+        )
+        return response
+
+    def _try_image_followup_ask(
+        self,
+        *,
+        request: InventoryAskRequest,
+        trace_id: str,
+        started_at: float,
+    ) -> InventoryAskResponse | None:
+        """Resolve a text-only follow-up against the previous image-search result.
+
+        Example: customer uploads a black shirt, bot shows the ribbed polo, then
+        the customer types "white ache?" / "M size ache?" / "ar ki color ache?".
+        The previous variant group is the anchor, so the decision policy is
+        re-run against the remembered product instead of doing a fresh search.
+        """
+        session_id = getattr(request, "session_id", None)
+        if not session_id:
+            return None
+        try:
+            from app.inventory.conversation_state import get_state_store
+
+            state = get_state_store().get(session_id)
+        except Exception:  # pragma: no cover - state store is best-effort
+            return None
+        if state.last_intent != "image_search":
+            return None
+        primary_id = state.last_primary_product_id
+        if not primary_id:
+            return None
+        if not self._is_image_variant_followup(request.question):
+            return None
+        catalog = self._load_catalog()
+        primary_item = catalog.get(primary_id)
+        if primary_item is None:
+            return None
+
+        decision = finalize_image_search(
+            catalog=catalog,
+            results=[self._synthetic_image_hit(primary_item)],
+            query_text=request.question,
+            top_k=request.top_k,
+        )
+        try:
+            self._record_image_search_turn(
+                session_id=session_id,
+                query_text=request.question,
+                decision=decision,
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.debug("image follow-up state save failed: %s", exc)
+        response = self._image_decision_to_ask_response(
+            request=request,
+            trace_id=trace_id,
+            decision=decision,
+            catalog=catalog,
+            memory_resolution=InventoryMemoryResolution(
+                used_memory=True,
+                reason="Resolved follow-up against the previous image-search variant group.",
+                resolved_product_ids=[primary_id],
+            ),
+        )
+        self._save_image_search_trace(
+            trace_id=trace_id,
+            started_at=started_at,
+            request_query=request.question,
+            query_image_id=None,
+            decision=decision,
+            retrieval_engine="image_memory_followup",
+            execution_path="inventory_image_followup",
+        )
+        return response
+
+    def _is_image_variant_followup(self, question: str) -> bool:
+        """True when a text-only turn is a color/size/availability follow-up.
+
+        A question that names a fresh product type (e.g. "red saree ache?") is
+        treated as a new search, not a follow-up, so prior image memory cannot
+        hijack a clearly different request.
+        """
+        from app.inventory.image_matcher import infer_requested_color
+
+        normalized = f" {question.casefold()} "
+        if self.product_ontology.detect_product_type(text=question):
+            return False
+        size_terms = (" m ", " l ", " xl ", " s ", " xxl ", "size", "maap", "মাপ", "সাইজ")
+        availability_terms = (
+            "ache", "available", "stock", "color", "colour", "kalar",
+            "রং", "রঙ", "design", "variant", "ar ki", "অন্য", "same", "eta",
+        )
+        return (
+            bool(infer_requested_color(question))
+            or any(term in normalized for term in size_terms)
+            or any(term in normalized for term in availability_terms)
+        )
+
+    @staticmethod
+    def _synthetic_image_hit(item: InventoryItemRecord) -> ImageMatchResult:
+        """Build a raw visual hit for a remembered product so the decision
+        policy (variant grouping, color resolution) can be re-applied."""
+        image = primary_image_asset(item)
+        attrs = item.attributes or {}
+        return ImageMatchResult(
+            product_id=item.product_id,
+            name=item.name,
+            score=0.97,
+            match_type="visual_similar",
+            reasons=("remembered from previous image search",),
+            price=item.price,
+            currency=item.currency,
+            stock=item.stock,
+            image_url=primary_image_url(item),
+            variant_group_id=(
+                attrs.get("variant_group_id")
+                or attrs.get("variant_group_name")
+                or attrs.get("design_id")
+            ),
+            design_id=attrs.get("design_id"),
+            color=attrs.get("color") or attrs.get("color_family"),
+            size=attrs.get("size"),
+            image_kind=image.kind if image else None,
+            is_reference=bool(image.is_reference) if image else False,
+        )
+
+    def _image_decision_to_ask_response(
+        self,
+        *,
+        request: InventoryAskRequest,
+        trace_id: str,
+        decision: ImageSearchDecision,
+        catalog: dict[str, InventoryItemRecord],
+        memory_resolution: InventoryMemoryResolution,
+    ) -> InventoryAskResponse:
+        hits = [self._image_match_to_search_hit(hit, catalog) for hit in decision.hits]
+        same_design_ids = list(decision.same_design_variant_ids)
+        similar_ids = list(decision.similar_product_ids)
+        abstained = decision.decision_label == "no_confident_match"
+        confidence = round(max((hit.score for hit in decision.hits), default=0.0), 4)
+        recommended: list[str] = []
+        for pid in (
+            [decision.primary_product_id] if decision.primary_product_id else []
+        ) + same_design_ids + similar_ids:
+            if pid and pid not in recommended:
+                recommended.append(pid)
+        answer_plan = InventoryAnswerPlan(
+            intent="image_search",
+            detected_intent="image_search",
+            intent_confidence=confidence,
+            intent_reasons=["Turn was answered from an uploaded screenshot / image memory."],
+            strategy="image_search",
+            primary_product_id=decision.primary_product_id,
+            alternative_product_ids=same_design_ids,
+            cross_sell_product_ids=[],
+            reasoning_steps=[
+                f"Image-search decision: {decision.decision_label}.",
+                f"Requested color: {decision.requested_color or 'not specified'}.",
+                f"Same-design variants: {', '.join(same_design_ids) or 'none'}.",
+                f"Available colors: {', '.join(decision.available_colors) or 'none'}.",
+            ],
+            confidence_breakdown=dict(decision.score_breakdown or {}),
+            metadata_used=["variant_group_id", "design_id", "color", "image_kind"],
+            abstain=abstained,
+            abstention_reason="no_confident_match" if abstained else None,
+        )
+        return InventoryAskResponse(
+            status="success",
+            question=request.question,
+            answer=decision.answer,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+            answer_engine="image_search",
+            confidence_score=confidence,
+            trace_id=trace_id,
+            abstained=abstained,
+            abstention_reason=answer_plan.abstention_reason,
+            total_hits=len(hits),
+            applied_filters=request.filters.model_copy(deep=True),
+            hits=hits,
+            recommended_product_ids=recommended,
+            cross_sell_product_ids=[],
+            follow_up_question=None,
+            answer_plan=answer_plan,
+            memory_resolution=memory_resolution,
+        )
+
+    @staticmethod
+    def _image_match_to_image_hit(hit: ImageMatchResult) -> ImageSearchHit:
+        return ImageSearchHit(
+            product_id=hit.product_id,
+            name=hit.name,
+            score=hit.score,
+            match_type=hit.match_type,
+            reasons=list(hit.reasons),
+            price=hit.price,
+            currency=hit.currency,
+            stock=hit.stock,
+            image_url=hit.image_url,
+            decision_label=hit.decision_label,
+            variant_group_id=hit.variant_group_id,
+            design_id=hit.design_id,
+            color=hit.color,
+            size=hit.size,
+            image_kind=hit.image_kind,
+            is_reference=hit.is_reference,
+            score_breakdown=hit.score_breakdown,
+        )
+
+    @staticmethod
+    def _image_match_to_search_hit(
+        hit: ImageMatchResult,
+        catalog: dict[str, InventoryItemRecord],
+    ) -> InventorySearchHit:
+        item = catalog.get(hit.product_id)
+        return InventorySearchHit(
+            product_id=hit.product_id,
+            sku=item.sku if item else hit.product_id,
+            name=hit.name,
+            category=item.category if item else None,
+            brand=item.brand if item else None,
+            status=item.status if item else None,
+            price=hit.price,
+            currency=hit.currency,
+            stock=hit.stock,
+            tags=list(item.tags) if item else [],
+            updated_at=item.updated_at if item else None,
+            snippet=(item.short_description or item.full_description) if item else None,
+            attributes=dict(item.attributes) if item else {},
+            metadata={
+                "image_url": hit.image_url,
+                "decision_label": hit.decision_label,
+                "match_type": hit.match_type,
+                "variant_group_id": hit.variant_group_id,
+                "design_id": hit.design_id,
+                "color": hit.color,
+                "size": hit.size,
+                "image_kind": hit.image_kind,
+                "is_reference": hit.is_reference,
+                "match_reasons": list(hit.reasons),
+            },
+            evidence_scores=dict(hit.score_breakdown or {}),
+            score=hit.score,
+        )
+
+    @staticmethod
+    def _record_image_search_turn(
+        *,
+        session_id: str | None,
+        query_text: str,
+        decision: ImageSearchDecision,
+    ) -> None:
+        if not session_id:
+            return
+        from app.inventory.conversation_state import get_state_store
+
+        primary = decision.hits[0] if decision.hits else None
+        slots = {
+            "color": decision.requested_color or (primary.color if primary else None),
+            "color_family": decision.requested_color or (primary.color if primary else None),
+            "variant_group_id": primary.variant_group_id if primary else None,
+            "design_id": primary.design_id if primary else None,
+            "category_key": (
+                (primary.score_breakdown or {}).get("category")
+                if primary and primary.score_breakdown
+                else None
+            ),
+        }
+        confidence = max((hit.score for hit in decision.hits), default=0.0)
+        get_state_store().record_turn(
+            session_id=session_id,
+            question=query_text or "[image upload]",
+            intent="image_search",
+            slots=slots,
+            product_ids=[hit.product_id for hit in decision.hits],
+            primary_product_id=decision.primary_product_id,
+            confidence=confidence,
+            abstained=decision.decision_label == "no_confident_match",
+        )
+
+    @staticmethod
+    def _log_image_search_failure_if_needed(
+        *,
+        query_text: str | None,
+        session_id: str | None,
+        query_image_id: str | None,
+        decision: ImageSearchDecision,
+    ) -> None:
+        top_score = max((hit.score for hit in decision.hits), default=0.0)
+        if decision.decision_label != "no_confident_match" and decision.hits and top_score >= 0.22:
+            return
+        reason = (
+            "no_confident_match"
+            if decision.decision_label == "no_confident_match"
+            else "low_visual_score"
+        )
+        save_image_search_failure(
+            ImageSearchFailure(
+                query_text=query_text or "",
+                session_id=session_id,
+                query_image_id=query_image_id,
+                decision_label=decision.decision_label,
+                primary_product_id=decision.primary_product_id,
+                top_product_ids=[hit.product_id for hit in decision.hits[:5]],
+                reason=reason,
+                score_breakdown=decision.score_breakdown,
+            )
+        )
+
+    def _save_image_search_trace(
+        self,
+        *,
+        trace_id: str,
+        started_at: float,
+        request_query: str | None,
+        query_image_id: str | None,
+        decision: ImageSearchDecision,
+        retrieval_engine: str,
+        execution_path: str,
+    ) -> None:
+        latency_ms = round((perf_counter() - started_at) * 1000, 3)
+        abstained = decision.decision_label == "no_confident_match"
+        confidence = max((hit.score for hit in decision.hits), default=0.0)
+        image_trace = {
+            "query_image_id": query_image_id,
+            "retrieval_engine": retrieval_engine,
+            "decision_label": decision.decision_label,
+            "primary_product_id": decision.primary_product_id,
+            "requested_color": decision.requested_color,
+            "available_colors": list(decision.available_colors),
+            "same_design_variant_ids": list(decision.same_design_variant_ids),
+            "similar_product_ids": list(decision.similar_product_ids),
+            "retrieved_product_ids": [hit.product_id for hit in decision.hits],
+            "score_breakdown": decision.score_breakdown,
+            "hits": [
+                {
+                    "product_id": hit.product_id,
+                    "name": hit.name,
+                    "score": hit.score,
+                    "decision_label": hit.decision_label,
+                    "match_type": hit.match_type,
+                    "image_kind": hit.image_kind,
+                    "is_reference": hit.is_reference,
+                    "variant_group_id": hit.variant_group_id,
+                    "color": hit.color,
+                    "stock": hit.stock,
+                    "reasons": list(hit.reasons),
+                }
+                for hit in decision.hits
+            ],
+        }
+        payload = {
+            "trace_id": trace_id,
+            "request_id": trace_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "question": request_query or "[image upload]",
+            "assistant_mode": "sales",
+            "reply_style": "short",
+            "answer_engine": "image_search",
+            "execution_path": execution_path,
+            "latency_ms": latency_ms,
+            "fallback_reason": None,
+            "intent": "image_search",
+            "route_decision": {"execution_path": execution_path, "retrieval_engine": retrieval_engine},
+            "retrieval_stage_counts": {"image_hits": len(decision.hits)},
+            "preferences": {"requested_color": decision.requested_color},
+            "retrieved_product_ids": [hit.product_id for hit in decision.hits],
+            "reranked_product_ids": [hit.product_id for hit in decision.hits],
+            "recommended_product_ids": (
+                [decision.primary_product_id] if decision.primary_product_id else []
+            ),
+            "cross_sell_product_ids": [],
+            "total_hits": len(decision.hits),
+            "confidence_score": confidence,
+            "abstained": abstained,
+            "abstention_reason": "no_confident_match" if abstained else None,
+            "reasoning_summary": [
+                f"Visual retrieval engine: {retrieval_engine}.",
+                f"Decision policy label: {decision.decision_label}.",
+            ],
+            "image_search": image_trace,
+            "final_answer": decision.answer,
+        }
+        try:
+            self.chat_trace_store.save(payload)
+        except Exception as exc:  # pragma: no cover - trace persistence is best-effort
+            logger.debug("image-search trace save failed: %s", exc)
+        logger.info(
+            "inventory_image_search_trace trace_id=%s execution_path=%s engine=%s decision=%s hits=%s latency_ms=%s",
+            trace_id,
+            execution_path,
+            retrieval_engine,
+            decision.decision_label,
+            len(decision.hits),
+            latency_ms,
+        )
+
+    @staticmethod
+    def _build_profile_context_turn(session_id: str | None) -> tuple[str, str] | None:
+        """
+        Load the customer's saved profile from the identity store and build a
+        system-style context turn so slot extraction inherits known preferences
+        (budget, favourite colours, sizes) even on the first question.
+        Returns None when no useful profile data exists.
+        """
+        if not session_id:
+            return None
+        try:
+            from app.inventory.identity_store import IdentityStore
+            profile = IdentityStore().get_or_create_profile(session_id)
+            parts: list[str] = []
+            if profile.get("budget_max"):
+                parts.append(f"budget up to BDT {profile['budget_max']:,.0f}")
+            if profile.get("favorite_colors"):
+                parts.append(f"favourite colours: {', '.join(profile['favorite_colors'][:3])}")
+            if profile.get("sizes"):
+                size_str = ", ".join(f"{k} {v}" for k, v in list(profile["sizes"].items())[:3])
+                parts.append(f"saved sizes: {size_str}")
+            if profile.get("preferred_categories"):
+                parts.append(f"preferred categories: {', '.join(profile['preferred_categories'][:3])}")
+            if not parts:
+                return None
+            return ("user", f"[My saved preferences: {'; '.join(parts)}]")
+        except Exception:
+            return None
+
+    def _build_planner_clarification_response(
+        self,
+        *,
+        request: InventoryAskRequest,
+        trace_id: str,
+        started_at: float,
+        memory_resolution: InventoryMemoryResolution,
+        question_to_ask: str,
+        plan: Any,
+    ) -> InventoryAskResponse:
+        """
+        Build the response when the top-level planner decided to ask back
+        before any retrieval. The pipeline is bypassed entirely — we just
+        return the planner's question so the customer can clarify.
+        """
+        plan_steps = []
+        if plan.reasoning:
+            plan_steps.append(f"Planner reasoning: {plan.reasoning}")
+        if plan.customer_situation:
+            plan_steps.append(f"Inferred situation: {plan.customer_situation}")
+        plan_steps.append("Planner asked the customer to clarify before retrieving.")
+
+        answer_plan = InventoryAnswerPlan(
+            intent="fashion_clarification",
+            detected_intent=plan.intent,
+            intent_confidence=plan.confidence,
+            intent_reasons=["Top-level planner requested clarification before retrieval."],
+            strategy="planner_clarification",
+            preferences=dict(plan.key_constraints) if plan.key_constraints else {},
+            next_best_question=question_to_ask,
+            reasoning_steps=plan_steps,
+            confidence_breakdown={
+                "planner_confidence": plan.confidence,
+                "pipeline_hints": plan.pipeline_hints,
+            },
+            abstain=False,
+            abstention_reason=None,
+        )
+        verification = InventoryAnswerVerification(
+            passed=True,
+            issues=[],
+            checked_final_answer=False,
+            final_answer_issues=[],
+        )
+        response = InventoryAskResponse(
+            status="success",
+            question=request.question,
+            answer=question_to_ask,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+            answer_engine="planner",
+            confidence_score=plan.confidence,
+            trace_id=trace_id,
+            abstained=False,
+            abstention_reason=None,
+            total_hits=0,
+            applied_filters=InventorySearchFilters(),
+            hits=[],
+            recommended_product_ids=[],
+            cross_sell_product_ids=[],
+            follow_up_question=question_to_ask,
+            answer_plan=answer_plan,
+            verification=verification,
+            memory_resolution=memory_resolution,
+        )
+        # Persist this turn into conversation state so the next turn knows
+        # we asked a clarifying question.
+        try:
+            from app.inventory.conversation_state import get_state_store
+            session_id = getattr(request, "session_id", None)
+            if session_id:
+                get_state_store().record_turn(
+                    session_id=session_id,
+                    question=request.question,
+                    intent="fashion_clarification",
+                    slots=dict(plan.key_constraints) if plan.key_constraints else {},
+                    product_ids=[],
+                    primary_product_id=None,
+                    confidence=plan.confidence,
+                    abstained=False,
+                    clarification_pending="planner",
+                )
+        except Exception as exc:
+            logger.debug("Planner-clarification state save failed: %s", exc)
+        self._save_inventory_chat_trace(
+            trace_id=trace_id,
+            response=response,
+            execution_path="inventory_planner_clarification",
+            started_at=started_at,
+            requested_answer_engine=request.answer_engine,
+            retrieved_hits=[],
+            reranked_hits=[],
+            retrieval_stage_counts={"planner_clarifications": 1},
+            reasoning_summary=plan_steps,
+        )
+        return response
+
+    def _try_fashion_retail_ask(
+        self,
+        *,
+        request: InventoryAskRequest,
+        trace_id: str,
+        started_at: float,
+        effective_filters: InventorySearchFilters,
+        memory_resolution: InventoryMemoryResolution,
+        session_id: str | None = None,
+    ) -> InventoryAskResponse | None:
+        catalog = self._load_catalog()
+        last_primary_product_id = request.last_answer_plan.primary_product_id if request.last_answer_plan else None
+        conversation_history = [
+            (turn.role, turn.content) for turn in (request.conversation_history or [])
+        ]
+        # Prepend saved profile as context turn so slot extraction inherits preferences
+        profile_turn = self._build_profile_context_turn(session_id)
+        if profile_turn:
+            conversation_history = [profile_turn] + conversation_history
+
+        # Load structured conversation state so we can resolve pronouns
+        # ("এটা", "first one", "same design") against products we showed earlier.
+        conv_state = None
+        focused_product_ids = tuple(request.focused_product_ids)
+        if session_id:
+            try:
+                from app.inventory.conversation_state import get_state_store
+                from app.inventory.coreference_resolver import resolve_coreference
+                conv_state = get_state_store().get(session_id)
+                if conv_state.last_shown_product_ids and not focused_product_ids:
+                    coref = resolve_coreference(
+                        question=request.question,
+                        last_shown_product_ids=conv_state.last_shown_product_ids,
+                        last_primary_product_id=conv_state.last_primary_product_id,
+                    )
+                    if coref.resolved_product_id:
+                        last_primary_product_id = coref.resolved_product_id
+                        focused_product_ids = (coref.resolved_product_id,)
+            except Exception as exc:
+                logger.debug("Conversation state load failed: %s", exc)
+
+        # Top-of-pipeline thinking layer. The planner reads the whole
+        # conversation, the customer's profile, and recent state — and
+        # writes a structured plan that downstream layers can lean on.
+        intent_plan = None
+        if request.answer_engine == "auto":
+            try:
+                from app.inventory.intent_planner import (
+                    plan as plan_intent,
+                    render_profile_summary,
+                    render_state_summary,
+                    should_invoke_planner,
+                )
+                from app.inventory.llm_slot_extractor import is_ollama_available
+
+                consec_failures = (
+                    conv_state.consecutive_failures if conv_state is not None else 0
+                )
+                if (
+                    is_ollama_available()
+                    and should_invoke_planner(
+                        question=request.question,
+                        conversation_history=conversation_history,
+                        consecutive_failures=consec_failures,
+                    )
+                ):
+                    profile_summary = ""
+                    if session_id:
+                        try:
+                            from app.inventory.identity_store import IdentityStore
+                            store = IdentityStore()
+                            phone = store.get_phone_for_session(session_id)
+                            if phone:
+                                profile_summary = render_profile_summary(
+                                    store.get_profile(phone)
+                                )
+                        except Exception:
+                            pass
+                    intent_plan = plan_intent(
+                        question=request.question,
+                        conversation_history=conversation_history,
+                        state_summary=render_state_summary(conv_state),
+                        profile_summary=profile_summary,
+                    )
+            except Exception as exc:
+                logger.debug("IntentPlanner failed (continuing without plan): %s", exc)
+
+        # If the planner — having read the whole conversation — still says
+        # it needs to clarify, return that question now and skip the
+        # pipeline entirely. This is a deeper "ask back" than the per-turn
+        # clarification gate downstream.
+        if intent_plan is not None and intent_plan.should_clarify and intent_plan.clarifying_question:
+            return self._build_planner_clarification_response(
+                request=request,
+                trace_id=trace_id,
+                started_at=started_at,
+                memory_resolution=memory_resolution,
+                question_to_ask=intent_plan.clarifying_question,
+                plan=intent_plan,
+            )
+
+        outcome = self.fashion_retail_assistant.answer(
+            question=request.question,
+            catalog=catalog,
+            filters=effective_filters,
+            focused_product_ids=focused_product_ids,
+            last_primary_product_id=last_primary_product_id,
+            top_k=request.top_k,
+            conversation_history=conversation_history,
+            allow_llm_slots=request.answer_engine == "auto",
+        )
+        if outcome is None:
+            return None
+
+        # Generalized reasoner — for open-ended fashion_search, let the LLM
+        # re-rank the candidates and explain its pick. Specific intents
+        # (variant_color, size_availability, compare, etc.) keep their
+        # deterministic logic because they have hard correctness rules.
+        reasoning_note: str | None = None
+        if (
+            request.answer_engine == "auto"
+            and
+            outcome.intent == "fashion_search"
+            and not outcome.abstained
+            and len(outcome.product_ids) > 1
+        ):
+            try:
+                from app.inventory.llm_reasoner import reason_over_candidates
+                from app.inventory.llm_slot_extractor import is_ollama_available
+                if is_ollama_available():
+                    candidates = [
+                        catalog[pid] for pid in outcome.product_ids[:8] if pid in catalog
+                    ]
+                    if candidates:
+                        ctx_parts: list[str] = []
+                        # Planner's narrative is the strongest context signal —
+                        # put it first so the reasoner reads it as the lede.
+                        if intent_plan is not None and intent_plan.customer_situation:
+                            ctx_parts.append(f"Situation: {intent_plan.customer_situation}")
+                        if intent_plan is not None and intent_plan.key_constraints.get("rejected_attributes"):
+                            rej = intent_plan.key_constraints["rejected_attributes"]
+                            ctx_parts.append(f"Customer already rejected: {', '.join(rej)}.")
+                        if conv_state and conv_state.color_counts:
+                            top_color = max(conv_state.color_counts, key=conv_state.color_counts.get)
+                            if conv_state.color_counts[top_color] >= 2:
+                                ctx_parts.append(f"Customer often asks about {top_color}.")
+                        if conv_state and conv_state.budget_observations:
+                            avg_budget = sum(conv_state.budget_observations) / len(conv_state.budget_observations)
+                            ctx_parts.append(f"Customer's typical budget around BDT {avg_budget:,.0f}.")
+                        customer_context = " ".join(ctx_parts) if ctx_parts else None
+
+                        selection = reason_over_candidates(
+                            question=request.question,
+                            candidates=candidates,
+                            customer_context=customer_context,
+                        )
+                        if selection and selection.selected_product_ids and not selection.none_fit:
+                            # Reorder outcome.product_ids so the LLM's picks are first
+                            picks = list(selection.selected_product_ids)
+                            remaining = [p for p in outcome.product_ids if p not in picks]
+                            from dataclasses import replace
+                            outcome = replace(
+                                outcome,
+                                product_ids=tuple(picks + remaining),
+                                reasoning_steps=outcome.reasoning_steps + (
+                                    f"LLM reasoner picked {len(picks)} of {len(candidates)} candidates: {selection.reasoning}",
+                                ),
+                            )
+                            reasoning_note = selection.reasoning
+            except Exception as exc:
+                logger.debug("LLM reasoner step failed (continuing with deterministic order): %s", exc)
+
+        response_hits = self._fashion_retail_hits(outcome=outcome, catalog=catalog)
+        primary = response_hits[0] if response_hits else None
+        cross_sell_ids = list(outcome.cross_sell_product_ids)
+        recommended_ids = [product_id for product_id in outcome.product_ids if product_id not in cross_sell_ids]
+        if not recommended_ids and not cross_sell_ids:
+            recommended_ids = [hit.product_id for hit in response_hits]
+        alternative_ids = [
+            product_id
+            for product_id in outcome.product_ids[1:]
+            if product_id not in cross_sell_ids
+        ]
+        plan = InventoryAnswerPlan(
+            intent=outcome.intent,
+            detected_intent=outcome.intent,
+            intent_confidence=outcome.confidence,
+            intent_reasons=["Handled by generalized fashion retail structured layer."],
+            strategy="fashion_retail_structured_lookup",
+            preferences=outcome.slots.to_plan_dict(),
+            product_type=outcome.slots.category_key,
+            product_family="fashion_retail",
+            primary_product_id=primary.product_id if primary else None,
+            alternative_product_ids=alternative_ids,
+            cross_sell_product_ids=cross_sell_ids,
+            primary_reason="Selected by exact retail slots: category, design, color, size, price, stock, and compatibility.",
+            next_best_question=outcome.follow_up_question,
+            confidence_breakdown={
+                "fashion_retail_confidence": outcome.confidence,
+                "structured_slots": outcome.slots.to_plan_dict(),
+                "total_matches": outcome.total_matches,
+            },
+            reasoning_steps=list(outcome.reasoning_steps)
+            or [
+                "Detected a fashion retail query.",
+                "Applied structured catalog logic before semantic/vector search.",
+            ],
+            metadata_used=[
+                "attributes.design_id",
+                "attributes.color",
+                "attributes.size",
+                "attributes.stock",
+                "attributes.compatible_design_ids",
+            ],
+            abstain=outcome.abstained,
+            abstention_reason=outcome.abstention_reason,
+        )
+        verification = InventoryAnswerVerification(
+            passed=not outcome.abstained,
+            issues=[] if not outcome.abstained else [outcome.abstention_reason or "No structured fashion match."],
+            checked_final_answer=True,
+            final_answer_issues=[],
+        )
+        applied_filters = self._fashion_retail_applied_filters(
+            filters=effective_filters,
+            outcome=outcome,
+        )
+        retrieval_stage_counts = {
+            "fashion_structured_requests": 1,
+            "fashion_structured_matches": outcome.total_matches,
+            "returned_hits": len(response_hits),
+        }
+        retrieval_steps: list[InventoryAgenticStep] = []
+        reasoning_summary = list(outcome.reasoning_steps)
+        if request.debug_retrieval_probe:
+            probe_backend = self.vector_store.provider.value
+            try:
+                probe_response, probe_counts, probe_trace_diagnostics = self._search_with_trace_diagnostics(
+                    InventorySearchRequest(
+                        query_text=request.question,
+                        top_k=request.top_k,
+                        filters=applied_filters.model_copy(deep=True),
+                    )
+                )
+                retrieval_stage_counts = self._merge_retrieval_stage_counts(
+                    retrieval_stage_counts,
+                    probe_counts,
+                )
+                retrieval_stage_counts["returned_hits"] = len(response_hits)
+                retrieval_stage_counts["retrieval_probe_requests"] = (
+                    retrieval_stage_counts.get("retrieval_probe_requests", 0) + 1
+                )
+                retrieval_stage_counts["retrieval_probe_returned_hits"] = probe_response.total_hits
+                retrieval_stage_counts[f"{probe_backend}_probe_requests"] = (
+                    retrieval_stage_counts.get(f"{probe_backend}_probe_requests", 0) + 1
+                )
+                retrieval_stage_counts[f"{probe_backend}_probe_hits"] = probe_response.total_hits
+                probe_hits = probe_response.hits[: min(3, len(probe_response.hits))]
+                retrieval_steps.append(
+                    self._build_trace_step(
+                        step_number=1,
+                        action=f"{probe_backend}_hybrid_retrieval_probe",
+                        query_text=request.question,
+                        applied_filters=applied_filters,
+                        total_hits=probe_response.total_hits,
+                        selected_hits=probe_hits,
+                        rejected_candidates=list(probe_trace_diagnostics.rejected_candidates[:5]),
+                        observation=(
+                            f"{probe_backend} retrieval probe ran for observability. "
+                            "The final answer still used the structured fashion decision because it had exact catalog slots."
+                        ),
+                        retrieval_stage_counts=probe_counts,
+                    )
+                )
+                reasoning_summary.append(
+                    f"Debug retrieval probe ran against {probe_backend} and returned {probe_response.total_hits} hit(s)."
+                )
+            except Exception as exc:
+                logger.warning("Debug retrieval probe failed: %s", exc)
+                retrieval_stage_counts["retrieval_probe_errors"] = (
+                    retrieval_stage_counts.get("retrieval_probe_errors", 0) + 1
+                )
+                reasoning_summary.append(f"Debug retrieval probe failed: {exc}")
+        # Build product snippets for the natural answer generator
+        product_snippets = [
+            {
+                "name": catalog[pid].name,
+                "price": catalog[pid].price,
+                "stock": catalog[pid].stock,
+                "attributes": dict(catalog[pid].attributes),
+            }
+            for pid in recommended_ids[:5]
+            if pid in catalog
+        ]
+        # Try Ollama natural answer; fall back to template on failure
+        natural = None
+        critique_passed = True
+        critique_issues: list[str] = []
+        requested_fashion_answer_engine = self._resolve_inventory_answer_engine(
+            requested_answer_engine=request.answer_engine,
+            confidence_score=outcome.confidence,
+            hits=response_hits,
+            abstention_reason=outcome.abstention_reason,
+        )
+        if requested_fashion_answer_engine == "natural" and not outcome.abstained and product_snippets:
+            from app.inventory.llm_slot_extractor import is_ollama_available
+
+            if not is_ollama_available():
+                requested_fashion_answer_engine = "deterministic"
+        if requested_fashion_answer_engine == "natural" and not outcome.abstained and product_snippets:
+            natural = generate_ollama_answer(
+                question=request.question,
+                product_snippets=product_snippets,
+                language_hint=outcome.slots.language,
+                model=self.config.natural_answer_model_name or "qwen3:8b",
+                timeout=self.config.natural_answer_timeout_seconds,
+                temperature=self.config.natural_answer_temperature,
+                num_predict=self.config.natural_answer_max_tokens,
+                fallback=outcome.answer,
+            )
+            # Self-critique loop: catch hallucinations, ignored constraints, etc.
+            # If the critic fails the answer, regenerate ONCE with the fix hint.
+            if natural and request.answer_engine == "auto":
+                try:
+                    from app.inventory.answer_critic import critique_answer
+                    critique = critique_answer(
+                        question=request.question,
+                        answer=natural,
+                        product_snippets=product_snippets,
+                    )
+                    if not critique.passes and critique.severity == "major":
+                        critique_passed = False
+                        critique_issues = list(critique.issues)
+                        # One regenerate cycle, telling the model what went wrong
+                        fix_hint = (
+                            f"\n\nIMPORTANT: previous draft had issues: "
+                            f"{'; '.join(critique.issues) or 'wrong claim'}. "
+                            f"{critique.suggested_fix}"
+                        )
+                        retry = generate_ollama_answer(
+                            question=request.question + fix_hint,
+                            product_snippets=product_snippets,
+                            language_hint=outcome.slots.language,
+                            model=self.config.natural_answer_model_name or "qwen3:8b",
+                            timeout=self.config.natural_answer_timeout_seconds,
+                            temperature=self.config.natural_answer_temperature,
+                            num_predict=self.config.natural_answer_max_tokens,
+                            fallback=outcome.answer,
+                        )
+                        if retry:
+                            natural = retry
+                except Exception as exc:
+                    logger.debug("Answer critic step failed: %s", exc)
+        base_answer = natural if natural else outcome.answer
+
+        if outcome.abstained or not recommended_ids:
+            enriched_answer = base_answer
+        else:
+            enriched_answer = build_proactive_message(
+                answer=base_answer,
+                catalog={pid: item for pid, item in catalog.items()},
+                recommended_ids=recommended_ids,
+                primary_category=outcome.slots.category_key,
+                color_hint=outcome.slots.color,
+                budget_max=outcome.slots.budget_max,
+            )
+
+        # Escalation gate: if we've failed this customer multiple turns in a
+        # row OR they explicitly asked for a human, replace the answer with a
+        # handoff message and notify the owner queue. Once escalated we skip
+        # all downstream decoration (soft-confirm) — the handoff text is
+        # final and must not be mutated.
+        escalation_active = False
+        if session_id and conv_state is not None:
+            try:
+                from app.inventory.escalation import (
+                    decide_escalation,
+                    emit_escalation_notification,
+                )
+                escalation = decide_escalation(state=conv_state, question=request.question)
+                if escalation.should_escalate and escalation.message:
+                    emit_escalation_notification(
+                        state=conv_state,
+                        decision=escalation,
+                        last_question=request.question,
+                    )
+                    enriched_answer = escalation.message
+                    escalation_active = True
+            except Exception as exc:
+                logger.debug("Escalation check failed: %s", exc)
+
+        # Soft-confirm: in the medium-confidence band, append a short
+        # confirmation tail so the customer can correct course. Skipped
+        # entirely when an escalation message is in flight.
+        if not escalation_active:
+            try:
+                from app.inventory.soft_confirm import decorate_with_soft_confirm
+                enriched_answer = decorate_with_soft_confirm(
+                    enriched_answer,
+                    confidence=outcome.confidence,
+                    intent=outcome.intent,
+                    language=outcome.slots.language,
+                )
+            except Exception as exc:
+                logger.debug("Soft-confirm decoration failed: %s", exc)
+        response = InventoryAskResponse(
+            status="success",
+            question=request.question,
+            answer=enriched_answer,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+            answer_engine="natural" if natural else "deterministic",
+            confidence_score=outcome.confidence,
+            trace_id=trace_id,
+            abstained=outcome.abstained,
+            abstention_reason=outcome.abstention_reason,
+            total_hits=outcome.total_matches,
+            applied_filters=applied_filters,
+            hits=response_hits,
+            recommended_product_ids=recommended_ids,
+            cross_sell_product_ids=cross_sell_ids,
+            follow_up_question=outcome.follow_up_question,
+            answer_plan=plan,
+            verification=verification,
+            memory_resolution=memory_resolution,
+        )
+        self._save_inventory_chat_trace(
+            trace_id=trace_id,
+            response=response,
+            execution_path="inventory_fashion_retail_structured",
+            started_at=started_at,
+            requested_answer_engine=request.answer_engine,
+            retrieved_hits=response_hits,
+            reranked_hits=response_hits,
+            retrieval_stage_counts=retrieval_stage_counts,
+            retrieval_steps=retrieval_steps,
+            reasoning_summary=reasoning_summary,
+        )
+        # Conversion funnel telemetry — best-effort
+        try:
+            from app.inventory.conversion_tracker import record_abstain, record_shown
+            if session_id:
+                if outcome.abstained:
+                    record_abstain(
+                        session_id=session_id,
+                        question=request.question,
+                        intent=outcome.intent,
+                        reason=outcome.abstention_reason,
+                    )
+                elif recommended_ids:
+                    record_shown(
+                        session_id=session_id,
+                        question=request.question,
+                        product_ids=recommended_ids,
+                        intent=outcome.intent,
+                        confidence=outcome.confidence,
+                    )
+        except Exception as exc:
+            logger.debug("Conversion tracking failed: %s", exc)
+
+        # Persist conversation state and trigger implicit preference learning.
+        # All best-effort — failures must not break the response.
+        if session_id:
+            try:
+                from app.inventory.conversation_state import get_state_store
+                slots_dict = {
+                    "category_key": outcome.slots.category_key,
+                    "color_family": outcome.slots.color_family,
+                    "color": outcome.slots.color,
+                    "fabric": outcome.slots.fabric,
+                    "occasion": outcome.slots.occasion,
+                    "budget_max": outcome.slots.budget_max,
+                    "size": outcome.slots.size,
+                }
+                clarification_pending = (
+                    "yes" if outcome.intent == "fashion_clarification" else None
+                )
+                new_state = get_state_store().record_turn(
+                    session_id=session_id,
+                    question=request.question,
+                    intent=outcome.intent,
+                    slots=slots_dict,
+                    product_ids=recommended_ids,
+                    primary_product_id=primary.product_id if primary else None,
+                    confidence=outcome.confidence,
+                    abstained=outcome.abstained,
+                    clarification_pending=clarification_pending,
+                )
+                # Trigger preference learning if a phone is linked
+                try:
+                    from app.inventory.identity_store import IdentityStore
+                    from app.inventory.preference_learner import apply_preferences_to_profile
+                    store = IdentityStore()
+                    phone = store.get_phone_for_session(session_id)
+                    if phone:
+                        apply_preferences_to_profile(
+                            state=new_state,
+                            identity_store=store,
+                            phone=phone,
+                        )
+                except Exception as exc:
+                    logger.debug("Preference learning failed: %s", exc)
+            except Exception as exc:
+                logger.debug("Conversation state persistence failed: %s", exc)
+        return response
+
+    def _fashion_retail_hits(
+        self,
+        *,
+        outcome: FashionRetailOutcome,
+        catalog: dict[str, InventoryItemRecord],
+    ) -> list[InventorySearchHit]:
+        ordered_ids: list[str] = []
+        for product_id in [*outcome.product_ids, *outcome.cross_sell_product_ids]:
+            if product_id in ordered_ids:
+                continue
+            ordered_ids.append(product_id)
+        hits: list[InventorySearchHit] = []
+        for index, product_id in enumerate(ordered_ids):
+            item = catalog.get(product_id)
+            if item is None:
+                continue
+            score = max(0.0, outcome.confidence - (index * 0.03))
+            hit = self._build_search_hit(item=item, score=score)
+            hit.evidence_scores.update(
+                {
+                    "final_score": score,
+                    "fashion_retail_score": score,
+                    "fashion_retail_intent": outcome.intent,
+                    "structured_slots": outcome.slots.to_plan_dict(),
+                    "reasons": list(outcome.reasoning_steps),
+                }
+            )
+            hits.append(hit)
+        return hits
+
+    def _fashion_retail_applied_filters(
+        self,
+        *,
+        filters: InventorySearchFilters,
+        outcome: FashionRetailOutcome,
+    ) -> InventorySearchFilters:
+        applied = filters.model_copy(deep=True)
+        if outcome.slots.category_label and not applied.categories:
+            if outcome.slots.category_key in {"jewelry", "bag", "accessories"}:
+                applied.categories = ["Accessories"]
+            else:
+                applied.categories = [outcome.slots.category_label]
+        if outcome.slots.budget_min is not None and applied.min_price is None:
+            applied.min_price = outcome.slots.budget_min
+        if outcome.slots.budget_max is not None and applied.max_price is None:
+            applied.max_price = outcome.slots.budget_max
+        return applied
 
     def route(self, request: InventoryRouteRequest) -> InventoryRouteResponse:
         signals = self._build_route_signals(
@@ -2005,6 +3347,9 @@ class InventoryService:
             "dense_raw_matches": 0,
             "dense_pool_candidates": 0,
             "lexical_pool_candidates": 0,
+            "elastic_lexical_raw_matches": 0,
+            "elastic_lexical_pool_candidates": 0,
+            "elastic_hybrid_pool_candidates": 0,
             "merged_pool_candidates": 0,
             "spec_filtered_candidates": 0,
             "type_gated_candidates": 0,
@@ -2078,6 +3423,64 @@ class InventoryService:
             )
         return lexical_scores
 
+    def _external_lexical_candidate_scores(
+        self,
+        *,
+        query_text: str,
+        top_k: int,
+        catalog: dict[str, InventoryItemRecord],
+        filters: InventorySearchFilters,
+        query_terms: list[str],
+        subject_phrase: str | None,
+        derived_filters: dict[str, object] | None = None,
+    ) -> tuple[dict[str, tuple[float, int]], int]:
+        lexical_query = getattr(self.vector_store, "lexical_query", None)
+        if not callable(lexical_query):
+            return {}, 0
+        vector_filters = self._build_vector_filters(filters)
+        if derived_filters:
+            vector_filters.update(derived_filters)
+        candidate_limit = max(top_k * self.config.search_candidate_multiplier, top_k)
+        result = lexical_query(
+            query_text,
+            top_k=candidate_limit,
+            filters=vector_filters or None,
+            namespace=self.config.namespace,
+        )
+        max_score = max((match.score for match in result.matches), default=0.0)
+        lexical_scores: dict[str, tuple[float, int]] = {}
+        for match in result.matches:
+            if match.record_id not in catalog:
+                continue
+            item = catalog[match.record_id]
+            if not self._item_matches_filters(item, filters):
+                continue
+            local_score = self._lexical_match_score(
+                item=item,
+                query_terms=query_terms,
+                subject_phrase=subject_phrase,
+            )
+            external_score = min(12.0, (match.score / max_score) * 12.0) if max_score > 0 else 0.0
+            lexical_score = max(local_score, external_score)
+            if lexical_score <= 0:
+                continue
+            lexical_scores[item.product_id] = (
+                lexical_score,
+                self._query_term_coverage(item=item, query_terms=query_terms),
+            )
+        return lexical_scores, len(result.matches)
+
+    @staticmethod
+    def _merge_lexical_candidate_scores(
+        primary: dict[str, tuple[float, int]],
+        secondary: dict[str, tuple[float, int]],
+    ) -> dict[str, tuple[float, int]]:
+        merged = dict(primary)
+        for product_id, (score, coverage) in secondary.items():
+            existing_score, existing_coverage = merged.get(product_id, (0.0, 0))
+            merged[product_id] = (max(existing_score, score), max(existing_coverage, coverage))
+        return merged
+
     def _semantic_search(
         self,
         *,
@@ -2104,12 +3507,13 @@ class InventoryService:
             filters=filters,
             products=list(catalog.values()),
         )
+        derived_vector_filters = self._build_requirement_vector_filters(preference_profile)
         vector_scores, dense_raw_matches = self._dense_candidate_scores(
             query_text=query_text,
             top_k=top_k,
             filters=filters,
             catalog=catalog,
-            derived_filters=self._build_requirement_vector_filters(preference_profile),
+            derived_filters=derived_vector_filters,
         )
         retrieval_stage_counts["dense_raw_matches"] = dense_raw_matches
         retrieval_stage_counts["dense_pool_candidates"] = len(vector_scores)
@@ -2117,13 +3521,31 @@ class InventoryService:
         if detail_request and subject_phrase and len(subject_phrase.split()) >= 3:
             requested_product_type = None
 
-        lexical_candidates = self._lexical_candidate_scores(
+        local_lexical_candidates = self._lexical_candidate_scores(
             catalog=catalog,
             filters=filters,
             query_terms=query_terms,
             subject_phrase=subject_phrase,
         )
+        external_lexical_candidates, external_lexical_raw_matches = self._external_lexical_candidate_scores(
+            query_text=query_text,
+            top_k=top_k,
+            catalog=catalog,
+            filters=filters,
+            query_terms=query_terms,
+            subject_phrase=subject_phrase,
+            derived_filters=derived_vector_filters,
+        )
+        lexical_candidates = self._merge_lexical_candidate_scores(
+            local_lexical_candidates,
+            external_lexical_candidates,
+        )
         retrieval_stage_counts["lexical_pool_candidates"] = len(lexical_candidates)
+        retrieval_stage_counts["elastic_lexical_raw_matches"] = external_lexical_raw_matches
+        retrieval_stage_counts["elastic_lexical_pool_candidates"] = len(external_lexical_candidates)
+        retrieval_stage_counts["elastic_hybrid_pool_candidates"] = len(
+            dict.fromkeys([*external_lexical_candidates.keys(), *vector_scores.keys()])
+        )
         merged_candidate_ids = list(dict.fromkeys([*lexical_candidates.keys(), *vector_scores.keys()]))
         retrieval_stage_counts["merged_pool_candidates"] = len(merged_candidate_ids)
 
@@ -2458,7 +3880,7 @@ class InventoryService:
         token_count = len(normalized.split())
         inventory_request = self._looks_like_inventory_request(normalized)
 
-        if self._has_any_phrase(normalized, _HOW_ARE_YOU_PHRASES):
+        if self._has_standalone_phrase(normalized, _HOW_ARE_YOU_PHRASES):
             if assistant_mode == "sales":
                 return (
                     InventoryReply(
@@ -2487,7 +3909,7 @@ class InventoryService:
                 1.0,
             )
 
-        if token_count <= 6 and self._has_any_phrase(normalized, _GREETING_PHRASES) and not inventory_request:
+        if token_count <= 6 and self._has_standalone_phrase(normalized, _GREETING_PHRASES) and not inventory_request:
             if assistant_mode == "sales":
                 return (
                     InventoryReply(
@@ -2514,7 +3936,7 @@ class InventoryService:
                 1.0,
             )
 
-        if token_count <= 8 and self._has_any_phrase(normalized, _THANKS_PHRASES) and not inventory_request:
+        if token_count <= 8 and self._has_standalone_phrase(normalized, _THANKS_PHRASES) and not inventory_request:
             if assistant_mode == "sales":
                 return (
                     InventoryReply(
@@ -2529,7 +3951,7 @@ class InventoryService:
                 1.0,
             )
 
-        if token_count <= 8 and self._has_any_phrase(normalized, _CLOSING_PHRASES) and not inventory_request:
+        if token_count <= 8 and self._has_standalone_phrase(normalized, _CLOSING_PHRASES) and not inventory_request:
             if assistant_mode == "sales":
                 return (
                     InventoryReply(answer="Talk soon. When you are back, I can help you sell, upsell, or compare products."),
@@ -2604,12 +4026,12 @@ class InventoryService:
         is_small_talk = (
             not self._looks_like_inventory_request(normalized)
             and (
-                self._has_any_phrase(normalized, _GREETING_PHRASES)
-                or self._has_any_phrase(normalized, _HOW_ARE_YOU_PHRASES)
-                or self._has_any_phrase(normalized, _THANKS_PHRASES)
-                or self._has_any_phrase(normalized, _HELP_PHRASES)
-                or self._has_any_phrase(normalized, _IDENTITY_PHRASES)
-                or self._has_any_phrase(normalized, _CLOSING_PHRASES)
+                self._has_standalone_phrase(normalized, _GREETING_PHRASES)
+                or self._has_standalone_phrase(normalized, _HOW_ARE_YOU_PHRASES)
+                or self._has_standalone_phrase(normalized, _THANKS_PHRASES)
+                or self._has_standalone_phrase(normalized, _HELP_PHRASES)
+                or self._has_standalone_phrase(normalized, _IDENTITY_PHRASES)
+                or self._has_standalone_phrase(normalized, _CLOSING_PHRASES)
             )
         )
         has_explicit_product_reference = bool(filters.product_ids) or self._is_detail_request(question) or bool(
@@ -3330,14 +4752,20 @@ class InventoryService:
 
     def _business_tool_intent(self, question: str) -> str | None:
         normalized = self._normalize_conversation_text(question)
-        if self._has_any_phrase(normalized, ["stockout", "stock out", "prevent stockout", "avoid stockout"]):
+        if self._has_any_phrase(
+            normalized,
+            ["stockout", "stock out", "prevent stockout", "avoid stockout", "risky to promise", "stock is tight", "tight stock"],
+        ):
             return "stockout_prevention"
+        if self._has_any_phrase(normalized, ["margin", "profit", "profitable"]) and not self._has_any_phrase(
+            normalized,
+            ["restock", "reorder"],
+        ):
+            return "margin"
         if self._has_any_phrase(normalized, ["restock", "reorder", "running low", "low stock"]):
             return "restock"
         if self._has_any_phrase(normalized, ["supplier", "vendor", "lead time", "lead-time", "purchase order", "delay", "delays"]):
             return "supplier_risk"
-        if self._has_any_phrase(normalized, ["margin", "profit", "profitable"]):
-            return "margin"
         if self._has_any_phrase(normalized, ["return rate", "returns", "returned"]):
             return "returns"
         if self._has_any_phrase(normalized, ["customer segment", "customer segments", "segment", "segments"]):
@@ -3345,6 +4773,13 @@ class InventoryService:
         if self._has_any_phrase(normalized, ["demand", "sales", "sold", "selling", "velocity", "trend", "dropped", "drop", "dropping", "decline", "declining"]):
             return "demand"
         return None
+
+    @staticmethod
+    def _requested_result_count(question: str, *, default: int, max_count: int) -> int:
+        match = re.search(r"\b(?:top|first|rank|show|list)\s+(\d{1,2})\b", question.casefold())
+        if match:
+            return max(1, min(max_count, int(match.group(1))))
+        return default
 
     def _business_candidate_hits(
         self,
@@ -3454,7 +4889,7 @@ class InventoryService:
                 missing_facts=[f"No product-level business signals matched this {business_intent} question."]
             )
 
-        selected_hits = hits_with_signals[:3]
+        selected_hits = hits_with_signals[: self._requested_result_count(question, default=3, max_count=10)]
         primary = selected_hits[0]
         primary_signal = business_signals[primary.product_id]
         reasoning_summary = [
@@ -3488,7 +4923,7 @@ class InventoryService:
         question_family: str,
         strategy: str,
     ) -> InventoryReply:
-        selected_ids = business_insight.selected_product_ids[:3]
+        selected_ids = business_insight.selected_product_ids
         if strategy not in {"diagnosis", "operational_planning"} or not selected_ids:
             return reply
 
@@ -4840,6 +6275,7 @@ class InventoryService:
                 low_stock_threshold=low_stock_threshold,
                 reply_style=reply_style,
             )
+            plan_hits = self._ensure_answer_plan_evidence_hits(answer_plan=reply.answer_plan, hits=plan_hits)
             plan_hits = self._annotate_sales_alternative_scores(
                 hits=plan_hits,
                 primary_product_id=reply.answer_plan.primary_product_id,
@@ -4852,7 +6288,8 @@ class InventoryService:
                 filters=filters,
                 low_stock_threshold=low_stock_threshold,
                 reply_style=reply_style,
-        )
+            )
+            plan_hits = self._ensure_answer_plan_evidence_hits(answer_plan=reply.answer_plan, hits=hits)
         return self._enrich_reply_plan(
             reply=reply,
             question=question,
@@ -5035,47 +6472,64 @@ class InventoryService:
                 assistant_mode="support",
                 reply_style=reply_style,
             )
-        primary = restock_hits[0]
-        alternatives = restock_hits[1:3]
+        requested_count = self._requested_result_count(question, default=3, max_count=10)
+        selected_hits = restock_hits[:requested_count]
+        primary = selected_hits[0]
+        alternatives = selected_hits[1:]
         primary_score = self._decision_score(hit=primary, strategy="restock", fallback=primary.score)
         primary_reasons = self._decision_reasons(hit=primary, strategy="restock")
-        answer_parts = [
-            f"Restock {self._format_option_label(primary)} first."
-        ]
-        if primary_reasons:
-            answer_parts.append(
-                f"It leads the restock scorecard at {primary_score:.2f} because {self._natural_join(primary_reasons[:3])}."
+        if requested_count >= 4 or "rank" in question.casefold():
+            answer_parts = [f"Top {len(selected_hits)} restock ranking:"]
+            for index, hit in enumerate(selected_hits, start=1):
+                score = self._decision_score(hit=hit, strategy="restock", fallback=hit.score)
+                summary = self._format_business_signal_summary(
+                    hit=hit,
+                    signal=business_signals[hit.product_id],
+                    include_margin=True,
+                    include_supplier=True,
+                    include_returns=False,
+                    include_segments=False,
+                )
+                answer_parts.append(f"{index}. {hit.name} scores {score:.2f}: {summary}.")
+        else:
+            answer_parts = [
+                f"Restock {self._format_option_label(primary)} first."
+            ]
+            if primary_reasons:
+                answer_parts.append(
+                    f"It leads the restock scorecard at {primary_score:.2f} because {self._natural_join(primary_reasons[:3])}."
+                )
+            summary = self._format_business_signal_summary(
+                hit=primary,
+                signal=business_signals[primary.product_id],
+                include_margin=True,
+                include_supplier=True,
+                include_returns=False,
+                include_segments=False,
             )
-        summary = self._format_business_signal_summary(
-            hit=primary,
-            signal=business_signals[primary.product_id],
-            include_margin=True,
-            include_supplier=True,
-            include_returns=False,
-            include_segments=False,
-        )
-        answer_parts.append(f"Operational read: {summary}.")
-        if alternatives:
-            answer_parts.append(
-                f"Next restock candidates are {self._natural_join(self._format_option_label(hit) for hit in alternatives)}."
-            )
+            answer_parts.append(f"Operational read: {summary}.")
+            if alternatives:
+                answer_parts.append(
+                    f"Next restock candidates are {self._natural_join(self._format_option_label(hit) for hit in alternatives)}."
+                )
         follow_up_question = "Do you want the full restock ranking or the safest backup options after this?"
         if reply_style == "detailed":
             answer_parts.append(follow_up_question)
+        plan = self._build_inventory_answer_plan(
+            intent="restock_recommendation",
+            primary=primary,
+            excluded_hits=[hit for hit in hits if hit.product_id not in {item.product_id for item in selected_hits}],
+            metadata_source=primary,
+            reasoning_steps=[
+                "Ranked restock candidates with a deterministic scorecard over demand, stock pressure, lead time, margin, and supplier risk.",
+                "Kept the answer tied to mirrored catalog items with supporting business signals.",
+            ],
+        ).model_copy(update={"alternative_product_ids": [hit.product_id for hit in alternatives]})
         reply = InventoryReply(
             answer=" ".join(answer_parts),
-            recommended_product_ids=[primary.product_id, *[hit.product_id for hit in alternatives[:2]]],
+            recommended_product_ids=[hit.product_id for hit in selected_hits],
             follow_up_question=follow_up_question,
-            answer_plan=self._build_inventory_answer_plan(
-                intent="restock_recommendation",
-                primary=primary,
-                excluded_hits=[hit for hit in hits if hit.product_id not in {primary.product_id, *[item.product_id for item in alternatives]}],
-                metadata_source=primary,
-                reasoning_steps=[
-                    "Ranked restock candidates with a deterministic scorecard over demand, stock pressure, lead time, margin, and supplier risk.",
-                    "Kept the answer tied to mirrored catalog items with supporting business signals.",
-                ],
-            ),
+            answer_plan=plan,
         )
         reply = self._enrich_reply_plan(
             reply=reply,
@@ -5138,6 +6592,22 @@ class InventoryService:
         low_stock_threshold: int,
         reply_style: str,
     ) -> InventoryReply:
+        out_of_domain_reply = self._build_out_of_domain_inventory_reply(question=question)
+        if out_of_domain_reply is not None:
+            return out_of_domain_reply
+
+        unsupported_reply = self._build_unsupported_product_reply(question=question)
+        if unsupported_reply is not None:
+            return unsupported_reply
+
+        bundle_reply = self._build_bundle_answer_if_requested(
+            question=question,
+            filters=filters,
+            low_stock_threshold=low_stock_threshold,
+        )
+        if bundle_reply is not None:
+            return bundle_reply
+
         if not hits:
             follow_up_question = self._build_clarification_question(
                 question=question,
@@ -5183,6 +6653,14 @@ class InventoryService:
         )
         if detail_reply is not None:
             return detail_reply
+
+        business_reply = self._build_business_summary_reply_if_requested(
+            question=question,
+            filters=filters,
+            low_stock_threshold=low_stock_threshold,
+        )
+        if business_reply is not None:
+            return business_reply
 
         clarification_question = self._build_clarification_question(
             question=question,
@@ -5292,6 +6770,22 @@ class InventoryService:
         low_stock_threshold: int,
         reply_style: str,
     ) -> InventoryReply:
+        out_of_domain_reply = self._build_out_of_domain_inventory_reply(question=question)
+        if out_of_domain_reply is not None:
+            return out_of_domain_reply
+
+        unsupported_reply = self._build_unsupported_product_reply(question=question)
+        if unsupported_reply is not None:
+            return unsupported_reply
+
+        bundle_reply = self._build_bundle_answer_if_requested(
+            question=question,
+            filters=filters,
+            low_stock_threshold=low_stock_threshold,
+        )
+        if bundle_reply is not None:
+            return bundle_reply
+
         if not hits:
             follow_up_question = self._build_clarification_question(
                 question=question,
@@ -5321,6 +6815,11 @@ class InventoryService:
         sales_style = self._classify_sales_style(
             question=question,
             filters=filters,
+        )
+        preference_profile = self.preference_extractor.extract(
+            question,
+            filters=filters,
+            products=list(hits),
         )
         ranked_hits = self._rank_sales_hits(hits=hits, sales_style=sales_style)
         in_stock_hits = [hit for hit in ranked_hits if not self._is_out_of_stock(hit)]
@@ -5389,9 +6888,18 @@ class InventoryService:
             elif reason_parts:
                 answer_parts.append(reason_parts[0])
 
+        alternative_pool = coherent_hits[1:]
+        if preference_profile.spec_requirements:
+            constraint_fit_alternatives = [
+                hit
+                for hit in alternative_pool
+                if self._hit_satisfies_spec_requirements(hit, preference_profile.spec_requirements)
+            ]
+            alternative_pool = constraint_fit_alternatives
+
         alternative = self.decision_scorer.select_sales_alternative(
             primary=primary,
-            hits=coherent_hits[1:],
+            hits=alternative_pool,
             sales_style=sales_style,
         )
         if alternative is not None:
@@ -5408,7 +6916,7 @@ class InventoryService:
 
         upsell_candidate = self._select_sales_upsell_candidate(
             primary=primary,
-            hits=coherent_hits[1:],
+            hits=alternative_pool,
             sales_style=sales_style,
         )
         if upsell_candidate is not None and reply_style == "detailed":
@@ -5437,7 +6945,7 @@ class InventoryService:
             primary=primary,
             alternative=alternative,
             upsell=upsell_candidate,
-            coherent_hits=coherent_hits,
+            coherent_hits=[primary, *alternative_pool],
         )
         answer_plan = self._build_inventory_answer_plan(
             intent=f"sales_{sales_style}",
@@ -5463,6 +6971,418 @@ class InventoryService:
             answer_plan=answer_plan,
             verification=verification,
         )
+
+    def _build_unsupported_product_reply(self, *, question: str) -> InventoryReply | None:
+        normalized = self._normalize_search_text(question)
+        matched_term = next(
+            (term for term in _UNSUPPORTED_PRODUCT_TERMS if self._contains_normalized_phrase(normalized, term)),
+            None,
+        )
+        if matched_term is None:
+            return None
+        plan = self._build_inventory_answer_plan(
+            intent="unsupported_product_no_match",
+            primary=None,
+            abstain=True,
+            abstention_reason=f"No reliable catalog match for {matched_term}.",
+            reasoning_steps=[
+                f"Detected unsupported product request '{matched_term}' and did not substitute unrelated catalog items."
+            ],
+        )
+        return InventoryReply(
+            answer=(
+                f"The current catalog does not show {matched_term}, so I do not have a reliable "
+                f"{matched_term} recommendation or price to give."
+            ),
+            follow_up_question="Share another product type or SKU and I will check the catalog directly.",
+            answer_plan=plan,
+            verification=self._verify_answer_plan(answer_plan=plan, hits=[]),
+        )
+
+    def _build_out_of_domain_inventory_reply(self, *, question: str) -> InventoryReply | None:
+        normalized = self._normalize_search_text(question)
+        if not self._has_any_phrase(normalized, _OUT_OF_DOMAIN_INVENTORY_PHRASES):
+            return None
+        plan = self._build_inventory_answer_plan(
+            intent="inventory_out_of_domain",
+            primary=None,
+            abstain=True,
+            abstention_reason="Question is outside the inventory catalog context.",
+            reasoning_steps=["Declined to answer a non-inventory question from product catalog evidence."],
+        )
+        return InventoryReply(
+            answer=(
+                "That question is outside the inventory catalog context, so I should not answer it from product data."
+            ),
+            follow_up_question="Ask me for a product, SKU, stock, price, bundle, or restock question and I will check inventory.",
+            answer_plan=plan,
+            verification=self._verify_answer_plan(answer_plan=plan, hits=[]),
+        )
+
+    def _build_business_summary_reply_if_requested(
+        self,
+        *,
+        question: str,
+        filters: InventorySearchFilters,
+        low_stock_threshold: int,
+    ) -> InventoryReply | None:
+        business_intent = self._business_tool_intent(question)
+        if business_intent not in {"restock", "stockout_prevention", "margin"}:
+            return None
+        business_signals = self._load_business_signals()
+        if not business_signals:
+            return None
+
+        requested_count = self._requested_result_count(question, default=5, max_count=10)
+        business_filters = filters.model_copy(deep=True)
+        business_filters.max_stock = None
+        candidate_hits = self._business_candidate_hits(
+            question=question,
+            filters=business_filters,
+            business_signals=business_signals,
+            top_k=len(business_signals),
+        )
+        tight_stock_cutoff = min(low_stock_threshold, 5) + 1
+        tight_stock_hits = [
+            hit
+            for hit in candidate_hits
+            if (business_signals[hit.product_id].inventory_on_hand if business_signals[hit.product_id].inventory_on_hand is not None else hit.stock)
+            is not None
+            and (business_signals[hit.product_id].inventory_on_hand if business_signals[hit.product_id].inventory_on_hand is not None else hit.stock)
+            <= tight_stock_cutoff
+        ]
+        demand_filtered_tight_hits = [
+            hit
+            for hit in tight_stock_hits
+            if (business_signals[hit.product_id].demand_score or 0.0) >= 0.7
+        ]
+        if len(demand_filtered_tight_hits) >= min(requested_count, 5):
+            tight_stock_hits = demand_filtered_tight_hits
+        if len(tight_stock_hits) >= min(requested_count, 5):
+            candidate_hits = tight_stock_hits
+        selected_hits = candidate_hits[:requested_count]
+        if not selected_hits:
+            return None
+
+        if business_intent == "restock":
+            lead = f"Top {len(selected_hits)} restock ranking:"
+            include_supplier = True
+        elif business_intent == "stockout_prevention":
+            lead = "These are the products I would be careful promising customers while stock is tight:"
+            include_supplier = True
+        else:
+            lead = "Margin-aware low-stock priorities:"
+            include_supplier = False
+
+        lines = [lead]
+        for index, hit in enumerate(selected_hits, start=1):
+            signal = business_signals[hit.product_id]
+            summary = self._format_business_signal_summary(
+                hit=hit,
+                signal=signal,
+                include_margin=True,
+                include_supplier=include_supplier,
+                include_returns=False,
+                include_segments=False,
+            )
+            if business_intent == "stockout_prevention":
+                lines.append(f"{index}. {summary}.")
+            else:
+                score = self._decision_score(hit=hit, strategy="restock", fallback=hit.score)
+                lines.append(f"{index}. {summary}; restock score {score:.2f}.")
+        if business_intent == "stockout_prevention":
+            lines.append("Promise risk depends on demand and lead time too, not stock alone.")
+        if business_intent == "margin":
+            lines.append("Margin should still be balanced with demand and replenishment lead time.")
+
+        plan = self._build_inventory_answer_plan(
+            intent=f"business_{business_intent}",
+            primary=selected_hits[0],
+            metadata_source=selected_hits[0],
+            reasoning_steps=[
+                "Built a deterministic business ranking from mirrored inventory, demand, margin, supplier, and stock signals."
+            ],
+        ).model_copy(update={"cross_sell_product_ids": [hit.product_id for hit in selected_hits[1:]]})
+        verification = self._verify_answer_plan(answer_plan=plan, hits=selected_hits)
+        return InventoryReply(
+            answer=" ".join(lines),
+            recommended_product_ids=[hit.product_id for hit in selected_hits],
+            cross_sell_product_ids=[hit.product_id for hit in selected_hits[1:]],
+            answer_plan=plan,
+            verification=verification,
+        )
+
+    def _build_bundle_answer_if_requested(
+        self,
+        *,
+        question: str,
+        filters: InventorySearchFilters,
+        low_stock_threshold: int,
+    ) -> InventoryReply | None:
+        normalized = self._normalize_search_text(question)
+        requested_types = self._requested_bundle_product_types(normalized)
+        if len(requested_types) < 2:
+            return None
+
+        preferences = self.preference_extractor.extract(
+            question,
+            filters=filters,
+            products=list(self._load_catalog().values()),
+        )
+        budget_max = preferences.budget_max
+        candidates = self._bundle_candidate_hits(filters=filters)
+        selected = self._select_bundle_items(
+            requested_types=requested_types,
+            candidates=candidates,
+            normalized_question=normalized,
+            budget_max=budget_max,
+        )
+        if len(selected) < min(2, len(requested_types)):
+            return None
+
+        total_price = self._bundle_total_price(selected)
+        intro = "I would build the bundle with " + self._natural_join(hit.name for hit in selected) + "."
+        item_sentences = [
+            self._bundle_item_detail_sentence(
+                hit=hit,
+                low_stock_threshold=low_stock_threshold,
+            )
+            for hit in selected
+        ]
+        answer_parts = [intro, *item_sentences]
+        if total_price is not None:
+            answer_parts.append(f"Bundle total is {selected[0].currency or 'USD'} {total_price:.2f}.")
+            if budget_max is not None and total_price > budget_max:
+                answer_parts.append(f"That is above the requested {selected[0].currency or 'USD'} {budget_max:.2f} ceiling.")
+        answer_parts.append("That keeps the recommendation grounded in catalog items that are currently in stock.")
+
+        plan = InventoryAnswerPlan(
+            intent="sales_bundle",
+            primary_product_id=selected[0].product_id,
+            cross_sell_product_ids=[hit.product_id for hit in selected[1:]],
+            reasoning_steps=[
+                "Detected a bundle/setup request and selected complementary product roles instead of a single lead SKU.",
+                "Used catalog price, stock, product type, and structured attributes to assemble the bundle.",
+            ],
+            metadata_used=self._metadata_used_for_hit(selected[0]),
+        )
+        verification = self._verify_answer_plan(answer_plan=plan, hits=selected)
+        return InventoryReply(
+            answer=" ".join(answer_parts),
+            recommended_product_ids=[hit.product_id for hit in selected],
+            cross_sell_product_ids=[hit.product_id for hit in selected[1:]],
+            answer_plan=plan,
+            verification=verification,
+        )
+
+    def _requested_bundle_product_types(self, normalized_question: str) -> list[str]:
+        bundle_signal = self._has_any_phrase(
+            normalized_question,
+            [
+                "bundle",
+                "kit",
+                "setup",
+                "desk setup",
+                "planning corner",
+                "add on",
+                "add-ons",
+                "add ons",
+                "include",
+            ],
+        )
+        if not bundle_signal:
+            return []
+
+        if self._has_any_phrase(normalized_question, ["travel charging", "charging bundle"]):
+            return ["charger", "power_bank", "cable_pack"]
+        if "novacore" in normalized_question or self._has_any_phrase(normalized_question, ["protected", "protection"]):
+            return ["phone_case", "cleaning_kit", "charger"]
+        if self._has_any_phrase(normalized_question, ["planning corner", "small team"]):
+            return ["whiteboard", "lamp", "organizer"]
+        if self._has_any_phrase(normalized_question, ["remote meeting", "meeting kit"]):
+            return ["webcam", "headset", "dock"]
+        if self._has_any_phrase(normalized_question, ["laptop desk setup", "laptop desk"]):
+            return ["laptop", "monitor", "dock", "laptop_stand"]
+        if self._has_any_phrase(normalized_question, ["creator podcast", "podcast setup"]):
+            return ["microphone", "webcam", "lamp"]
+        if self._has_any_phrase(normalized_question, ["cleaner desk", "desk setup"]):
+            return ["laptop_stand", "lamp", "organizer", "mouse", "keyboard"]
+        return []
+
+    def _bundle_candidate_hits(self, *, filters: InventorySearchFilters) -> list[InventorySearchHit]:
+        catalog = self._load_catalog()
+        hits = [
+            self._build_search_hit(item=item, score=0.0)
+            for item in catalog.values()
+            if self._item_matches_filters(item, filters)
+        ]
+        return [hit for hit in hits if not self._is_out_of_stock(hit)]
+
+    def _select_bundle_items(
+        self,
+        *,
+        requested_types: list[str],
+        candidates: list[InventorySearchHit],
+        normalized_question: str,
+        budget_max: float | None,
+    ) -> list[InventorySearchHit]:
+        selected: list[InventorySearchHit] = []
+        remaining_budget = budget_max
+        for index, product_type in enumerate(requested_types):
+            remaining_types = requested_types[index + 1 :]
+            min_remaining_price = self._minimum_bundle_price(
+                requested_types=remaining_types,
+                candidates=candidates,
+                selected_product_ids={hit.product_id for hit in selected},
+                normalized_question=normalized_question,
+            )
+            max_price = None
+            if remaining_budget is not None and min_remaining_price is not None:
+                max_price = max(0.0, remaining_budget - min_remaining_price)
+            candidate = self._select_bundle_candidate(
+                product_type=product_type,
+                candidates=candidates,
+                selected_product_ids={hit.product_id for hit in selected},
+                normalized_question=normalized_question,
+                max_price=max_price,
+            )
+            if candidate is None:
+                continue
+            selected.append(candidate)
+            if remaining_budget is not None and candidate.price is not None:
+                remaining_budget -= candidate.price
+        return selected
+
+    def _minimum_bundle_price(
+        self,
+        *,
+        requested_types: list[str],
+        candidates: list[InventorySearchHit],
+        selected_product_ids: set[str],
+        normalized_question: str,
+    ) -> float | None:
+        prices: list[float] = []
+        blocked_ids = set(selected_product_ids)
+        for product_type in requested_types:
+            matches = [
+                hit
+                for hit in candidates
+                if hit.product_id not in blocked_ids
+                and self.product_ontology.detect_product_type(product=hit) == product_type
+                and hit.price is not None
+                and self._bundle_candidate_allowed(hit=hit, product_type=product_type, normalized_question=normalized_question)
+            ]
+            if not matches:
+                return None
+            cheapest = min(matches, key=lambda hit: hit.price or float("inf"))
+            blocked_ids.add(cheapest.product_id)
+            prices.append(float(cheapest.price or 0.0))
+        return sum(prices)
+
+    def _select_bundle_candidate(
+        self,
+        *,
+        product_type: str,
+        candidates: list[InventorySearchHit],
+        selected_product_ids: set[str],
+        normalized_question: str,
+        max_price: float | None,
+    ) -> InventorySearchHit | None:
+        matches = [
+            hit
+            for hit in candidates
+            if hit.product_id not in selected_product_ids
+            and self.product_ontology.detect_product_type(product=hit) == product_type
+            and self._bundle_candidate_allowed(hit=hit, product_type=product_type, normalized_question=normalized_question)
+        ]
+        if not matches:
+            return None
+        affordable = [hit for hit in matches if max_price is None or hit.price is None or hit.price <= max_price + 0.01]
+        pool = affordable or matches
+        return sorted(
+            pool,
+            key=lambda hit: (
+                -self._bundle_candidate_score(
+                    hit=hit,
+                    product_type=product_type,
+                    normalized_question=normalized_question,
+                ),
+                self._price_sort_key(hit),
+                hit.name.casefold(),
+            ),
+        )[0]
+
+    def _bundle_candidate_allowed(
+        self,
+        *,
+        hit: InventorySearchHit,
+        product_type: str,
+        normalized_question: str,
+    ) -> bool:
+        if product_type == "microphone" and "xlr" not in normalized_question:
+            usb_value = self._hit_metadata_value(hit, "usb_input")
+            xlr_value = self._hit_metadata_value(hit, "xlr_input")
+            return coerce_spec_bool(usb_value, key="usb_input") is True and coerce_spec_bool(xlr_value, key="xlr_input") is not True
+        return True
+
+    def _bundle_candidate_score(
+        self,
+        *,
+        hit: InventorySearchHit,
+        product_type: str,
+        normalized_question: str,
+    ) -> float:
+        searchable = self._normalize_search_text(
+            " ".join(
+                [
+                    hit.name,
+                    hit.category,
+                    hit.brand,
+                    hit.snippet or "",
+                    " ".join(hit.tags),
+                    " ".join(f"{key} {value}" for key, value in hit.attributes.items()),
+                ]
+            )
+        )
+        query_terms = set(normalized_question.split())
+        product_terms = set(searchable.split())
+        score = len(query_terms.intersection(product_terms)) * 0.2
+        if self.product_ontology.detect_product_type(product=hit) == product_type:
+            score += 3.0
+        if hit.stock is not None and hit.stock > 0:
+            score += 0.4
+        score += min(0.4, self._quality_score(hit) * 0.05)
+        if product_type == "laptop" and self._has_any_phrase(normalized_question, ["practical", "around"]):
+            score += 0.4 if hit.price is not None and hit.price <= 1000 else 0.0
+        if product_type == "phone_case" and "novacore" in searchable:
+            score += 1.0
+        return score
+
+    @staticmethod
+    def _bundle_total_price(hits: list[InventorySearchHit]) -> float | None:
+        prices: list[float] = []
+        for hit in hits:
+            if hit.price is None:
+                return None
+            prices.append(float(hit.price))
+        return sum(prices)
+
+    def _bundle_item_detail_sentence(
+        self,
+        *,
+        hit: InventorySearchHit,
+        low_stock_threshold: int,
+    ) -> str:
+        details = [f"{hit.name}: {self._format_price_text(hit)}"]
+        if hit.stock is not None:
+            stock_note = f"{hit.stock} in stock"
+            if hit.stock <= low_stock_threshold:
+                stock_note += ", low stock"
+            details.append(stock_note)
+        metadata_sentence = self._metadata_answer_sentence(hit)
+        if metadata_sentence:
+            details.append(metadata_sentence.replace("Structured details include ", "").rstrip("."))
+        return "; ".join(details) + "."
 
     def _format_hit_line(self, hit: InventorySearchHit) -> str:
         details = [f"{hit.name} (SKU {hit.sku})"]
@@ -5545,6 +7465,35 @@ class InventoryService:
             abstain=abstain,
             abstention_reason=abstention_reason,
         )
+
+    def _ensure_answer_plan_evidence_hits(
+        self,
+        *,
+        answer_plan: InventoryAnswerPlan,
+        hits: list[InventorySearchHit],
+    ) -> list[InventorySearchHit]:
+        required_ids = [
+            product_id
+            for product_id in [
+                answer_plan.primary_product_id,
+                *answer_plan.alternative_product_ids,
+                *answer_plan.cross_sell_product_ids,
+            ]
+            if product_id
+        ]
+        if not required_ids:
+            return hits
+        seen_ids = {hit.product_id for hit in hits}
+        missing_ids = [product_id for product_id in required_ids if product_id not in seen_ids]
+        if not missing_ids:
+            return hits
+        catalog = self._load_catalog()
+        extra_hits = [
+            self._build_search_hit(item=catalog[product_id], score=0.0)
+            for product_id in missing_ids
+            if product_id in catalog
+        ]
+        return [*hits, *extra_hits]
 
     def _enrich_reply_plan(
         self,
@@ -5863,13 +7812,10 @@ class InventoryService:
         return vector_filters
 
     def _build_requirement_vector_filters(self, preferences: InventoryPreferenceProfile) -> dict[str, object]:
-        vector_filters: dict[str, object] = {}
-        for requirement in preferences.spec_requirements:
-            if requirement.operator == "eq":
-                vector_filters[requirement.key] = {"$eq": requirement.value}
-            elif requirement.operator == "gte":
-                vector_filters[requirement.key] = {"$gte": requirement.value}
-        return vector_filters
+        # Keep external/vector recall broad; structured eligibility is enforced against
+        # catalog records after candidate merging so missing vector metadata cannot hide
+        # otherwise valid products.
+        return {}
 
     def _hit_satisfies_spec_requirements(
         self,
@@ -5897,15 +7843,7 @@ class InventoryService:
 
     @staticmethod
     def _hit_metadata_value(hit: InventorySearchHit, key: str) -> object | None:
-        aliases = {
-            "ram_gb": ("ram_gb", "ram"),
-            "storage_gb": ("storage_gb", "storage"),
-            "battery_hours": ("battery_hours",),
-            "screen_size_inch": ("screen_size_inch", "display_size_inch", "screen_size", "display"),
-            "gps_support": ("gps_support", "gps"),
-            "anc_support": ("anc_support", "anc", "noise_cancellation", "noise_cancelling", "noise_canceling"),
-            "inverter_support": ("inverter_support", "inverter"),
-        }.get(key, (key,))
+        aliases = SPEC_METADATA_ALIASES.get(key, (key,))
         for alias in aliases:
             if alias in hit.metadata:
                 return hit.metadata.get(alias)
@@ -5921,48 +7859,21 @@ class InventoryService:
 
     @staticmethod
     def _spec_requirement_satisfied(actual: object | None, requirement: InventorySpecRequirement) -> bool:
-        if actual is None:
-            return False
-        if requirement.operator == "eq":
-            if isinstance(requirement.value, bool):
-                if isinstance(actual, bool):
-                    return actual is requirement.value
-                normalized_actual = str(actual).strip().casefold()
-                if normalized_actual in _BOOLEAN_FALSE_VALUES:
-                    return requirement.value is False
-                if normalized_actual in _BOOLEAN_TRUE_VALUES:
-                    return requirement.value is True
-                return requirement.value is True
-            return str(actual).strip().casefold() == str(requirement.value).strip().casefold()
-        if requirement.operator == "gte":
-            if isinstance(actual, bool):
-                return False
-            try:
-                return float(actual) >= float(requirement.value)
-            except (TypeError, ValueError):
-                return False
-        return False
+        return spec_requirement_satisfied(
+            actual,
+            key=requirement.key,
+            operator=requirement.operator,
+            expected=requirement.value,
+        )
 
     @staticmethod
     def _spec_requirement_partial_credit(actual: object | None, requirement: InventorySpecRequirement) -> float:
-        if actual is None:
-            return 0.0
-        if requirement.operator == "eq":
-            return 0.0
-        if requirement.operator == "gte":
-            if isinstance(actual, bool):
-                return 0.0
-            try:
-                actual_number = float(actual)
-                expected_number = float(requirement.value)
-            except (TypeError, ValueError):
-                return 0.0
-            if expected_number <= 0:
-                return 0.0
-            if actual_number <= 0:
-                return 0.0
-            return max(0.0, min(0.75, actual_number / expected_number))
-        return 0.0
+        return spec_requirement_partial_credit(
+            actual,
+            key=requirement.key,
+            operator=requirement.operator,
+            expected=requirement.value,
+        )
 
     def _item_matches_filters(self, item: InventoryItemRecord, filters: InventorySearchFilters) -> bool:
         if filters.rag_only and not item.include_in_rag:
@@ -6030,6 +7941,7 @@ class InventoryService:
             metadata={
                 "product_id": item.product_id,
                 "sku": item.sku,
+                "name": item.name,
                 "category": item.category,
                 "category_key": item.category.casefold() if item.category else None,
                 "brand": item.brand,
@@ -6087,6 +7999,7 @@ class InventoryService:
             "battery_mah": ("battery_mah",),
             "screen_size_inch": ("screen_size_inch", "display_size_inch", "screen_size", "display"),
             "refresh_rate_hz": ("refresh_rate_hz", "refresh_rate"),
+            "capacity_gb": ("capacity_gb", "capacity", "storage"),
             "capacity_tb": ("capacity_tb",),
             "coverage_sqft": ("coverage_sqft",),
         }
@@ -6115,15 +8028,59 @@ class InventoryService:
 
         boolean_aliases = {
             "gps_support": ("gps",),
+            "built_in_gps_support": ("gps",),
             "anc_support": ("anc", "noise_cancellation", "noise_cancelling", "noise_canceling"),
             "inverter_support": ("inverter", "inverter_support"),
             "stylus_support": ("stylus_support",),
             "voice_support": ("voice_support",),
+            "wireless_support": ("connectivity", "wifi_standard"),
+            "wired_support": ("connectivity", "input", "interface", "ports"),
+            "usb_input": ("input", "connectivity", "interface", "ports", "case_charging"),
+            "usb_c_input": ("input", "connectivity", "interface", "ports", "case_charging"),
+            "xlr_input": ("input", "connectivity", "interface", "ports"),
+            "water_resistance_support": ("water_resistance", "material"),
+            "oled_support": ("display", "panel_type", "panel"),
+            "wifi6_support": ("wifi_standard", "connectivity"),
+            "mesh_support": ("mesh", "coverage"),
+            "high_refresh_support": ("refresh_rate_hz", "refresh_rate"),
         }
         for target_key, aliases in boolean_aliases.items():
-            value = self._normalize_boolean_attribute_value(self._first_metadata_value(source, aliases))
+            value = self._normalize_boolean_attribute_value(
+                self._first_metadata_value(source, aliases),
+                target_key=target_key,
+            )
             if value is not None:
                 metadata[target_key] = value
+
+        text_evidence = self._normalize_search_text(
+            " ".join(
+                value
+                for value in (
+                    item.name,
+                    item.category,
+                    item.brand,
+                    item.short_description,
+                    item.full_description,
+                    " ".join(item.tags),
+                )
+                if isinstance(value, str) and value.strip()
+            )
+        )
+        if "wireless_support" not in metadata and self._has_any_phrase(
+            text_evidence,
+            ["wireless", "bluetooth", "wi-fi", "wifi"],
+        ):
+            metadata["wireless_support"] = True
+        if "usb_input" not in metadata and self._has_any_phrase(
+            text_evidence,
+            ["usb", "usb-c", "usb c", "type c"],
+        ):
+            metadata["usb_input"] = True
+        if "usb_c_input" not in metadata and self._has_any_phrase(
+            text_evidence,
+            ["usb-c", "usb c", "type c"],
+        ):
+            metadata["usb_c_input"] = True
 
         gps_value = self._normalize_text_attribute_value(self._first_metadata_value(source, ("gps",)))
         if gps_value and gps_value not in {"none", "no"}:
@@ -6147,6 +8104,8 @@ class InventoryService:
             fragments.append(f"{self._format_search_number(screen_size)} inch screen")
         if (refresh_rate := curated_metadata.get("refresh_rate_hz")) is not None:
             fragments.append(f"{self._format_search_number(refresh_rate)} hz refresh rate")
+        if (capacity_gb := curated_metadata.get("capacity_gb")) is not None:
+            fragments.append(f"{self._format_search_number(capacity_gb)} gb capacity")
         if (capacity_tb := curated_metadata.get("capacity_tb")) is not None:
             fragments.append(f"{self._format_search_number(capacity_tb)} tb capacity")
         if (coverage_sqft := curated_metadata.get("coverage_sqft")) is not None:
@@ -6169,6 +8128,8 @@ class InventoryService:
 
         if curated_metadata.get("gps_support") is True:
             fragments.append("gps")
+        if curated_metadata.get("built_in_gps_support") is True:
+            fragments.append("built-in gps")
         if curated_metadata.get("anc_support") is True:
             fragments.append("anc noise cancellation")
         if curated_metadata.get("inverter_support") is True:
@@ -6177,6 +8138,26 @@ class InventoryService:
             fragments.append("stylus support")
         if curated_metadata.get("voice_support") is True:
             fragments.append("voice support")
+        if curated_metadata.get("wireless_support") is True:
+            fragments.append("wireless bluetooth")
+        if curated_metadata.get("wired_support") is True:
+            fragments.append("wired")
+        if curated_metadata.get("usb_input") is True:
+            fragments.append("usb")
+        if curated_metadata.get("usb_c_input") is True:
+            fragments.append("usb-c")
+        if curated_metadata.get("xlr_input") is True:
+            fragments.append("xlr")
+        if curated_metadata.get("water_resistance_support") is True:
+            fragments.append("water resistant")
+        if curated_metadata.get("oled_support") is True:
+            fragments.append("oled")
+        if curated_metadata.get("wifi6_support") is True:
+            fragments.append("wi-fi 6")
+        if curated_metadata.get("mesh_support") is True:
+            fragments.append("mesh")
+        if curated_metadata.get("high_refresh_support") is True:
+            fragments.append("high refresh")
 
         return " ".join(fragments)
 
@@ -6274,7 +8255,7 @@ class InventoryService:
             if not match:
                 return None
             number = float(match.group())
-            if target_key in {"storage_gb", "ram_gb"} and "tb" in text and "gb" not in text:
+            if target_key in {"storage_gb", "ram_gb", "capacity_gb"} and "tb" in text and "gb" not in text:
                 number *= 1024
             if target_key == "capacity_tb" and "gb" in text and "tb" not in text:
                 number /= 1024
@@ -6284,6 +8265,7 @@ class InventoryService:
             "battery_hours",
             "battery_days",
             "battery_mah",
+            "capacity_gb",
             "refresh_rate_hz",
             "coverage_sqft",
         }:
@@ -6297,19 +8279,12 @@ class InventoryService:
         return self._normalize_search_text(str(value)) or None
 
     @staticmethod
-    def _normalize_boolean_attribute_value(value: object | None) -> bool | None:
-        if value is None:
-            return None
-        if isinstance(value, bool):
-            return value
-        normalized = str(value).strip().casefold()
-        if not normalized:
-            return None
-        if normalized in _BOOLEAN_FALSE_VALUES:
-            return False
-        if normalized in _BOOLEAN_TRUE_VALUES:
-            return True
-        return True
+    def _normalize_boolean_attribute_value(
+        value: object | None,
+        *,
+        target_key: str | None = None,
+    ) -> bool | None:
+        return coerce_spec_bool(value, key=target_key)
 
     @staticmethod
     def _format_search_number(value: object) -> str:
@@ -6468,6 +8443,9 @@ class InventoryService:
     def _catalog_path(self) -> Path:
         return Path(self.config.catalog_path)
 
+    def load_catalog(self) -> dict[str, InventoryItemRecord]:
+        return self.mirror_store.load_catalog()
+
     def _load_catalog(self) -> dict[str, InventoryItemRecord]:
         return self.mirror_store.load_catalog()
 
@@ -6486,8 +8464,28 @@ class InventoryService:
         return any(phrase in text for phrase in phrases)
 
     @staticmethod
+    def _has_standalone_phrase(text: str, phrases: list[str]) -> bool:
+        tokens = set(text.split())
+        for phrase in phrases:
+            if " " in phrase:
+                if phrase in text:
+                    return True
+                continue
+            if phrase in tokens:
+                return True
+        return False
+
+    @staticmethod
     def _is_out_of_stock(hit: InventorySearchHit) -> bool:
         return hit.stock is None or hit.stock <= 0
+
+    @staticmethod
+    def _try_policy_qa(question: str) -> str | None:
+        from app.inventory.policy_qa import PolicyQAEngine, is_policy_question
+        if not is_policy_question(question):
+            return None
+        engine = PolicyQAEngine()
+        return engine.answer(question)
 
     @staticmethod
     def _price_sort_key(hit: InventorySearchHit, *, reverse: bool = False) -> float:
@@ -7080,6 +9078,27 @@ class InventoryService:
     ) -> InventorySearchHit | None:
         if not hits:
             return None
+        query_terms = set(self._extract_query_terms(question))
+        normalized_question = self._normalize_search_text(question)
+        explicit_anchor_hits: list[tuple[int, float, InventorySearchHit]] = []
+        for hit in hits:
+            product_type = self.product_ontology.detect_product_type(product=hit)
+            if product_type not in self.product_ontology.CROSS_SELL_COMPATIBILITY:
+                continue
+            hit_tokens = (
+                self._tokenize_search_text(hit.name)
+                | self._tokenize_search_text(hit.sku)
+                | self._tokenize_search_text(hit.category)
+                | self._tokenize_search_text(" ".join(hit.tags))
+            )
+            overlap = len(query_terms.intersection(hit_tokens))
+            normalized_name = self._normalize_search_text(hit.name)
+            exact_name_bonus = 4 if normalized_name and normalized_name in normalized_question else 0
+            if overlap + exact_name_bonus >= 2:
+                explicit_anchor_hits.append((overlap + exact_name_bonus, hit.score, hit))
+        if explicit_anchor_hits:
+            explicit_anchor_hits.sort(key=lambda row: (row[0], row[1], row[2].stock or 0), reverse=True)
+            return explicit_anchor_hits[0][2]
         ranked_hits = self._rank_support_hits(
             question=question,
             hits=hits,

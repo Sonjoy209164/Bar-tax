@@ -1,10 +1,21 @@
 import json
 from collections.abc import AsyncIterator, Callable
+from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.core.schemas import (
+    CustomerProfileResponse,
+    ImageIndexRebuildRequest,
+    ImageIndexRebuildResponse,
+    ImageIndexStatusResponse,
+    ImageSearchCorrectionListResponse,
+    ImageSearchCorrectionRequest,
+    ImageSearchCorrectionResponse,
+    ImageSearchFailureListResponse,
+    ImageSearchRequest,
+    ImageSearchResponse,
     InventoryAgenticRequest,
     InventoryAgenticResponse,
     InventoryAgenticStatusResponse,
@@ -34,8 +45,25 @@ from app.core.schemas import (
     InventorySyncValidateResponse,
     InventoryUpsertRequest,
     InventoryUpsertResponse,
+    POSSyncImportRequest,
+    POSSyncResponse,
+    POSSyncStatusResponse,
+    POSSyncWebhookRequest,
+    PolicyQARequest,
+    PolicyQAResponse,
 )
+from app.inventory.catalog_audit import audit_catalog, enrich_item_attributes
+from app.inventory.image_feedback import (
+    ImageSearchCorrection,
+    list_image_search_corrections,
+    list_image_search_failures,
+    save_image_search_correction,
+)
+from app.inventory.image_index import build_image_index, image_index_status
 from app.inventory.policy import inventory_policy_contract
+from app.inventory.waitlist import WaitlistManager
+from app.inventory.policy_qa import PolicyQAEngine
+from app.inventory.pos_sync import POSSyncEngine
 from app.services.inventory_service import get_inventory_service
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -350,3 +378,179 @@ async def ask_inventory_stream(request: InventoryAskRequest) -> StreamingRespons
         media_type="text/event-stream",
         headers=_STREAMING_HEADERS,
     )
+
+
+@router.post("/image-search", response_model=ImageSearchResponse)
+async def image_search(request: ImageSearchRequest) -> ImageSearchResponse:
+    try:
+        return get_inventory_service().image_search(request)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "invalid_image_search_request", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "image_search_failed", "message": str(exc)},
+        ) from exc
+
+
+@router.get("/image-index/status", response_model=ImageIndexStatusResponse)
+async def get_image_index_status() -> ImageIndexStatusResponse:
+    catalog = get_inventory_service().load_catalog()
+    return ImageIndexStatusResponse(**image_index_status(catalog).to_dict())
+
+
+@router.post("/image-index/rebuild", response_model=ImageIndexRebuildResponse)
+async def rebuild_image_index(request: ImageIndexRebuildRequest) -> ImageIndexRebuildResponse:
+    catalog = get_inventory_service().load_catalog()
+    records = build_image_index(
+        catalog,
+        force=request.force,
+        include_embeddings=request.include_embeddings,
+    )
+    status_data = image_index_status(catalog).to_dict()
+    return ImageIndexRebuildResponse(rebuilt_count=len(records), **status_data)
+
+
+@router.get("/image-search/failures", response_model=ImageSearchFailureListResponse)
+async def read_image_search_failures(limit: int = 50) -> ImageSearchFailureListResponse:
+    failures = list_image_search_failures(limit=limit)
+    return ImageSearchFailureListResponse(status="success", total=len(failures), failures=failures)
+
+
+@router.get("/image-search/corrections", response_model=ImageSearchCorrectionListResponse)
+async def read_image_search_corrections(limit: int = 50) -> ImageSearchCorrectionListResponse:
+    corrections = list_image_search_corrections(limit=limit)
+    return ImageSearchCorrectionListResponse(status="success", total=len(corrections), corrections=corrections)
+
+
+@router.post("/image-search/corrections", response_model=ImageSearchCorrectionResponse)
+async def create_image_search_correction(
+    request: ImageSearchCorrectionRequest,
+) -> ImageSearchCorrectionResponse:
+    correction = ImageSearchCorrection(
+        query_image_id=request.query_image_id,
+        correction_type=request.correction_type,
+        correct_product_id=request.correct_product_id,
+        wrong_product_id=request.wrong_product_id,
+        notes=request.notes,
+        session_id=request.session_id,
+        query_text=request.query_text,
+    )
+    save_image_search_correction(correction)
+    return ImageSearchCorrectionResponse(status="success", correction=asdict(correction))
+
+
+@router.post("/sync/import", response_model=POSSyncResponse)
+async def pos_sync_csv_import(request: POSSyncImportRequest) -> POSSyncResponse:
+    engine = POSSyncEngine()
+    result = engine.import_from_csv(request.csv_text)
+    return POSSyncResponse(
+        status="success" if not result.errors else "partial",
+        inserted=result.inserted,
+        updated=result.updated,
+        stock_changed=result.stock_changed,
+        deactivated=result.deactivated,
+        skipped=result.skipped,
+        errors=result.errors[:10],
+        summary=result.summary(),
+        timestamp=result.timestamp,
+    )
+
+
+@router.post("/sync/webhook", response_model=POSSyncResponse)
+async def pos_sync_webhook(request: POSSyncWebhookRequest) -> POSSyncResponse:
+    engine = POSSyncEngine()
+    result = engine.import_from_webhook({"source": request.source, "event": request.event, "items": request.items})
+    return POSSyncResponse(
+        status="success" if not result.errors else "partial",
+        inserted=result.inserted,
+        updated=result.updated,
+        stock_changed=result.stock_changed,
+        deactivated=result.deactivated,
+        skipped=result.skipped,
+        errors=result.errors[:10],
+        summary=result.summary(),
+        timestamp=result.timestamp,
+    )
+
+
+@router.get("/sync/status", response_model=POSSyncStatusResponse)
+async def pos_sync_status() -> POSSyncStatusResponse:
+    engine = POSSyncEngine()
+    data = engine.get_sync_status()
+    return POSSyncStatusResponse(
+        status="success",
+        total_products=data["total_products"],
+        active_products=data["active_products"],
+        out_of_stock=data["out_of_stock"],
+        last_sync=data["last_sync"],
+    )
+
+
+@router.post("/policy-qa", response_model=PolicyQAResponse)
+async def policy_qa(request: PolicyQARequest) -> PolicyQAResponse:
+    engine = PolicyQAEngine()
+    answer = engine.answer(request.question)
+    if answer is None:
+        return PolicyQAResponse(
+            status="not_found",
+            answer="I don't have a specific policy answer for that question. Please contact us directly.",
+            source="policies.json",
+        )
+    return PolicyQAResponse(status="success", answer=answer, source="policies.json")
+
+
+from pydantic import BaseModel as _BaseModel  # noqa: E402
+
+
+class _WaitlistRequest(_BaseModel):
+    product_id: str
+    product_name: str = ""
+    session_id: str
+    phone: str | None = None
+
+
+@router.get("/audit")
+async def get_catalog_audit() -> dict:
+    svc = get_inventory_service()
+    catalog_path = svc._catalog_path() if hasattr(svc, "_catalog_path") else "data/inventory/catalog.jsonl"
+    report = audit_catalog(catalog_path)
+    return {
+        "total_products": report.total_products,
+        "active_products": report.active_products,
+        "rag_enabled": report.rag_enabled,
+        "out_of_stock": report.out_of_stock,
+        "completeness_score": report.completeness_score,
+        "attribute_coverage": report.attribute_coverage,
+        "category_counts": report.category_counts,
+        "brand_counts": report.brand_counts,
+        "price_range": report.price_range,
+        "enrichment_candidates": report.enrichment_candidates,
+        "issues": [
+            {"product_id": i.product_id, "name": i.name, "issue_type": i.issue_type, "detail": i.detail}
+            for i in report.issues
+        ],
+    }
+
+
+@router.post("/waitlist")
+async def join_waitlist(request: _WaitlistRequest) -> dict:
+    mgr = WaitlistManager()
+    mgr.add(
+        session_id=request.session_id,
+        product_id=request.product_id,
+        product_name=request.product_name,
+        phone=request.phone,
+    )
+    return {"status": "added", "product_id": request.product_id}
+
+
+@router.get("/waitlist/status")
+async def waitlist_status(product_id: str | None = None) -> dict:
+    mgr = WaitlistManager()
+    if product_id:
+        return {"product_id": product_id, "entries": mgr.get_waitlist(product_id)}
+    return {"pending": mgr.get_all_pending()}

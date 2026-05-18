@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inventory RAG Trace Observer</title>
+  <link rel="stylesheet" href="./trace.css?v=20260514-es-probe" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Inventory RAG Observer</p>
+        <h1>Query Trace Console</h1>
+      </div>
+      <div class="status-panel">
+        <span id="connectionDot" class="dot"></span>
+        <span id="connectionText">Checking backend</span>
+      </div>
+    </header>
+
+    <section class="query-panel">
+      <div class="field-stack">
+        <label for="queryInput">Customer query</label>
+        <textarea id="queryInput" rows="3" spellcheck="false">eid er jonno 5000 er moddhe elegant saree ache?</textarea>
+      </div>
+      <div class="controls-grid">
+        <label>
+          Answer engine
+          <select id="answerEngine">
+            <option value="deterministic">deterministic</option>
+            <option value="auto">auto</option>
+            <option value="natural">natural</option>
+          </select>
+        </label>
+        <label>
+          Reply style
+          <select id="replyStyle">
+            <option value="short">short</option>
+            <option value="detailed">detailed</option>
+          </select>
+        </label>
+        <label>
+          Assistant mode
+          <select id="assistantMode">
+            <option value="support">support</option>
+            <option value="sales">sales</option>
+          </select>
+        </label>
+        <label>
+          Top K
+          <input id="topK" type="number" min="1" max="20" value="5" />
+        </label>
+      </div>
+      <div class="button-row">
+        <button id="runButton" class="primary" type="button">Run Query</button>
+        <button id="clearButton" type="button">Clear</button>
+      </div>
+      <div class="examples-head">
+        <h2>Quick Test Queries</h2>
+        <p class="panel-note">Use these packs to test the full current inventory surface. For follow-up tests, run one product query first, then click a same-design or matching chip.</p>
+      </div>
+      <div class="examples" aria-label="Example queries">
+        <section class="example-group">
+          <h3>Memory Follow-up Sequence</h3>
+          <p class="example-hint">Run 1, then 2, then 3. The later questions depend on focused products and conversation history.</p>
+          <div class="example-chip-list">
+            <button type="button" data-query="Lotus Buti Dhakai Jamdani Saree Red ache?">1. Focus red Jamdani</button>
+            <button type="button" data-query="same design blue color e ache?">2. Same design blue?</button>
+            <button type="button" data-query="eta shathe kon bag manabe?">3. Matching bag?</button>
+          </div>
+        </section>
+        <section class="example-group">
+          <h3>Exact Product Lookup</h3>
+          <div class="example-chip-list">
+            <button type="button">do you have White Pearl Earrings?</button>
+            <button type="button">Lotus Buti Dhakai Jamdani Saree Red ache?</button>
+            <button type="button">black tote bag stock e ache?</button>
+            <button type="button">warm beige foundation available?</button>
+          </div>
+        </section>
+        <section class="example-group">
+          <h3>Bangla And Banglish Search</h3>
+          <div class="example-chip-list">
+            <button type="button">eid er jonno 5000 er moddhe elegant saree ache?</button>
+            <button type="button">amar biye er jonno premium lal saree dekhan</button>
+            <button type="button">office er jonno simple cotton saree dekhan</button>
+            <button type="button">gift er jonno 1500 er moddhe jewelry suggest korun</button>
+          </div>
+        </section>
+        <section class="example-group">
+          <h3>Same Design And Variants</h3>
+          <div class="example-chip-list">
+            <button type="button">ei same design ta blue color e ache?</button>
+            <button type="button">same design green ache?</button>
+            <button type="button">pink three piece er size L ache?</button>
+            <button type="button">white cotton panjabi size L ache?</button>
+          </div>
+        </section>
+        <section class="example-group">
+          <h3>Size, Menswear, Shoes</h3>
+          <div class="example-chip-list">
+            <button type="button">panjabi size XL ache?</button>
+            <button type="button">men's blue shirt size M available?</button>
+            <button type="button">men er formal pant waist 34 ache?</button>
+            <button type="button">ladies black heel size 38 ache?</button>
+            <button type="button">men's brown loafer size 42 ache?</button>
+          </div>
+        </section>
+        <section class="example-group">
+          <h3>Styling And Matching</h3>
+          <div class="example-chip-list">
+            <button type="button">নেভি কাতান শাড়ির সাথে কোন ব্যাগ মানাবে?</button>
+            <button type="button">এই শাড়ির সাথে কোন গয়না মানাবে?</button>
+            <button type="button">jamdani vs katan konta nibo?</button>
+            <button type="button">black tote bag office er jonno bhalo hobe?</button>
+          </div>
+        </section>
+        <section class="example-group">
+          <h3>Beauty And Cosmetics</h3>
+          <div class="example-chip-list">
+            <button type="button">oily skin er jonno sunscreen ache?</button>
+            <button type="button">dry skin er jonno sunscreen ache?</button>
+            <button type="button">neem face wash ache?</button>
+            <button type="button">red lipstick ache?</button>
+            <button type="button">kajal ache?</button>
+          </div>
+        </section>
+        <section class="example-group">
+          <h3>Budget, Compare, Gifts</h3>
+          <div class="example-chip-list">
+            <button type="button">3000 er moddhe bag dekhan</button>
+            <button type="button">BDT 2000 er moddhe gift ki ache?</button>
+            <button type="button">men er jonno Eid gift suggest korun</button>
+            <button type="button">rose gold watch ar silver watch er moddhe konta office er jonno better?</button>
+          </div>
+        </section>
+        <section class="example-group">
+          <h3>Policy, Order, Delivery</h3>
+          <div class="example-chip-list">
+            <button type="button">Dhaka delivery charge koto?</button>
+            <button type="button">COD payment available?</button>
+            <button type="button">refund policy ki?</button>
+            <button type="button">eta order korte chai</button>
+            <button type="button">amar order track korte chai</button>
+          </div>
+        </section>
+        <section class="example-group">
+          <h3>No-Match And Boundary Tests</h3>
+          <div class="example-chip-list">
+            <button type="button">same design purple ache?</button>
+            <button type="button">waterproof silk saree ache?</button>
+            <button type="button">tomader ki gaming laptop ache?</button>
+          </div>
+        </section>
+        <section class="example-group">
+          <h3>Owner And Business Signals</h3>
+          <div class="example-chip-list">
+            <button type="button">which products should I restock?</button>
+            <button type="button">which items have high demand?</button>
+            <button type="button">which products have high return risk?</button>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="summary-grid">
+      <article class="metric-card">
+        <span class="label">Trace ID</span>
+        <strong id="traceId">-</strong>
+      </article>
+      <article class="metric-card">
+        <span class="label">Execution Path</span>
+        <strong id="executionPath">-</strong>
+      </article>
+      <article class="metric-card">
+        <span class="label">Intent</span>
+        <strong id="intent">-</strong>
+      </article>
+      <article class="metric-card">
+        <span class="label">Latency</span>
+        <strong id="latency">-</strong>
+      </article>
+    </section>
+
+    <section class="flow-card">
+      <div class="flow-step" data-step="1">
+        <span>Input</span>
+        <small>frontend payload</small>
+      </div>
+      <div class="flow-arrow">-></div>
+      <div class="flow-step" data-step="2">
+        <span>API</span>
+        <small>/inventory/ask</small>
+      </div>
+      <div class="flow-arrow">-></div>
+      <div class="flow-step" data-step="3">
+        <span>Router</span>
+        <small>service branch</small>
+      </div>
+      <div class="flow-arrow">-></div>
+      <div class="flow-step" data-step="4">
+        <span>Retrieval</span>
+        <small>catalog/search</small>
+      </div>
+      <div class="flow-arrow">-></div>
+      <div class="flow-step" data-step="5">
+        <span>Evidence</span>
+        <small>plan + contract</small>
+      </div>
+      <div class="flow-arrow">-></div>
+      <div class="flow-step" data-step="6">
+        <span>Verify</span>
+        <small>safety checks</small>
+      </div>
+      <div class="flow-arrow">-></div>
+      <div class="flow-step" data-step="7">
+        <span>Answer</span>
+        <small>UI output</small>
+      </div>
+    </section>
+
+    <section class="observer-grid">
+      <article class="panel wide">
+        <div class="panel-head">
+          <div>
+            <h2>Final Answer</h2>
+            <p class="panel-note">Customer-facing response after routing, evidence selection, and verification.</p>
+            <code class="function-chip">_finalize_inventory_reply()</code>
+          </div>
+          <span id="answerEngineLabel" class="pill">-</span>
+        </div>
+        <div id="finalAnswer" class="answer-box muted">Run a query to see the generated answer.</div>
+      </article>
+
+      <article class="panel wide">
+        <div class="panel-title-row">
+          <div>
+            <h2>Why This Answer Happened</h2>
+            <p class="panel-note">A compact explanation of the route, evidence, verification, and writer path.</p>
+            <code class="function-chip">InventoryService.ask()</code>
+          </div>
+          <div id="statusBadges" class="badge-row"></div>
+        </div>
+        <div id="whySummary" class="why-box muted">Run a query to see the short diagnosis.</div>
+      </article>
+
+      <article class="panel">
+        <h2>1. Request Payload</h2>
+        <p class="panel-note">What the browser sends to the backend, including recent conversation context.</p>
+        <code class="function-chip">sendMessage() -> apiPost()</code>
+        <pre id="payloadView" class="code-box">-</pre>
+      </article>
+
+      <article class="panel">
+        <h2>2. Route Decision</h2>
+        <p class="panel-note">Shows which backend path handled the query: policy, fashion structured logic, or generic RAG.</p>
+        <code class="function-chip">InventoryService.ask()</code>
+        <div id="routeView" class="kv-list"></div>
+      </article>
+
+      <article class="panel">
+        <h2>3. Memory + Filters</h2>
+        <p class="panel-note">Shows follow-up context, focused products, extracted preferences, and applied filters.</p>
+        <code class="function-chip">InventoryMemoryResolver.resolve()</code>
+        <div id="memoryView" class="kv-list"></div>
+      </article>
+
+      <article class="panel wide" id="imageSearchPanel" style="display:none;">
+        <h2>3b. Image Search Pipeline</h2>
+        <p class="panel-note">Stage-by-stage screenshot search: visual retrieval engine, variant/design resolution, the business-safe decision policy, and the catalog-grounded hits.</p>
+        <code class="function-chip">InventoryService.image_search() / finalize_image_search()</code>
+        <div id="imageSearchView" class="kv-list"></div>
+        <div id="imageSearchHits" class="evidence-card-grid"></div>
+      </article>
+
+      <article class="panel">
+        <h2>4. Retrieval Counts</h2>
+        <p class="panel-note">Counts how many candidates came from structured search, dense search, lexical search, and gates.</p>
+        <code class="function-chip">_semantic_search() / FashionRetailAssistant.answer()</code>
+        <div id="retrievalCounts" class="count-grid"></div>
+      </article>
+
+      <article class="panel wide">
+        <h2>5. Product Candidate Movement</h2>
+        <p class="panel-note">Tracks product IDs as they move from retrieval to reranking to final recommendation roles.</p>
+        <code class="function-chip">_order_hits_for_assistant() + answer_plan</code>
+        <div class="candidate-columns">
+          <div>
+            <h3>Retrieved</h3>
+            <ul id="retrievedIds"></ul>
+          </div>
+          <div>
+            <h3>Reranked</h3>
+            <ul id="rerankedIds"></ul>
+          </div>
+          <div>
+            <h3>Recommended</h3>
+            <ul id="recommendedIds"></ul>
+          </div>
+          <div>
+            <h3>Cross-sell</h3>
+            <ul id="crossSellIds"></ul>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel wide">
+        <h2>6. Catalog Evidence Cards</h2>
+        <p class="panel-note">Human-readable catalog facts for the products returned in this response.</p>
+        <code class="function-chip">_build_search_hit()</code>
+        <div id="catalogEvidence" class="evidence-card-grid"></div>
+      </article>
+
+      <article class="panel wide">
+        <h2>7. Rejected Candidates</h2>
+        <p class="panel-note">Products that were filtered out or ranked away, with reasons when the trace recorded them.</p>
+        <code class="function-chip">_record_rejected_candidate()</code>
+        <div id="rejectedCandidates" class="rejected-grid"></div>
+      </article>
+
+      <article class="panel">
+        <h2>8. Answer Plan</h2>
+        <p class="panel-note">The controlled decision: primary product, alternatives, cross-sells, risks, and next question.</p>
+        <code class="function-chip">_build_inventory_answer_plan()</code>
+        <div id="answerPlanView" class="kv-list"></div>
+      </article>
+
+      <article class="panel">
+        <h2>9. Evidence Contract</h2>
+        <p class="panel-note">The allowed facts the final answer can safely claim from catalog/policy/business data.</p>
+        <code class="function-chip">InventoryEvidenceContractBuilder.build()</code>
+        <div id="evidenceView" class="kv-list"></div>
+      </article>
+
+      <article class="panel">
+        <h2>10. Verification</h2>
+        <p class="panel-note">Checks whether the planned products satisfy hard constraints like category, stock, price, and specs.</p>
+        <code class="function-chip">_verify_answer_plan()</code>
+        <div id="verificationView" class="kv-list"></div>
+      </article>
+
+      <article class="panel">
+        <h2>11. Trace Notes</h2>
+        <p class="panel-note">Extra reasoning, missing facts, and retrieval step details saved by the backend trace.</p>
+        <code class="function-chip">_save_inventory_chat_trace()</code>
+        <div id="notesView" class="note-list"></div>
+      </article>
+
+      <article class="panel wide">
+        <details>
+          <summary>Raw response JSON</summary>
+          <pre id="rawResponse" class="code-box">-</pre>
+        </details>
+        <details>
+          <summary>Raw trace JSON</summary>
+          <pre id="rawTrace" class="code-box">-</pre>
+        </details>
+      </article>
+    </section>
+  </main>
+
+  <script src="./trace.js?v=20260515-image-search"></script>
+</body>
+</html>

@@ -1,0 +1,235 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1650" viewBox="0 0 2400 1650" role="img" aria-labelledby="title desc">
+  <title id="title">Full Current Inventory RAG Pipeline</title>
+  <desc id="desc">Board-ready architecture diagram for the current inventory chatbot pipeline, showing data storage, indexing, query routing, retrieval, decisioning, answer generation, verification, and feedback.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f2937"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 800 42px Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 19px Arial, sans-serif; fill: #475569; }
+      .lane-label { font: 800 23px Arial, sans-serif; fill: #0f172a; }
+      .box-title { font: 800 20px Arial, sans-serif; fill: #111827; }
+      .box-text { font: 400 16px Arial, sans-serif; fill: #334155; }
+      .tiny { font: 400 14px Arial, sans-serif; fill: #475569; }
+      .note { font: 700 16px Arial, sans-serif; fill: #1e3a8a; }
+      .lane { rx: 20; stroke-width: 2.5; }
+      .box { rx: 14; stroke-width: 2; }
+      .decision { fill: #fff7ed; stroke: #f97316; stroke-width: 2.2; }
+      .arrow { fill: none; stroke: #1f2937; stroke-width: 2.8; marker-end: url(#arrow); }
+      .soft-arrow { fill: none; stroke: #64748b; stroke-width: 2.4; stroke-dasharray: 10 7; marker-end: url(#arrow); }
+      .loop { fill: none; stroke: #7c3aed; stroke-width: 2.6; stroke-dasharray: 9 7; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="2400" height="1650"/>
+
+  <text class="title" x="70" y="70">Full Current Inventory RAG Pipeline</text>
+  <text class="subtitle" x="70" y="105">Current boutique inventory chatbot: data -> index -> retrieval -> decision -> grounded answer -> feedback.</text>
+
+  <!-- Lane backgrounds -->
+  <rect class="lane" x="55" y="140" width="2290" height="250" fill="#ecfeff" stroke="#0891b2"/>
+  <rect class="lane" x="55" y="430" width="2290" height="280" fill="#f0fdf4" stroke="#16a34a"/>
+  <rect class="lane" x="55" y="750" width="2290" height="350" fill="#fff7ed" stroke="#f97316"/>
+  <rect class="lane" x="55" y="1140" width="2290" height="250" fill="#eef2ff" stroke="#4f46e5"/>
+  <rect class="lane" x="55" y="1430" width="2290" height="150" fill="#fefce8" stroke="#ca8a04"/>
+
+  <text class="lane-label" x="85" y="178">LAYER 1 - Data, DB Setup, Catalog Storage, Index Build</text>
+  <text class="lane-label" x="85" y="468">LAYER 2 - Customer Query, API Runtime, Orchestration</text>
+  <text class="lane-label" x="85" y="788">LAYER 3 - Retrieval, Retail Logic, Candidate Decisions</text>
+  <text class="lane-label" x="85" y="1178">LAYER 4 - Evidence, Answer Planning, Prompt Writing, Verification</text>
+  <text class="lane-label" x="85" y="1468">LAYER 5 - Side Workflows, Observability, Improvement Loop</text>
+
+  <!-- Layer 1 boxes -->
+  <rect class="box" x="90" y="210" width="300" height="125" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="115" y="240">Source Stores</text>
+  <text class="box-text" x="115" y="268">catalog.jsonl products</text>
+  <text class="box-text" x="115" y="292">policies.json rules</text>
+  <text class="box-text" x="115" y="316">orders/profile JSONL</text>
+
+  <rect class="box" x="450" y="210" width="300" height="125" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="475" y="240">Schema Validation</text>
+  <text class="box-text" x="475" y="268">Pydantic models</text>
+  <text class="box-text" x="475" y="292">InventoryItemRecord</text>
+  <text class="box-text" x="475" y="316">filters, ask, hit, plan</text>
+
+  <rect class="box" x="810" y="210" width="315" height="125" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="835" y="240">Build Search Text</text>
+  <text class="box-text" x="835" y="268">_build_search_text()</text>
+  <text class="box-text" x="835" y="292">name, SKU, attrs, tags</text>
+  <text class="box-text" x="835" y="316">metadata + aliases</text>
+
+  <rect class="box" x="1185" y="210" width="300" height="125" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="1210" y="240">Embed Products</text>
+  <text class="box-text" x="1210" y="268">app/retrieval/embedder.py</text>
+  <text class="box-text" x="1210" y="292">Transformers / local</text>
+  <text class="box-text" x="1210" y="316">deterministic for dev</text>
+
+  <rect class="box" x="1545" y="210" width="320" height="125" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="1570" y="240">Vector Store</text>
+  <text class="box-text" x="1570" y="268">Local JSONL vectors</text>
+  <text class="box-text" x="1570" y="292">or Elasticsearch index</text>
+  <text class="box-text" x="1570" y="316">namespace: inventory</text>
+
+  <rect class="box" x="1925" y="210" width="360" height="125" fill="#ffffff" stroke="#0891b2"/>
+  <text class="box-title" x="1950" y="240">Sync / Rebuild</text>
+  <text class="box-text" x="1950" y="268">/inventory/sync/rebuild</text>
+  <text class="box-text" x="1950" y="292">POS import / webhook</text>
+  <text class="box-text" x="1950" y="316">sync_audit.jsonl</text>
+
+  <path class="arrow" d="M390 272 L450 272"/>
+  <path class="arrow" d="M750 272 L810 272"/>
+  <path class="arrow" d="M1125 272 L1185 272"/>
+  <path class="arrow" d="M1485 272 L1545 272"/>
+  <path class="arrow" d="M1865 272 L1925 272"/>
+
+  <!-- Layer 2 boxes -->
+  <rect class="box" x="90" y="505" width="330" height="130" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="115" y="535">Customer UI</text>
+  <text class="box-text" x="115" y="563">/frontend/chat.html</text>
+  <text class="box-text" x="115" y="587">frontend/chat.js</text>
+  <text class="box-text" x="115" y="611">history + session + API key</text>
+
+  <rect class="box" x="490" y="505" width="320" height="130" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="515" y="535">FastAPI Routes</text>
+  <text class="box-text" x="515" y="563">POST /inventory/ask</text>
+  <text class="box-text" x="515" y="587">GET /inventory/items</text>
+  <text class="box-text" x="515" y="611">/orders, /feedback, /docs</text>
+
+  <rect class="box" x="880" y="505" width="360" height="130" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="905" y="535">InventoryService.ask()</text>
+  <text class="box-text" x="905" y="563">main orchestrator</text>
+  <text class="box-text" x="905" y="587">small talk + policy</text>
+  <text class="box-text" x="905" y="611">memory + routing</text>
+
+  <polygon class="decision" points="1385,485 1515,570 1385,655 1255,570"/>
+  <text class="box-title" x="1332" y="563">Route</text>
+  <text class="box-text" x="1327" y="590">Which path?</text>
+
+  <rect class="box" x="1625" y="505" width="290" height="130" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="1650" y="535">Memory Context</text>
+  <text class="box-text" x="1650" y="563">last answer plan</text>
+  <text class="box-text" x="1650" y="587">focused product IDs</text>
+  <text class="box-text" x="1650" y="611">safe follow-up only</text>
+
+  <rect class="box" x="1985" y="505" width="300" height="130" fill="#ffffff" stroke="#16a34a"/>
+  <text class="box-title" x="2010" y="535">Shortcut Outputs</text>
+  <text class="box-text" x="2010" y="563">small talk response</text>
+  <text class="box-text" x="2010" y="587">policy QA response</text>
+  <text class="box-text" x="2010" y="611">no retrieval needed</text>
+
+  <path class="arrow" d="M420 570 L490 570"/>
+  <path class="arrow" d="M810 570 L880 570"/>
+  <path class="arrow" d="M1240 570 L1255 570"/>
+  <path class="arrow" d="M1515 570 L1625 570"/>
+  <path class="soft-arrow" d="M1515 540 C1690 455 1860 455 1985 525"/>
+
+  <!-- Layer 3 boxes -->
+  <rect class="box" x="90" y="825" width="360" height="180" fill="#ffffff" stroke="#f97316"/>
+  <text class="box-title" x="115" y="855">Fashion Structured Path</text>
+  <text class="box-text" x="115" y="883">fashion_retail.py</text>
+  <text class="box-text" x="115" y="907">Banglish normalize</text>
+  <text class="box-text" x="115" y="931">intent + slots</text>
+  <text class="box-text" x="115" y="955">category, size, color</text>
+  <text class="box-text" x="115" y="979">budget, gender, design</text>
+
+  <rect class="box" x="510" y="825" width="360" height="180" fill="#ffffff" stroke="#f97316"/>
+  <text class="box-title" x="535" y="855">Retail Handlers</text>
+  <text class="box-text" x="535" y="883">search products</text>
+  <text class="box-text" x="535" y="907">same-design color</text>
+  <text class="box-text" x="535" y="931">size availability</text>
+  <text class="box-text" x="535" y="955">accessory matching</text>
+  <text class="box-text" x="535" y="979">compare + styling</text>
+
+  <rect class="box" x="955" y="825" width="360" height="180" fill="#ffffff" stroke="#f97316"/>
+  <text class="box-title" x="980" y="855">Generic RAG Search</text>
+  <text class="box-text" x="980" y="883">_semantic_search()</text>
+  <text class="box-text" x="980" y="907">dense vector retrieval</text>
+  <text class="box-text" x="980" y="931">lexical retrieval</text>
+  <text class="box-text" x="980" y="955">candidate merge</text>
+  <text class="box-text" x="980" y="979">filters + gates</text>
+
+  <rect class="box" x="1375" y="825" width="360" height="180" fill="#ffffff" stroke="#f97316"/>
+  <text class="box-title" x="1400" y="855">Gates + Rerank</text>
+  <text class="box-text" x="1400" y="883">spec gate</text>
+  <text class="box-text" x="1400" y="907">type/category gate</text>
+  <text class="box-text" x="1400" y="931">exact lookup gate</text>
+  <text class="box-text" x="1400" y="955">ecommerce reranker</text>
+  <text class="box-text" x="1400" y="979">stock + price + fit</text>
+
+  <rect class="box" x="1800" y="825" width="485" height="180" fill="#ffffff" stroke="#f97316"/>
+  <text class="box-title" x="1825" y="855">Search Hits / Outcome</text>
+  <text class="box-text" x="1825" y="883">InventorySearchHit objects</text>
+  <text class="box-text" x="1825" y="907">product IDs + scores</text>
+  <text class="box-text" x="1825" y="931">selected/rejected candidates</text>
+  <text class="box-text" x="1825" y="955">abstain if unsafe</text>
+  <text class="box-text" x="1825" y="979">reasoning steps for trace</text>
+
+  <path class="arrow" d="M1625 635 C1190 720 300 720 270 825"/>
+  <path class="arrow" d="M450 915 L510 915"/>
+  <path class="soft-arrow" d="M1625 635 C1520 720 1120 720 1135 825"/>
+  <path class="arrow" d="M1315 915 L1375 915"/>
+  <path class="arrow" d="M1735 915 L1800 915"/>
+  <path class="soft-arrow" d="M870 915 C910 915 915 915 955 915"/>
+
+  <!-- Layer 4 boxes -->
+  <rect class="box" x="90" y="1210" width="360" height="130" fill="#ffffff" stroke="#4f46e5"/>
+  <text class="box-title" x="115" y="1240">Evidence Contract</text>
+  <text class="box-text" x="115" y="1268">evidence_contract.py</text>
+  <text class="box-text" x="115" y="1292">allowed facts</text>
+  <text class="box-text" x="115" y="1316">missing facts + risks</text>
+
+  <rect class="box" x="520" y="1210" width="330" height="130" fill="#ffffff" stroke="#4f46e5"/>
+  <text class="box-title" x="545" y="1240">Answer Plan</text>
+  <text class="box-text" x="545" y="1268">planner.py</text>
+  <text class="box-text" x="545" y="1292">primary / alternatives</text>
+  <text class="box-text" x="545" y="1316">cross-sell / abstain</text>
+
+  <rect class="box" x="920" y="1210" width="370" height="130" fill="#ffffff" stroke="#4f46e5"/>
+  <text class="box-title" x="945" y="1240">Answer Writer</text>
+  <text class="box-text" x="945" y="1268">deterministic templates</text>
+  <text class="box-text" x="945" y="1292">Ollama natural_answer.py</text>
+  <text class="box-text" x="945" y="1316">strict writer prompt</text>
+
+  <rect class="box" x="1360" y="1210" width="360" height="130" fill="#ffffff" stroke="#4f46e5"/>
+  <text class="box-title" x="1385" y="1240">Verification</text>
+  <text class="box-text" x="1385" y="1268">_verify_answer_plan()</text>
+  <text class="box-text" x="1385" y="1292">answer_critic.py</text>
+  <text class="box-text" x="1385" y="1316">no invented facts</text>
+
+  <rect class="box" x="1790" y="1210" width="495" height="130" fill="#ffffff" stroke="#4f46e5"/>
+  <text class="box-title" x="1815" y="1240">Final API Response</text>
+  <text class="box-text" x="1815" y="1268">answer + hits + intent + trace_id</text>
+  <text class="box-text" x="1815" y="1292">recommended IDs + answer_plan</text>
+  <text class="box-text" x="1815" y="1316">UI renders product cards + feedback</text>
+
+  <path class="arrow" d="M2042 1005 C2042 1120 270 1100 270 1210"/>
+  <path class="arrow" d="M450 1275 L520 1275"/>
+  <path class="arrow" d="M850 1275 L920 1275"/>
+  <path class="arrow" d="M1290 1275 L1360 1275"/>
+  <path class="arrow" d="M1720 1275 L1790 1275"/>
+
+  <!-- Layer 5 boxes -->
+  <rect class="box" x="120" y="1495" width="340" height="55" fill="#ffffff" stroke="#ca8a04"/>
+  <text class="box-title" x="145" y="1530">Orders: draft/update/confirm/track</text>
+
+  <rect class="box" x="535" y="1495" width="310" height="55" fill="#ffffff" stroke="#ca8a04"/>
+  <text class="box-title" x="560" y="1530">Image Search: metadata / CLIP</text>
+
+  <rect class="box" x="920" y="1495" width="300" height="55" fill="#ffffff" stroke="#ca8a04"/>
+  <text class="box-title" x="945" y="1530">Trace Logs: answer + route</text>
+
+  <rect class="box" x="1295" y="1495" width="320" height="55" fill="#ffffff" stroke="#ca8a04"/>
+  <text class="box-title" x="1320" y="1530">Feedback: thumbs up/down</text>
+
+  <rect class="box" x="1690" y="1495" width="485" height="55" fill="#ffffff" stroke="#ca8a04"/>
+  <text class="box-title" x="1715" y="1530">Eval Loop: fix catalog, filters, prompts, tests</text>
+
+  <path class="soft-arrow" d="M2037 1340 C2037 1435 1932 1435 1932 1495"/>
+  <path class="loop" d="M1932 1495 C2260 1480 2295 300 2105 300"/>
+
+  <!-- Footer notes -->
+  <text class="note" x="90" y="1615">Correctness path: structured catalog -> filters/gates -> evidence contract -> answer plan -> verification.</text>
+  <text class="note" x="1010" y="1615">Tone path: language detection -> templates/prompts -> natural answer -> one useful follow-up.</text>
+</svg>

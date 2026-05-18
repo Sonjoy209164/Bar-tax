@@ -13,6 +13,7 @@ class VectorStoreProvider(StrEnum):
     LOCAL = "local"
     PINECONE = "pinecone"
     MILVUS = "milvus"
+    ELASTICSEARCH = "elasticsearch"
 
 
 class VectorStoreConfig(BaseModel):
@@ -27,6 +28,11 @@ class VectorStoreConfig(BaseModel):
     milvus_uri: str | None = None
     milvus_token: str | None = None
     milvus_collection_name: str | None = None
+    elasticsearch_url: str | None = None
+    elasticsearch_api_key: str | None = None
+    elasticsearch_username: str | None = None
+    elasticsearch_password: str | None = None
+    elasticsearch_index_name: str | None = None
 
     @field_validator("metric")
     @classmethod
@@ -111,6 +117,10 @@ def build_vector_store(config: VectorStoreConfig | None = None) -> VectorStore:
         from app.retrieval.milvus_store import MilvusVectorStore
 
         return MilvusVectorStore(resolved_config)
+    if resolved_config.provider is VectorStoreProvider.ELASTICSEARCH:
+        from app.retrieval.elasticsearch_store import ElasticsearchVectorStore
+
+        return ElasticsearchVectorStore(resolved_config)
     raise ValueError(f"Unsupported vector store provider: {resolved_config.provider}")
 
 
@@ -128,4 +138,9 @@ def vector_store_config_from_settings() -> VectorStoreConfig:
         milvus_uri=settings.milvus_uri,
         milvus_token=settings.milvus_token,
         milvus_collection_name=settings.milvus_collection_name,
+        elasticsearch_url=settings.elasticsearch_url,
+        elasticsearch_api_key=settings.elasticsearch_api_key,
+        elasticsearch_username=settings.elasticsearch_username,
+        elasticsearch_password=settings.elasticsearch_password,
+        elasticsearch_index_name=settings.elasticsearch_index_name,
     )

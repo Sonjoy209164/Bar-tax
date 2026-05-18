@@ -1,4 +1,7 @@
+import pytest
+
 from app.retrieval import (
+    ElasticsearchVectorStore,
     LocalVectorStore,
     MilvusVectorStore,
     PineconeVectorStore,
@@ -7,6 +10,14 @@ from app.retrieval import (
     VectorStoreProvider,
     build_vector_store,
 )
+
+_HAS_ELASTICSEARCH = False
+try:
+    import elasticsearch  # noqa: F401
+    _HAS_ELASTICSEARCH = True
+except ImportError:
+    pass
+from app.retrieval.elasticsearch_store import _elasticsearch_similarity
 from app.retrieval import vector_store_base
 from app.retrieval.milvus_store import _build_milvus_filter_expression
 
@@ -37,6 +48,15 @@ def test_build_vector_store_factory_selects_provider() -> None:
         )
     )
     assert isinstance(milvus_store, MilvusVectorStore)
+
+    elasticsearch_store = build_vector_store(
+        VectorStoreConfig(
+            provider=VectorStoreProvider.ELASTICSEARCH,
+            elasticsearch_url="http://localhost:9200",
+            elasticsearch_index_name="income-tax-vectors",
+        )
+    )
+    assert isinstance(elasticsearch_store, ElasticsearchVectorStore)
 
 
 def test_local_store_persists_queries_and_filters(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -235,6 +255,218 @@ def test_milvus_store_translates_filter_and_result_payloads() -> None:
     assert stats.total_vector_count == 19
 
 
+def test_elasticsearch_store_translates_upsert_query_delete_and_describe_payloads(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeIndices:
+        def exists(self, *, index):
+            captured.setdefault("exists_indices", []).append(index)
+            return bool(captured.get("index_exists", False))
+
+        def create(self, *, index, mappings, settings=None):
+            captured["created_index"] = index
+            captured["created_mappings"] = mappings
+            captured["created_settings"] = settings
+            captured["index_exists"] = True
+
+    class FakeElasticsearchClient:
+        def __init__(self) -> None:
+            self.indices = FakeIndices()
+
+        def search(self, *, index, knn, size, source_excludes=None):
+            captured["search_index"] = index
+            captured["search_knn"] = knn
+            captured["search_size"] = size
+            captured["search_source_excludes"] = source_excludes
+            return {
+                "hits": {
+                    "hits": [
+                        {
+                            "_id": "tax::chunk-1",
+                            "_score": 0.91,
+                            "_source": {
+                                "record_id": "chunk-1",
+                                "namespace": "tax",
+                                "text": "Income tax authorities",
+                                "metadata": {"section_number": "4"},
+                                "product_id": "prod-1",
+                                "stock": 12,
+                            },
+                        }
+                    ]
+                }
+            }
+
+        def delete(self, *, index, id, refresh=None):
+            captured["delete_index"] = index
+            captured["delete_id"] = id
+            captured["delete_refresh"] = refresh
+
+        def count(self, *, index, query):
+            captured["count_index"] = index
+            captured["count_query"] = query
+            return {"count": 7}
+
+    class FakeHelpers:
+        @staticmethod
+        def bulk(client, actions, refresh=None):
+            captured["bulk_client"] = client
+            captured["bulk_actions"] = list(actions)
+            captured["bulk_refresh"] = refresh
+
+    class FakeElasticsearchStore(ElasticsearchVectorStore):
+        def __init__(self, config):
+            super().__init__(config)
+            self.fake_client = FakeElasticsearchClient()
+
+        def _client(self):
+            return self.fake_client
+
+    monkeypatch.setattr("app.retrieval.elasticsearch_store.helpers", FakeHelpers)
+    store = FakeElasticsearchStore(
+        VectorStoreConfig(
+            provider=VectorStoreProvider.ELASTICSEARCH,
+            elasticsearch_url="http://localhost:9200",
+            elasticsearch_index_name="income-tax-vectors",
+            namespace="tax",
+        )
+    )
+
+    store.upsert(
+        [
+            VectorRecord(
+                record_id="chunk-1",
+                vector=[0.1, 0.2],
+                metadata={
+                    "section_number": "4",
+                    "product_id": "prod-1",
+                    "stock": 12,
+                    "nested": {"ignored": True},
+                },
+                text="Income tax authorities",
+            )
+        ]
+    )
+    result = store.query(
+        [0.2, 0.4],
+        top_k=3,
+        filters={
+            "section_number": {"$eq": "4"},
+            "page_start": {"$gte": 10, "$lte": 20},
+            "chunk_type": {"$in": ["rule", "table"]},
+            "product_id": ["prod-1", "prod-2"],
+        },
+    )
+    store.delete(["chunk-1"])
+    stats = store.describe()
+
+    mappings = captured["created_mappings"]
+    assert captured["created_index"] == "income-tax-vectors"
+    assert captured["created_settings"] == {"index": {"number_of_replicas": 0}}
+    assert mappings["properties"]["vector"] == {
+        "type": "dense_vector",
+        "dims": 2,
+        "index": True,
+        "similarity": "cosine",
+    }
+    assert captured["bulk_actions"] == [
+        {
+            "_op_type": "index",
+            "_index": "income-tax-vectors",
+            "_id": "tax::chunk-1",
+            "_source": {
+                "record_id": "chunk-1",
+                "namespace": "tax",
+                "text": "Income tax authorities",
+                "metadata": {
+                    "section_number": "4",
+                    "product_id": "prod-1",
+                    "stock": 12,
+                    "nested": {"ignored": True},
+                },
+                "vector": [0.1, 0.2],
+                "section_number": "4",
+                "product_id": "prod-1",
+                "stock": 12,
+            },
+        }
+    ]
+    assert captured["bulk_refresh"] is True
+    assert captured["search_index"] == "income-tax-vectors"
+    assert captured["search_knn"] == {
+        "field": "vector",
+        "query_vector": [0.2, 0.4],
+        "k": 3,
+        "num_candidates": 50,
+        "filter": [
+            {"term": {"namespace": "tax"}},
+            {"term": {"section_number": "4"}},
+            {"range": {"page_start": {"gte": 10, "lte": 20}}},
+            {"terms": {"chunk_type": ["rule", "table"]}},
+            {"terms": {"product_id": ["prod-1", "prod-2"]}},
+        ],
+    }
+    assert captured["search_source_excludes"] == ["vector"]
+    assert result.matches[0].record_id == "chunk-1"
+    assert result.matches[0].score == 0.91
+    assert result.matches[0].text == "Income tax authorities"
+    assert result.matches[0].metadata["section_number"] == "4"
+    assert result.matches[0].metadata["product_id"] == "prod-1"
+    assert captured["delete_id"] == "tax::chunk-1"
+    assert captured["delete_refresh"] is True
+    assert captured["count_query"] == {"bool": {"filter": [{"term": {"namespace": "tax"}}]}}
+    assert stats.total_vector_count == 7
+
+
+def test_elasticsearch_store_deletes_by_query_without_namespace() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeElasticsearchClient:
+        def delete_by_query(self, *, index, query, conflicts=None, refresh=None):
+            captured["delete_by_query_index"] = index
+            captured["delete_by_query_query"] = query
+            captured["delete_by_query_conflicts"] = conflicts
+            captured["delete_by_query_refresh"] = refresh
+
+    class FakeElasticsearchStore(ElasticsearchVectorStore):
+        def _client(self):
+            return FakeElasticsearchClient()
+
+    store = FakeElasticsearchStore(
+        VectorStoreConfig(
+            provider=VectorStoreProvider.ELASTICSEARCH,
+            elasticsearch_url="http://localhost:9200",
+            elasticsearch_index_name="income-tax-vectors",
+        )
+    )
+
+    store.delete(["chunk-1", "chunk-2"])
+
+    assert captured == {
+        "delete_by_query_index": "income-tax-vectors",
+        "delete_by_query_query": {"terms": {"record_id": ["chunk-1", "chunk-2"]}},
+        "delete_by_query_conflicts": "proceed",
+        "delete_by_query_refresh": True,
+    }
+
+
+@pytest.mark.skipif(not _HAS_ELASTICSEARCH, reason="elasticsearch package not installed")
+def test_elasticsearch_store_requires_url() -> None:
+    store = ElasticsearchVectorStore(
+        VectorStoreConfig(
+            provider=VectorStoreProvider.ELASTICSEARCH,
+            elasticsearch_index_name="income-tax-vectors",
+        )
+    )
+
+    try:
+        store._client()
+    except ValueError as exc:
+        assert str(exc) == "Elasticsearch URL is required"
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Expected missing Elasticsearch URL to fail")
+
+
 def test_build_milvus_filter_expression_supports_common_operators() -> None:
     expression = _build_milvus_filter_expression(
         {
@@ -251,3 +483,8 @@ def test_build_milvus_filter_expression_supports_common_operators() -> None:
         'chunk_type in ["rule", "table"] and '
         'namespace == "tax"'
     )
+
+
+def test_elasticsearch_similarity_normalizes_supported_metrics() -> None:
+    assert _elasticsearch_similarity("cosine") == "cosine"
+    assert _elasticsearch_similarity("euclidean") == "l2_norm"

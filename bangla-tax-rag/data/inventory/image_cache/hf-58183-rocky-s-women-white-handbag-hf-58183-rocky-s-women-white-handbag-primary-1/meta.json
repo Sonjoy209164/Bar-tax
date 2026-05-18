@@ -1,0 +1,15 @@
+{
+  "image_id": "hf-58183-rocky-s-women-white-handbag-hf-58183-rocky-s-women-white-handbag-primary-1",
+  "source": "frontend/assets/demo_catalog/hf-58183-rocky-s-women-white-handbag/primary.jpg",
+  "full_path": "data/inventory/image_cache/hf-58183-rocky-s-women-white-handbag-hf-58183-rocky-s-women-white-handbag-primary-1/full.jpg",
+  "crop_path": "data/inventory/image_cache/hf-58183-rocky-s-women-white-handbag-hf-58183-rocky-s-women-white-handbag-primary-1/crop.jpg",
+  "gray_path": "data/inventory/image_cache/hf-58183-rocky-s-women-white-handbag-hf-58183-rocky-s-women-white-handbag-primary-1/gray.jpg",
+  "meta_path": "data/inventory/image_cache/hf-58183-rocky-s-women-white-handbag-hf-58183-rocky-s-women-white-handbag-primary-1/meta.json",
+  "width": 260,
+  "height": 346,
+  "crop_width": 185,
+  "crop_height": 232,
+  "dominant_color": "cream",
+  "color_family": "white",
+  "preprocess_version": "image-preprocess-v1"
+}

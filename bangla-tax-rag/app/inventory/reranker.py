@@ -5,6 +5,12 @@ from typing import Any
 
 from app.inventory.ontology import ProductOntology, normalize_inventory_text
 from app.inventory.preferences import InventoryPreferenceProfile, InventorySpecRequirement
+from app.inventory.spec_utils import (
+    SPEC_METADATA_ALIASES,
+    coerce_spec_bool,
+    coerce_spec_number,
+    spec_requirement_satisfied,
+)
 
 
 @dataclass(frozen=True)
@@ -52,34 +58,45 @@ class ProductEvidenceScore:
 
 
 class EcommerceReranker:
-    METADATA_ALIASES: dict[str, tuple[str, ...]] = {
-        "ram_gb": ("ram_gb", "ram"),
-        "storage_gb": ("storage_gb", "storage"),
-        "battery_hours": ("battery_hours",),
-        "screen_size_inch": ("screen_size_inch", "display_size_inch", "screen_size", "display"),
-        "gps_support": ("gps_support", "gps"),
-        "anc_support": ("anc_support", "anc", "noise_cancellation", "noise_cancelling", "noise_canceling"),
-        "inverter_support": ("inverter_support", "inverter"),
-    }
+    METADATA_ALIASES: dict[str, tuple[str, ...]] = SPEC_METADATA_ALIASES
     FEATURE_TERMS: dict[str, tuple[str, ...]] = {
         "wireless": ("wireless", "bluetooth"),
+        "wired": ("wired", "3 5mm", "usb", "xlr", "ethernet"),
         "noise_cancellation": ("noise cancellation", "noise cancelling", "anc"),
+        "usb": ("usb",),
         "usb_c": ("usb c", "usb-c", "type c"),
+        "xlr": ("xlr",),
         "battery_life": ("battery", "battery life", "hours"),
         "ergonomic": ("ergonomic", "lumbar"),
         "gps": ("gps",),
+        "built_in_gps": ("built in gps", "built-in gps", "multi band gps", "offline route"),
         "heart_rate": ("heart rate", "heart-rate"),
+        "water_resistance": ("water resistant", "water resistance", "ipx", "5atm", "10atm"),
+        "oled": ("oled",),
+        "wifi_6": ("wi-fi 6", "wifi 6", "wifi6", "ax1800"),
+        "mesh": ("mesh",),
+        "high_refresh": ("high refresh", "165hz", "144hz", "120hz", "gaming monitor"),
+        "lockable": ("lockable", "locking", "keyed", "secure"),
+        "quiet": ("quiet", "silent"),
+        "mechanical": ("mechanical", "tactile", "switches"),
         "portable": ("portable", "travel", "commute"),
         "premium": ("premium", "flagship", "pro", "elite", "ultra"),
     }
     USE_CASE_TERMS: dict[str, tuple[str, ...]] = {
         "office_calls": ("office call", "office calls", "meeting", "meetings", "calls", "webinar"),
+        "support_calls": ("support", "support team", "customer service", "sales calls", "daily calling"),
+        "meeting_rooms": ("meeting room", "meeting rooms", "conference room", "hybrid meeting", "group calls"),
         "gaming": ("gaming", "game"),
+        "outdoor": ("outdoor", "hiking", "trail", "adventure"),
         "travel": ("travel", "commute", "commuter"),
         "fitness": ("fitness", "workout", "running", "health"),
-        "podcasting": ("podcast", "podcasting", "recording", "webinar"),
+        "podcasting": ("podcast", "podcasting", "recording", "webinar", "streaming"),
+        "creator": ("creator", "content creator", "streamer", "studio", "editing"),
         "business": ("business", "manager", "analyst", "client"),
         "editing": ("editing", "studio", "content"),
+        "backup": ("backup", "archive", "archives"),
+        "networking_coverage": ("coverage", "dead spot", "larger home", "small home", "internet"),
+        "desk_setup": ("desk setup", "workstation", "office setup"),
     }
     PREMIUM_TERMS = ("premium", "flagship", "pro", "elite", "ultra", "high end", "high-end", "luxury")
 
@@ -301,19 +318,15 @@ class EcommerceReranker:
         if actual is None:
             return 0.0
         if requirement.operator == "eq":
-            if isinstance(requirement.value, bool):
-                actual_bool = self._bool_value(actual)
-                return 1.0 if actual_bool is requirement.value else 0.0
-            if isinstance(requirement.value, str):
-                return 1.0 if normalize_inventory_text(str(actual)) == normalize_inventory_text(requirement.value) else 0.0
-            actual_number = self._number_from_value(actual)
-            expected_number = self._number_from_value(requirement.value)
-            if actual_number is None or expected_number is None:
-                return 0.0
-            return 1.0 if actual_number == expected_number else 0.0
+            return 1.0 if spec_requirement_satisfied(
+                actual,
+                key=requirement.key,
+                operator=requirement.operator,
+                expected=requirement.value,
+            ) else 0.0
         if requirement.operator == "gte":
-            actual_number = self._number_from_value(actual)
-            expected_number = self._number_from_value(requirement.value)
+            actual_number = coerce_spec_number(actual, key=requirement.key)
+            expected_number = coerce_spec_number(requirement.value, key=requirement.key)
             if actual_number is None or expected_number is None:
                 return 0.0
             if actual_number < expected_number:
@@ -433,27 +446,11 @@ class EcommerceReranker:
 
     @staticmethod
     def _number_from_value(value: Any) -> float | None:
-        if isinstance(value, bool) or value is None:
-            return None
-        if isinstance(value, int | float):
-            return float(value)
-        try:
-            return float(str(value))
-        except (TypeError, ValueError):
-            return None
+        return coerce_spec_number(value)
 
     @staticmethod
     def _bool_value(value: Any) -> bool | None:
-        if isinstance(value, bool):
-            return value
-        normalized = normalize_inventory_text(str(value))
-        if not normalized:
-            return None
-        if normalized in {"false", "no", "off", "unsupported", "not supported", "none", "0"}:
-            return False
-        if normalized in {"true", "yes", "on", "supported", "available", "included", "1"}:
-            return True
-        return True
+        return coerce_spec_bool(value)
 
     @staticmethod
     def _clamp(value: float) -> float:

@@ -21,3 +21,23 @@ def clear_api_key_for_tests(monkeypatch: pytest.MonkeyPatch):
     yield
     reset_security_state()
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_ollama_probe_cache_globally():
+    """
+    is_ollama_available() caches its probe for 30s in production. In tests,
+    that means whichever test runs first poisons the cache for every later
+    test. Reset around every test so each test's mocks behave consistently.
+    """
+    try:
+        from app.inventory.llm_slot_extractor import reset_ollama_probe_cache
+        reset_ollama_probe_cache()
+    except Exception:
+        pass
+    yield
+    try:
+        from app.inventory.llm_slot_extractor import reset_ollama_probe_cache
+        reset_ollama_probe_cache()
+    except Exception:
+        pass

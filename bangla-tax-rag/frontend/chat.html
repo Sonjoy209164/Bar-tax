@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inventory Chat</title>
+    <link rel="stylesheet" href="./chat.css?v=20260514-image-decision" />
+    <style>
+      /* Image upload */
+      .image-upload-area {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-top: 1px solid var(--line);
+        background: var(--panel);
+      }
+      .image-upload-area label {
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 0.8rem;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+      }
+      .image-upload-area label:hover { color: var(--accent); border-color: var(--accent); }
+      #imageInput { display: none; }
+      #imagePreview {
+        max-height: 48px; max-width: 64px;
+        border-radius: 4px; object-fit: cover;
+        display: none; border: 1px solid var(--line);
+      }
+      #clearImageBtn {
+        background: none; border: none; cursor: pointer;
+        color: var(--muted); font-size: 1rem; display: none;
+        padding: 0 2px; line-height: 1;
+      }
+      #clearImageBtn:hover { color: #dc2626; }
+
+      /* Order bars */
+      .order-status-bar {
+        padding: 6px 12px;
+        background: #fef3c7;
+        border-top: 1px solid #fcd34d;
+        font-size: 0.8rem; color: #92400e;
+        display: none;
+      }
+      .order-status-bar.active { display: block; }
+      .order-confirm-bar {
+        display: none; gap: 8px;
+        padding: 6px 12px;
+        background: #f0fdf4;
+        border-top: 1px solid #86efac;
+        align-items: center;
+      }
+      .order-confirm-bar.active { display: flex; }
+      .order-confirm-bar button {
+        padding: 5px 14px; border-radius: 5px;
+        font-size: 0.82rem; cursor: pointer; font-weight: 600;
+      }
+      .btn-confirm { background: var(--accent); color: white; border: 1px solid var(--accent-strong); }
+      .btn-confirm:hover { background: var(--accent-strong); }
+      .btn-cancel  { background: white; color: #dc2626; border: 1px solid #fca5a5; }
+      .btn-cancel:hover { background: #fef2f2; }
+
+      /* Cart panel */
+      .cart-panel {
+        border-top: 1px solid var(--line);
+        background: var(--panel);
+        font-size: 0.8rem;
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.25s ease;
+      }
+      .cart-panel.open { max-height: 220px; overflow-y: auto; }
+      .cart-header {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 4px 12px; cursor: pointer;
+        font-weight: 600; color: var(--muted);
+      }
+      .cart-header:hover { color: var(--fg); }
+      .cart-item-row {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 3px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .cart-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .cart-item-controls { display: flex; align-items: center; gap: 4px; }
+      .cart-qty-btn {
+        background: var(--line); border: none; border-radius: 3px;
+        width: 20px; height: 20px; cursor: pointer; font-weight: bold;
+        font-size: 0.85rem; line-height: 1;
+      }
+      .cart-qty-btn:hover { background: var(--accent); color: white; }
+      .cart-remove-btn {
+        background: none; border: none; color: #dc2626; cursor: pointer;
+        font-size: 0.9rem; padding: 0 2px;
+      }
+      .cart-total-row {
+        padding: 4px 12px; font-weight: 600;
+        display: flex; justify-content: space-between;
+      }
+
+      /* Feedback thumbs */
+      .feedback-row {
+        display: flex; gap: 6px; margin-top: 4px;
+        align-items: center;
+      }
+      .feedback-btn {
+        background: none; border: 1px solid var(--line);
+        border-radius: 4px; padding: 2px 7px;
+        cursor: pointer; font-size: 0.8rem; color: var(--muted);
+        transition: all 0.15s;
+      }
+      .feedback-btn:hover { border-color: var(--accent); color: var(--accent); }
+      .feedback-btn.voted { opacity: 0.5; pointer-events: none; }
+      .feedback-label { font-size: 0.72rem; color: var(--muted); }
+      .feedback-comment {
+        width: min(430px, 100%); margin-top: 6px;
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      .feedback-comment[hidden] { display: none; }
+      .feedback-comment textarea {
+        width: 100%; resize: vertical; min-height: 46px;
+        border: 1px solid var(--line); border-radius: 6px;
+        padding: 7px 9px; font: inherit; font-size: 0.82rem;
+        background: #fff; color: var(--text);
+      }
+      .feedback-comment textarea:focus {
+        outline: none; border-color: var(--accent);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+      }
+      .feedback-comment-actions { display: flex; gap: 6px; }
+      .feedback-submit,
+      .feedback-skip {
+        border: 1px solid var(--line); border-radius: 5px;
+        padding: 4px 10px; cursor: pointer; font-size: 0.78rem;
+        background: #fff; color: var(--text);
+      }
+      .feedback-submit { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .feedback-submit:disabled,
+      .feedback-skip:disabled { opacity: 0.55; cursor: default; }
+
+      /* Mic button */
+      #micBtn {
+        background: none; border: 1px solid var(--line); border-radius: 5px;
+        padding: 0 9px; cursor: pointer; color: var(--muted);
+        font-size: 1.1rem; height: 36px; display: flex; align-items: center;
+        transition: all 0.15s;
+      }
+      #micBtn:hover { border-color: var(--accent); color: var(--accent); }
+      #micBtn.recording { background: #fef2f2; border-color: #dc2626; color: #dc2626; animation: pulse 1s infinite; }
+      @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+      /* Track order bar */
+      .track-bar {
+        display: none; padding: 5px 12px;
+        background: #eff6ff; border-top: 1px solid #93c5fd;
+        font-size: 0.8rem; color: #1d4ed8; align-items: center; gap: 8px;
+      }
+      .track-bar.active { display: flex; }
+      .track-input {
+        flex: 1; border: 1px solid #93c5fd; border-radius: 4px;
+        padding: 3px 7px; font-size: 0.8rem;
+        background: white;
+      }
+      .track-btn {
+        background: #1d4ed8; color: white; border: none;
+        border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 0.8rem;
+      }
+      .track-btn:hover { background: #1e40af; }
+
+      /* Catalog side panel */
+      .catalog-toggle {
+        background: none;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 3px 9px;
+        cursor: pointer;
+        font-size: 0.78rem;
+        color: var(--muted);
+      }
+      .catalog-toggle:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .workspace {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 12px;
+      }
+      .workspace.catalog-hidden {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .workspace.catalog-hidden .catalog-side-panel {
+        display: none;
+      }
+      .catalog-side-panel {
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+      }
+      .catalog-side-header {
+        padding: 14px;
+        border-bottom: 1px solid var(--line);
+        display: grid;
+        gap: 10px;
+      }
+      .catalog-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        gap: 8px;
+      }
+      .catalog-title-row h2 {
+        margin: 0;
+        font-size: 18px;
+        line-height: 1.2;
+      }
+      .catalog-count {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .catalog-refresh {
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: white;
+        color: var(--muted);
+        cursor: pointer;
+        padding: 4px 9px;
+        font-size: 12px;
+      }
+      .catalog-refresh:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .catalog-controls {
+        display: grid;
+        grid-template-columns: 1fr 120px;
+        gap: 8px;
+      }
+      .catalog-controls input,
+      .catalog-controls select {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--ink);
+        padding: 8px 9px;
+        font-size: 13px;
+        outline: none;
+      }
+      .catalog-controls input:focus,
+      .catalog-controls select:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1);
+      }
+      .catalog-list {
+        min-height: 0;
+        overflow-y: auto;
+        padding: 8px;
+        display: grid;
+        gap: 8px;
+      }
+      .catalog-item {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 10px;
+        display: grid;
+        gap: 6px;
+      }
+      .catalog-thumb {
+        width: 100%;
+        aspect-ratio: 4 / 3;
+        object-fit: cover;
+        display: block;
+        border-radius: 6px;
+        background: #eef2f7;
+        border: 1px solid #e4e9f1;
+      }
+      .catalog-item-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .catalog-item-name {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.25;
+        font-weight: 800;
+      }
+      .catalog-item-price {
+        flex: 0 0 auto;
+        color: var(--accent-strong);
+        font-weight: 800;
+        font-size: 12px;
+      }
+      .catalog-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+      .catalog-tag {
+        border: 1px solid #d7e7e4;
+        color: #315c58;
+        background: #f4fbf9;
+        border-radius: 999px;
+        padding: 2px 7px;
+        font-size: 11px;
+      }
+      .catalog-meta-line {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+      .catalog-item-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+      .catalog-ask-btn {
+        border: 1px solid var(--accent);
+        border-radius: 5px;
+        background: white;
+        color: var(--accent-strong);
+        cursor: pointer;
+        padding: 5px 8px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .catalog-ask-btn:hover {
+        background: var(--soft);
+      }
+      .catalog-empty {
+        color: var(--muted);
+        text-align: center;
+        padding: 24px 14px;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Fashion Inventory</p>
+          <h1>Customer Chat</h1>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="catalogToggle" class="catalog-toggle" type="button">
+            Hide Catalog
+          </button>
+          <button id="trackOrderToggle" type="button"
+            style="background:none;border:1px solid var(--line);border-radius:5px;padding:3px 9px;cursor:pointer;font-size:0.78rem;color:var(--muted);">
+            📦 Track Order
+          </button>
+          <div class="status-pill" id="statusPill">
+            <span class="status-dot"></span>
+            <span id="statusText">Connecting</span>
+          </div>
+        </div>
+      </header>
+
+      <div class="workspace" id="workspace">
+        <section class="chat-panel" id="chatPanel">
+          <div class="chat-toolbar">
+            <div>
+              <strong>Chat Transcript</strong>
+              <span id="messagesStatus">Visible. Memory still uses the last 8 turns.</span>
+            </div>
+            <button id="messagesToggle" type="button" aria-expanded="true">Hide Messages</button>
+          </div>
+          <div class="messages" id="messages" aria-live="polite"></div>
+
+          <!-- Order state bars -->
+          <div class="order-status-bar" id="orderStatusBar">
+            🛒 Order in progress — please provide your name, phone, delivery area, and payment method.
+          </div>
+          <div class="order-confirm-bar" id="orderConfirmBar">
+            <button class="btn-confirm" id="confirmOrderBtn" type="button">✅ Confirm Order</button>
+            <button class="btn-cancel" id="cancelOrderBtn" type="button">✕ Cancel</button>
+          </div>
+
+          <!-- Cart panel (collapsible) -->
+          <div class="cart-panel" id="cartPanel">
+            <div class="cart-header" id="cartToggle">
+              🛍 Cart <span id="cartCount" style="font-weight:normal;color:var(--muted);">(0 items)</span>
+              <span id="cartChevron">▲</span>
+            </div>
+            <div id="cartItems"></div>
+            <div class="cart-total-row" id="cartTotalRow" style="display:none;">
+              <span>Subtotal</span><span id="cartSubtotal">BDT 0</span>
+            </div>
+          </div>
+
+          <!-- Order tracking bar -->
+          <div class="track-bar" id="trackBar">
+            <span>Order ID or phone:</span>
+            <input type="text" class="track-input" id="trackInput" placeholder="ORD-XXXX or 01711..." />
+            <button class="track-btn" id="trackBtn" type="button">Track</button>
+            <button type="button" id="trackClose"
+              style="background:none;border:none;cursor:pointer;color:var(--muted);">✕</button>
+          </div>
+
+          <!-- Quick chips -->
+          <div class="chips" id="chips">
+            <span class="chip-label">Memory test</span>
+            <button type="button" data-question="Lotus Buti Dhakai Jamdani Saree Red ache?">1. Focus red Jamdani</button>
+            <button type="button" data-question="same design blue color e ache?">2. Same design blue?</button>
+            <button type="button" data-question="eta shathe kon bag manabe?">3. Matching bag?</button>
+            <span class="chip-label">Try</span>
+            <button type="button">do you have White Pearl Earrings?</button>
+            <button type="button">white pearl earrings er blue color ache?</button>
+            <button type="button">ei same design ta blue color e ache?</button>
+            <button type="button">Lotus Buti Jamdani red ar royal blue er moddhe konta better?</button>
+            <button type="button">jamdani vs katan — konta nibo?</button>
+            <button type="button">biye te porar moto premium saree ache?</button>
+            <button type="button">eid er jonno 5000 er moddhe elegant saree</button>
+            <button type="button">office er jonno cotton saree dekhan</button>
+            <button type="button">panjabi size XL ache?</button>
+            <button type="button">men's blue shirt size M available?</button>
+            <button type="button">oily skin er jonno sunscreen ache?</button>
+            <button type="button">warm beige foundation stock e ache?</button>
+            <button type="button">gift er jonno 1500 er moddhe jewelry suggest korun</button>
+            <button type="button">black tote bag office er jonno bhalo hobe?</button>
+            <button type="button">নেভি কাতান শাড়ির সাথে কোন ব্যাগ মানাবে?</button>
+            <button type="button">এই শাড়ির সাথে কোন গয়না মানাবে?</button>
+            <button type="button">Dhaka delivery charge koto?</button>
+            <button type="button">COD payment available?</button>
+            <button type="button">refund policy ki?</button>
+            <button type="button">eta order korte chai</button>
+            <button type="button">amar order track korte chai</button>
+            <button type="button">same design green ache?</button>
+            <button type="button">pink three piece er size L ache?</button>
+            <button type="button">white cotton panjabi size L ache?</button>
+            <button type="button">men er formal pant waist 34 ache?</button>
+            <button type="button">ladies black heel size 38 ache?</button>
+            <button type="button">men's brown loafer size 42 ache?</button>
+            <button type="button">men's oud perfume gift er jonno bhalo?</button>
+            <button type="button">unisex citrus fresh perfume ache?</button>
+            <button type="button">dry skin er jonno sunscreen ache?</button>
+            <button type="button">neem face wash ache?</button>
+            <button type="button">red lipstick ache?</button>
+            <button type="button">same design purple ache?</button>
+            <button type="button">tomader ki gaming laptop ache?</button>
+            <button type="button">which products should I restock?</button>
+          </div>
+
+          <!-- Image upload -->
+          <div class="image-upload-area" id="imageUploadArea">
+            <label for="imageInput">📷 Find by Image</label>
+            <input type="file" id="imageInput" accept="image/*" />
+            <img id="imagePreview" alt="Selected image" />
+            <button type="button" id="clearImageBtn" title="Remove image">✕</button>
+            <span id="imageLabel" style="font-size:0.75rem;color:var(--muted);"></span>
+          </div>
+
+          <!-- Composer with mic -->
+          <form class="composer" id="chatForm" style="display:flex;align-items:flex-end;gap:5px;">
+            <button type="button" id="micBtn" title="Voice input (Bangla/English)">🎤</button>
+            <textarea
+              id="chatInput"
+              rows="1"
+              autocomplete="off"
+              style="flex:1;"
+              placeholder="Type Bangla, Banglish, or English... or tap 🎤 to speak"
+            ></textarea>
+            <button id="sendButton" type="submit">Send</button>
+          </form>
+        </section>
+
+        <aside class="catalog-side-panel" id="catalogPanel" aria-label="Current inventory catalog">
+          <div class="catalog-side-header">
+            <div class="catalog-title-row">
+              <div>
+                <p class="eyebrow">Live Catalog</p>
+                <h2>Inventory</h2>
+                <div class="catalog-count" id="catalogCount">Loading catalog...</div>
+              </div>
+              <button class="catalog-refresh" id="catalogRefresh" type="button">Refresh</button>
+            </div>
+            <div class="catalog-controls">
+              <input id="catalogSearch" type="search" placeholder="Search products..." />
+              <select id="catalogCategory" aria-label="Filter catalog by category">
+                <option value="">All</option>
+              </select>
+            </div>
+          </div>
+          <div class="catalog-list" id="catalogItems">
+            <div class="catalog-empty" id="catalogEmpty">Catalog will appear here.</div>
+          </div>
+        </aside>
+      </div>
+    </main>
+    <script src="./chat.js?v=20260514-image-full-coding"></script>
+  </body>
+</html>

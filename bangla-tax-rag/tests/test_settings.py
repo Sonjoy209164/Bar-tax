@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.core.settings import get_settings
+from app.retrieval.vector_store_base import vector_store_config_from_settings
 
 
 def test_environment_values_override_yaml_config(monkeypatch) -> None:
@@ -59,4 +60,43 @@ def test_settings_support_rotated_api_keys(monkeypatch) -> None:
         "next-key",
         "future-key",
     )
+    get_settings.cache_clear()
+
+
+def test_elasticsearch_settings_are_loaded_without_exposing_secrets(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(
+        """
+vector_store:
+  provider: local
+  elasticsearch_url: http://localhost:9200
+  elasticsearch_api_key: yaml-secret-key
+  elasticsearch_username: elastic
+  elasticsearch_password: yaml-secret-password
+  elasticsearch_index_name: inventory-test
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_PATH", str(config_path))
+    get_settings.cache_clear()
+
+    settings = get_settings()
+    vector_config = vector_store_config_from_settings()
+    public_config = settings.non_secret_config()
+
+    assert settings.elasticsearch_url == "http://localhost:9200"
+    assert settings.elasticsearch_api_key == "yaml-secret-key"
+    assert settings.elasticsearch_username == "elastic"
+    assert settings.elasticsearch_password == "yaml-secret-password"
+    assert settings.elasticsearch_index_name == "inventory-test"
+    assert vector_config.elasticsearch_url == "http://localhost:9200"
+    assert vector_config.elasticsearch_api_key == "yaml-secret-key"
+    assert vector_config.elasticsearch_username == "elastic"
+    assert vector_config.elasticsearch_password == "yaml-secret-password"
+    assert vector_config.elasticsearch_index_name == "inventory-test"
+    assert public_config["elasticsearch_url"] == "http://localhost:9200"
+    assert public_config["elasticsearch_index_name"] == "inventory-test"
+    assert "elasticsearch_api_key" not in public_config
+    assert "elasticsearch_password" not in public_config
+    assert "elasticsearch_username" not in public_config
     get_settings.cache_clear()

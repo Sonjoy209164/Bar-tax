@@ -1,0 +1,5 @@
+INFO:     Started server process [644986]
+INFO:     Waiting for application startup.
+2026-05-15 03:18:01,938 | INFO | app.main | FastAPI app started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:5555 (Press CTRL+C to quit)

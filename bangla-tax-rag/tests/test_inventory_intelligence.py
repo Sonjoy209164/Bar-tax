@@ -1382,3 +1382,16 @@ def test_inventory_memory_resolver_uses_reference_but_ignores_new_explicit_reque
     assert ignored.filters.product_ids == []
     assert ignored.filters.categories == []
     assert ignored.resolution.ignored_memory_reason is not None
+
+    explicit_product_name = resolver.resolve(
+        question="white pearl earrings",
+        filters=InventorySearchFilters(),
+        focused_product_ids=["prod-watch"],
+        active_filters=InventorySearchFilters(categories=["Wearables"]),
+        last_answer_plan=last_plan,
+    )
+
+    assert explicit_product_name.resolution.used_memory is False
+    assert explicit_product_name.filters.product_ids == []
+    assert explicit_product_name.filters.categories == []
+    assert explicit_product_name.resolution.ignored_memory_reason is not None

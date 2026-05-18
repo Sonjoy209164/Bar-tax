@@ -442,6 +442,497 @@ This is why recent work in the repo focused on:
 
 That is the right direction. Otherwise the system would sound smart while making unstable decisions.
 
+### 6.1 Current Inventory Pipeline Deep Dive
+
+This is the current inventory pipeline as implemented now. The critical point: this is no longer a plain vector-search chatbot. It is a hybrid retail reasoning pipeline with a fast structured fashion layer, a broader inventory RAG fallback, sync checks, traces, and final-answer guardrails.
+
+#### 6.1.1 Arrow Flow Diagram
+
+![Current inventory RAG pipeline](docs/assets/inventory_pipeline_flow.jpg)
+
+The same flow in text form:
+
+```text
+Customer / staff chat
+-> `frontend/chat.html`
+-> `frontend/chat.js`
+-> local config loads API base URL + API key
+-> `POST /inventory/ask`
+-> FastAPI route: `app/api/routes_inventory.py`
+-> service: `app/services/inventory_service.py`
+-> small-talk guard
+-> short-term memory resolver
+-> question filters + slot extraction
+-> fashion structured layer
+   -> category / color / size / budget / fabric / design / stock lookup
+   -> same-design and variant reasoning
+   -> Bangla / Banglish / English reply shaping
+   -> deterministic answer + answer plan
+-> if fashion layer cannot safely answer:
+   -> general inventory RAG
+   -> preference extraction
+   -> dense vector retrieval
+   -> local lexical retrieval
+   -> optional Elasticsearch lexical retrieval
+   -> merge candidates
+   -> spec/type/category/exact-match gates
+   -> inventory-aware reranking
+   -> evidence contract
+   -> deterministic decisioning
+   -> support/sales answer planning
+   -> optional natural answer synthesis
+   -> final answer verification
+-> response:
+   -> answer
+   -> product IDs
+   -> hits
+   -> answer plan
+   -> verification
+   -> memory resolution
+   -> trace ID
+-> frontend stores recent turns + focused products for follow-up questions
+```
+
+#### 6.1.2 Data Input Layer
+
+The inventory data currently comes from catalog mirror records, not from live Shopify/POS/ERP APIs.
+
+Main files:
+
+- `data/inventory/catalog.jsonl`: active mirrored catalog used by the inventory service
+- `data/inventory/saree_shop_catalog.jsonl`: saree/fashion sample catalog created for the retail use case
+- `data/inventory/saree_shop_inventory_db.json`: DB-style source sample for saree shop inventory
+- `data/inventory/business_signals.jsonl`: optional business facts such as velocity, restock signals, snapshots, or operational metadata
+
+The item contract is `InventoryItemRecord` in `app/core/schemas.py`. The important product fields are:
+
+- `product_id`: stable internal product ID
+- `sku`: sellable stock keeping unit
+- `name`: customer-readable product name
+- `category`, `brand`, `tags`
+- `price`, `currency`, `stock`, `status`
+- `attributes`: structured product facts such as color, size, fabric, design ID, work type, dimensions, specs
+- `metadata`: extra source/system facts
+- `include_in_rag`: controls whether this product should be indexed for retrieval
+- `updated_at`: used for sync and stale-data checks
+
+Strategic warning: for fashion retail, `attributes` are not optional decoration. They are the difference between answering "same design in another color?" correctly and guessing from product names. The catalog should carry structured fields such as `category_key`, `color`, `color_family`, `size`, `fabric`, `design_id`, `occasion`, `work_type`, and `stock`.
+
+#### 6.1.3 Storage And Index Layer
+
+The mirror storage is selected from config:
+
+```text
+config/config.dev.yaml
+-> inventory_chat.storage_backend: jsonl
+-> paths.inventory_catalog_path: data/inventory/catalog.jsonl
+-> paths.inventory_business_signal_path: data/inventory/business_signals.jsonl
+```
+
+The vector backend is also selected from config:
+
+```text
+vector_store.provider: local
+vector_store.local_store_path: data/agentic_store/local_vectors.jsonl
+```
+
+The code supports multiple vector stores:
+
+```text
+`VectorStoreProvider.LOCAL`
+`VectorStoreProvider.PINECONE`
+`VectorStoreProvider.MILVUS`
+`VectorStoreProvider.ELASTICSEARCH`
+```
+
+For Elasticsearch, `app/retrieval/elasticsearch_store.py` provides:
+
+- deterministic document IDs: `namespace::record_id`
+- vector KNN search over the `vector` field
+- lexical search over `sku`, `product_id`, `name`, `brand`, `category`, and `text`
+- top-level metadata fields copied out for filtering
+- `$eq`, `$in`, `$gte`, and `$lte` filter support
+- record ID listing for sync checks
+
+Current dev reality: the repo can use Elasticsearch, but the checked dev config still points to the local vector store unless `VECTOR_DB=elasticsearch` or the YAML provider is changed. Elasticsearch is an available backend, not automatically the active backend in every run.
+
+#### 6.1.4 Catalog Upsert And Sync Flow
+
+The upsert path is:
+
+```text
+Source product records
+-> `POST /inventory/items/upsert`
+-> validate into `InventoryItemRecord`
+-> persist catalog mirror
+-> build vector record for every `include_in_rag=true` item
+-> upsert vectors into current vector backend
+-> delete vectors for products no longer RAG-enabled
+```
+
+The sync paths are:
+
+```text
+`GET /inventory/sync/status`
+-> compare catalog IDs against vector IDs
+-> report missing vectors, stale vectors, invalid catalog rows
+
+`POST /inventory/sync/validate`
+-> compare external source IDs/items against mirrored catalog + vectors
+-> report missing, extra, stale, invalid, and vector drift
+
+`POST /inventory/sync/rebuild`
+-> rebuild vector records from the current catalog
+-> remove stale vector records
+-> return final sync health
+```
+
+This matters because the chatbot is only as truthful as the mirror. A clean sync means catalog rows and vector records agree; it does not prove the original shop database is fresh unless `/sync/validate` is given source-of-truth product IDs/items.
+
+#### 6.1.5 Chat UI Flow
+
+The smooth chat page is:
+
+```text
+`frontend/chat.html`
+-> `frontend/chat.css`
+-> `frontend/chat.js`
+```
+
+The browser flow is:
+
+```text
+page load
+-> fetch `frontend/config.local.json`
+-> set `apiBaseUrl`
+-> set local API key for development
+-> call `/health`
+-> user sends message
+-> build `/inventory/ask` payload
+-> render answer and metadata
+-> store recent conversation turns
+-> store focused product IDs
+-> store last answer plan
+```
+
+The chat page sends:
+
+- `question`
+- `top_k`
+- `assistant_mode`
+- `reply_style`
+- `answer_engine`
+- recent `conversation_history`
+- `focused_product_ids`
+- `last_answer_plan`
+
+This is why follow-ups can work:
+
+```text
+"Lotus Buti Jamdani same design ta blue color e ache?"
+-> response focuses Lotus Buti products
+
+"ei same design ta green e ache?"
+-> frontend sends focused product IDs + previous answer plan
+-> backend resolves "ei same design" against prior context
+```
+
+Limit: this memory is short-term browser/session memory. It is not persistent customer memory. Refreshing the page or opening another browser context can lose the thread unless a server-side session layer is added.
+
+#### 6.1.6 `/inventory/ask` Runtime Flow
+
+The main non-agentic inventory answer path is:
+
+```text
+`POST /inventory/ask`
+-> `InventoryService.ask(...)`
+-> create trace ID
+-> small-talk / greeting / helper response check
+-> memory resolution
+-> question-derived filter merge
+-> fashion structured answer attempt
+-> general inventory retrieval fallback
+-> answer construction
+-> final verification
+-> trace save
+-> response
+```
+
+The first important branch is conversational handling. Greetings, thanks, help questions, and simple chat do not go through retrieval. This prevents the system from wasting catalog search on "hi" or "thank you".
+
+The second branch is memory. `InventoryMemoryResolver` uses only safe references:
+
+```text
+"it"
+"this one"
+"the first one"
+"same design"
+"alternative"
+"cheaper one"
+```
+
+It avoids applying old context when the new question clearly asks for a fresh product/category search. This is a necessary guardrail; otherwise the bot would drag old products into unrelated questions.
+
+#### 6.1.7 Fashion Retail Structured Layer
+
+The fashion layer lives in `app/inventory/fashion_retail.py`.
+
+This layer was added because saree/accessories questions are often structured retail questions, not fuzzy knowledge questions. Examples:
+
+```text
+"same design ta blue color e ache?"
+"amar size M available?"
+"৪০০০ টাকার মধ্যে office er jonno halka saree ache?"
+"matching blouse ache?"
+"ei jamdani tar green color stock e ache?"
+```
+
+The fashion assistant extracts slots:
+
+- category: saree, blouse, panjabi, kurti, salwar kameez, dupatta, shawl, bag, jewelry, accessories
+- color and color family
+- size
+- budget minimum/maximum
+- fabric
+- work type
+- occasion
+- style
+- design ID
+- stock intent
+- language: Bangla, Banglish, or English
+
+Then it ranks structured catalog rows directly. For variant questions, it looks for same-design relationships using product context and design metadata. This is the right architecture for fashion retail because "same design, different color" is a database-style constraint, not a pure semantic similarity problem.
+
+The fashion layer returns:
+
+- deterministic customer-facing answer
+- intent such as `fashion_search`, `fashion_variant_color`, or `fashion_size_availability`
+- product IDs
+- cross-sell IDs when relevant
+- structured slots in the answer plan
+- abstention when the catalog does not support the answer
+
+This layer should stay generalized. It must not be designed only to pass one small QA set. The scalable target is: any fashion/accessory product with clean attributes should be answerable through the same slot-and-variant logic.
+
+#### 6.1.8 General Inventory Retrieval Flow
+
+If the fashion layer cannot answer, the service falls back to the general inventory RAG path.
+
+The retrieval logic is:
+
+```text
+question
+-> preference extraction
+-> dense vector retrieval
+-> local lexical candidate scoring
+-> optional external Elasticsearch lexical scoring
+-> merge dense + lexical candidates
+-> spec gate
+-> product type gate
+-> category gate
+-> exact lookup gate
+-> lexical anchor gate
+-> inventory-aware reranker
+-> top-k hits
+```
+
+The key design choice is that dense retrieval is not trusted alone. The system also uses lexical matching and gates because inventory questions often contain exact facts:
+
+- SKU
+- product name
+- color
+- category
+- size
+- price ceiling
+- structured specs
+
+For exact product lookup, lexical grounding is especially important. A semantically similar but different product is still wrong if the customer asked for a specific item.
+
+#### 6.1.9 Answer Planning, Evidence, And Verification
+
+After retrieval, the system does not simply paste hits into an LLM prompt. It builds a controlled answer path.
+
+The important modules are:
+
+- `app/inventory/evidence_contract.py`: converts hits into allowed claims
+- `app/inventory/decisioning.py`: scores candidates for recommendation, comparison, restock, and alternatives
+- `app/inventory/planner.py`: turns evidence and scores into an explicit answer plan
+- `app/inventory/verifier.py`: checks final answer text against the evidence and plan
+
+The answer plan can include:
+
+- detected intent
+- product family/type
+- primary product ID
+- alternative product IDs
+- cross-sell product IDs
+- excluded products
+- metadata used
+- reasoning steps
+- confidence breakdown
+- risk notes
+- abstention reason
+- evidence contract
+
+Final output can be deterministic or natural:
+
+```text
+answer_engine = deterministic
+-> use rule-based verified answer
+
+answer_engine = natural
+-> synthesize a nicer answer
+-> verify final text
+-> fall back to deterministic if verification fails
+
+answer_engine = auto
+-> choose natural only when confidence and settings allow it
+```
+
+The verification step is the strategic moat. It stops the chatbot from sounding fluent while making unsupported claims about price, stock, product fit, or cross-sells.
+
+#### 6.1.10 Agentic Inventory Flow
+
+There is also an agentic inventory path:
+
+```text
+`POST /inventory/route`
+-> decide normal ask vs agentic ask
+
+`POST /inventory/agentic/ask`
+-> classify/decompose
+-> retrieve evidence over one or more steps
+-> reason over comparison/bundle/restock/diagnosis/planning tasks
+-> verify
+-> return answer + reasoning steps + trace
+```
+
+Use the normal `/inventory/ask` path for fast customer support questions:
+
+- availability
+- size
+- color
+- budget
+- simple recommendations
+- same-design variants
+- matching accessories
+
+Use the agentic path when the question is operational or multi-step:
+
+- "Which items should I restock first and why?"
+- "Why are premium sarees not selling?"
+- "Build a bundle strategy from current stock."
+- "Compare these product families with tradeoffs."
+
+For a customer-facing saree shop chatbot, the normal ask path plus fashion structured layer is the core. The agentic path is more useful for owner/staff decision support.
+
+#### 6.1.11 Response Contract
+
+A successful `/inventory/ask` response carries more than answer text:
+
+```text
+answer
+trace_id
+answer_engine
+confidence_score
+abstained
+abstention_reason
+total_hits
+applied_filters
+hits
+recommended_product_ids
+cross_sell_product_ids
+follow_up_question
+answer_plan
+verification
+memory_resolution
+```
+
+The frontend mainly shows the answer, intent/language metadata, and product IDs. But the richer response is valuable for debugging, analytics, and future UI cards.
+
+#### 6.1.12 Observability And Debugging
+
+Useful inventory endpoints:
+
+```text
+`GET /inventory/status`
+-> current catalog/vector counts and storage backend
+
+`GET /inventory/production/status`
+-> warns when dev-only storage/vector choices are active
+
+`GET /inventory/sync/status`
+-> catalog/vector drift report
+
+`POST /inventory/sync/rebuild`
+-> rebuild vector index from catalog
+
+`GET /inventory/chat/trace/{trace_id}`
+-> direct ask trace
+
+`GET /inventory/agentic/trace/{trace_id}`
+-> agentic trace
+```
+
+The trace system is important because inventory failures are rarely "the model was bad" in a generic sense. They usually come from one of these:
+
+- missing product attributes
+- stale catalog mirror
+- stale vector index
+- wrong category/type metadata
+- weak lexical match
+- overbroad follow-up memory
+- unsupported natural answer wording
+- missing business signals
+
+#### 6.1.13 What The Bot Is Ready For Today
+
+The current bot is strongest for:
+
+- Bangla/Banglish/English fashion search
+- same-design color variant questions
+- size availability questions
+- budget-constrained product discovery
+- stock-aware recommendations
+- simple matching accessory/cross-sell questions
+- exact product or SKU lookup
+- support-style "do you have this?" questions
+- deterministic answers grounded in current catalog records
+
+It is partially ready for:
+
+- broader non-fashion inventory, depending on metadata quality
+- multi-step operational decisions through `/inventory/agentic/ask`
+- natural fluent answers when the answer engine is allowed to use natural synthesis
+
+It is not fully ready for:
+
+- persistent customer memory across sessions
+- checkout/cart/order actions
+- live POS sync without a source connector
+- image-based product matching
+- production-safe browser auth
+- high-concurrency production storage while using JSONL
+
+#### 6.1.14 Immediate Strategic Upgrade Path
+
+The next serious upgrades should be:
+
+1. Add server-side chat sessions.
+   Store `session_id`, recent turns, focused products, preferred size, preferred colors, budget, and last category. This converts short-term browser state into real customer memory.
+
+2. Make product attributes mandatory for fashion.
+   Every saree/accessory should have clean `category_key`, `design_id`, `color`, `size`, `fabric`, `stock`, and price fields. Without this, the bot will degrade into fuzzy search.
+
+3. Add source-of-truth sync.
+   `/sync/status` checks mirror versus vector index. A real shop also needs a connector from the true inventory system into the mirror.
+
+4. Move production retrieval/storage off local dev defaults.
+   Use SQLite at minimum for mirror durability, and Elasticsearch/Milvus/Pinecone for production search. JSONL and local vectors are fine for development, weak for real operations.
+
+5. Render product cards in the UI.
+   The API already returns product IDs and hits. The UI should show product name, price, stock, color, size, and action buttons instead of only text.
+
 ## 7. What Has Been Implemented So Far
 
 Based on `todo_retrival.md`, the project has already moved well beyond a basic retrieval chatbot.

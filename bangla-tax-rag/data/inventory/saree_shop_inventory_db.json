@@ -1,0 +1,222 @@
+{
+  "store": {
+    "store_id": "saree-demo-shop-001",
+    "name": "Saree Demo Shop",
+    "currency": "BDT",
+    "catalog_version": "saree-demo-2026-05-07",
+    "notes": "DB-style sample catalog for testing variant-aware customer questions."
+  },
+  "product_families": [
+    {
+      "design_id": "JMD-LOTUS-01",
+      "family_name": "Lotus Buti Dhakai Jamdani Saree",
+      "category": "Saree",
+      "fabric": "half-silk jamdani",
+      "work_type": "woven buti",
+      "pattern": "lotus buti with contrast border",
+      "occasion": ["wedding guest", "pohela boishakh", "party"],
+      "variants": [
+        {
+          "product_id": "saree-jmd-lotus-red",
+          "sku": "SAR-JMD-LT-RED",
+          "color": "red",
+          "price": 6800,
+          "stock": 3,
+          "size": "free size",
+          "blouse_piece": "included"
+        },
+        {
+          "product_id": "saree-jmd-lotus-blue",
+          "sku": "SAR-JMD-LT-BLU",
+          "color": "royal blue",
+          "price": 6800,
+          "stock": 2,
+          "size": "free size",
+          "blouse_piece": "included"
+        },
+        {
+          "product_id": "saree-jmd-lotus-green",
+          "sku": "SAR-JMD-LT-GRN",
+          "color": "bottle green",
+          "price": 6800,
+          "stock": 0,
+          "size": "free size",
+          "blouse_piece": "included"
+        }
+      ]
+    },
+    {
+      "design_id": "KTN-MEENA-02",
+      "family_name": "Meena Border Bridal Katan Saree",
+      "category": "Saree",
+      "fabric": "silk katan",
+      "work_type": "zari and meena work",
+      "pattern": "heavy border with floral anchal",
+      "occasion": ["bridal", "wedding", "reception"],
+      "variants": [
+        {
+          "product_id": "saree-ktn-meena-maroon",
+          "sku": "SAR-KTN-MN-MRN",
+          "color": "maroon",
+          "price": 12500,
+          "stock": 1,
+          "size": "free size",
+          "blouse_piece": "included"
+        },
+        {
+          "product_id": "saree-ktn-meena-navy",
+          "sku": "SAR-KTN-MN-NVY",
+          "color": "navy blue",
+          "price": 12500,
+          "stock": 2,
+          "size": "free size",
+          "blouse_piece": "included"
+        },
+        {
+          "product_id": "saree-ktn-meena-gold",
+          "sku": "SAR-KTN-MN-GLD",
+          "color": "antique gold",
+          "price": 13200,
+          "stock": 1,
+          "size": "free size",
+          "blouse_piece": "included"
+        }
+      ]
+    },
+    {
+      "design_id": "MSN-PASTEL-03",
+      "family_name": "Pastel Soft Muslin Saree",
+      "category": "Saree",
+      "fabric": "soft muslin",
+      "work_type": "light embroidery",
+      "pattern": "minimal floral embroidery",
+      "occasion": ["office", "casual", "day event", "gift"],
+      "variants": [
+        {
+          "product_id": "saree-msn-pastel-peach",
+          "sku": "SAR-MSN-PS-PCH",
+          "color": "peach",
+          "price": 3600,
+          "stock": 5,
+          "size": "free size",
+          "blouse_piece": "not included"
+        },
+        {
+          "product_id": "saree-msn-pastel-mint",
+          "sku": "SAR-MSN-PS-MNT",
+          "color": "mint green",
+          "price": 3600,
+          "stock": 4,
+          "size": "free size",
+          "blouse_piece": "not included"
+        },
+        {
+          "product_id": "saree-msn-pastel-lavender",
+          "sku": "SAR-MSN-PS-LAV",
+          "color": "lavender",
+          "price": 3600,
+          "stock": 2,
+          "size": "free size",
+          "blouse_piece": "not included"
+        }
+      ]
+    },
+    {
+      "design_id": "COT-BLOCK-04",
+      "family_name": "Everyday Cotton Block Print Saree",
+      "category": "Saree",
+      "fabric": "cotton",
+      "work_type": "block print",
+      "pattern": "geometric block print",
+      "occasion": ["daily wear", "office", "summer"],
+      "variants": [
+        {
+          "product_id": "saree-cot-block-indigo",
+          "sku": "SAR-COT-BL-IND",
+          "color": "indigo",
+          "price": 2200,
+          "stock": 6,
+          "size": "free size",
+          "blouse_piece": "not included"
+        },
+        {
+          "product_id": "saree-cot-block-mustard",
+          "sku": "SAR-COT-BL-MUS",
+          "color": "mustard",
+          "price": 2200,
+          "stock": 3,
+          "size": "free size",
+          "blouse_piece": "not included"
+        }
+      ]
+    }
+  ],
+  "standalone_products": [
+    {
+      "product_id": "blouse-silk-princess-red-38",
+      "sku": "BLS-SLK-RED-38",
+      "category": "Blouse",
+      "name": "Ready Silk Princess Cut Blouse Red Size 38",
+      "color": "red",
+      "size": "38",
+      "price": 1450,
+      "stock": 2,
+      "compatible_design_ids": ["JMD-LOTUS-01", "KTN-MEENA-02"]
+    },
+    {
+      "product_id": "blouse-silk-princess-red-40",
+      "sku": "BLS-SLK-RED-40",
+      "category": "Blouse",
+      "name": "Ready Silk Princess Cut Blouse Red Size 40",
+      "color": "red",
+      "size": "40",
+      "price": 1450,
+      "stock": 0,
+      "compatible_design_ids": ["JMD-LOTUS-01", "KTN-MEENA-02"]
+    },
+    {
+      "product_id": "blouse-cotton-black-36",
+      "sku": "BLS-COT-BLK-36",
+      "category": "Blouse",
+      "name": "Everyday Cotton Blouse Black Size 36",
+      "color": "black",
+      "size": "36",
+      "price": 850,
+      "stock": 4,
+      "compatible_design_ids": ["COT-BLOCK-04", "MSN-PASTEL-03"]
+    },
+    {
+      "product_id": "acc-bangles-gold-meena",
+      "sku": "ACC-BNG-MEENA-GLD",
+      "category": "Accessories",
+      "name": "Gold Meena Bangles Set",
+      "color": "gold",
+      "size": "2.4, 2.6",
+      "price": 1200,
+      "stock": 5,
+      "compatible_design_ids": ["KTN-MEENA-02"]
+    },
+    {
+      "product_id": "acc-clutch-antique-gold",
+      "sku": "ACC-CLT-ANT-GLD",
+      "category": "Accessories",
+      "name": "Antique Gold Party Clutch",
+      "color": "antique gold",
+      "size": "one size",
+      "price": 1850,
+      "stock": 2,
+      "compatible_design_ids": ["KTN-MEENA-02", "JMD-LOTUS-01"]
+    },
+    {
+      "product_id": "acc-oxidized-necklace-blue",
+      "sku": "ACC-NCK-OXI-BLU",
+      "category": "Accessories",
+      "name": "Oxidized Necklace With Blue Stone",
+      "color": "silver and blue",
+      "size": "adjustable",
+      "price": 950,
+      "stock": 3,
+      "compatible_design_ids": ["JMD-LOTUS-01", "MSN-PASTEL-03"]
+    }
+  ]
+}

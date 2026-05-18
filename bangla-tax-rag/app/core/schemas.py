@@ -371,6 +371,40 @@ class ConfigResponse(BaseModel):
     reranker_model_name: str
 
 
+class InventoryImageAsset(BaseModel):
+    image_id: str = Field(..., description="Stable image identifier, usually product_id plus sequence.")
+    url: str | None = Field(default=None, description="Direct HTTP(S) image URL for display or embedding.")
+    local_path: str | None = Field(default=None, description="Optional local image path when assets are stored in the repo/POS.")
+    source_url: str | None = Field(default=None, description="Human-reviewable source page for attribution.")
+    source_name: str | None = Field(default=None, description="Source system or website name.")
+    license: str | None = Field(default=None, description="Image license label when externally sourced.")
+    license_url: str | None = Field(default=None, description="URL for the image license.")
+    attribution: str | None = Field(default=None, description="Creator/owner attribution when required.")
+    role: Literal["primary", "alternate", "detail", "reference"] = Field(default="primary")
+    kind: Literal["product_photo", "supplier_photo", "reference_photo", "generated"] = Field(default="product_photo")
+    is_reference: bool = Field(
+        default=False,
+        description="True when the image is a demo/reference image, not an actual SKU photo.",
+    )
+    visual_tags: list[str] = Field(default_factory=list, description="Color/category/material/pattern tags for visual fallback.")
+    width: int | None = Field(default=None, ge=0)
+    height: int | None = Field(default=None, ge=0)
+
+    @field_validator("image_id")
+    @classmethod
+    def validate_image_id(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("image_id must not be empty")
+        return stripped
+
+    @model_validator(mode="after")
+    def validate_location(self) -> "InventoryImageAsset":
+        if not self.url and not self.local_path:
+            raise ValueError("InventoryImageAsset requires either url or local_path")
+        return self
+
+
 class InventoryItemRecord(BaseModel):
     product_id: str = Field(..., description="Stable product identifier from the inventory system.")
     sku: str = Field(..., description="Human-readable stock keeping unit.")
@@ -385,6 +419,7 @@ class InventoryItemRecord(BaseModel):
     status: str | None = Field(default=None, description="Operational stock status.")
     tags: list[str] = Field(default_factory=list, description="Free-form tags used for search and filtering.")
     attributes: dict[str, str] = Field(default_factory=dict, description="Structured product attributes.")
+    images: list[InventoryImageAsset] = Field(default_factory=list, description="Product or reference images for visual search.")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional opaque metadata from the inventory system.")
     include_in_rag: bool = Field(default=True, description="Whether the product should be indexed for semantic retrieval.")
     updated_at: str | None = Field(default=None, description="Last updated timestamp from the source system.")
@@ -906,6 +941,25 @@ class InventoryAskRequest(BaseModel):
         default=None,
         description="Previous answer plan from the main backend. Used for safe reference resolution only.",
     )
+    session_id: str | None = Field(
+        default=None,
+        description="Optional browser/client session ID. Used to load saved customer preferences (budget, colours, sizes) as context.",
+    )
+    image_b64: str | None = Field(
+        default=None,
+        description="Optional base64-encoded screenshot. When present, the question is answered as an image search.",
+    )
+    query_image_id: str | None = Field(
+        default=None,
+        description="Optional stable id for the uploaded image; derived from image_b64 when omitted.",
+    )
+    debug_retrieval_probe: bool = Field(
+        default=False,
+        description=(
+            "Debug/observer mode only. When true, structured inventory answers also run "
+            "a sidecar retrieval probe so traces show vector/BM25 backend activity."
+        ),
+    )
 
     @field_validator("question")
     @classmethod
@@ -1338,4 +1392,238 @@ class InventoryChatTraceResponse(BaseModel):
     reasoning_summary: list[str] = Field(default_factory=list)
     missing_facts: list[str] = Field(default_factory=list)
     retrieval_steps: list[InventoryAgenticStep] = Field(default_factory=list)
+    image_search: dict[str, Any] | None = Field(
+        default=None,
+        description="Stage-by-stage image-search trace when the turn was answered from a screenshot.",
+    )
     final_answer: str
+
+
+# ---------------------------------------------------------------------------
+# Order workflow schemas
+# ---------------------------------------------------------------------------
+
+class OrderItemSchema(BaseModel):
+    product_id: str
+    sku: str
+    name: str
+    quantity: int = Field(default=1, ge=1)
+    unit_price: float
+    currency: str = "BDT"
+    line_total: float = 0.0
+
+
+class OrderDraftRequest(BaseModel):
+    session_id: str
+    product_id: str
+    sku: str
+    name: str
+    unit_price: float
+    quantity: int = Field(default=1, ge=1)
+    currency: str = "BDT"
+
+
+class OrderUpdateRequest(BaseModel):
+    session_id: str
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    delivery_area: str | None = None
+    payment_method: str | None = None
+    notes: str | None = None
+
+
+class OrderConfirmRequest(BaseModel):
+    session_id: str
+    order_id: str
+
+
+class OrderResponse(BaseModel):
+    status: str
+    order_id: str | None = None
+    message: str
+    items: list[OrderItemSchema] = Field(default_factory=list)
+    subtotal: float = 0.0
+    delivery_charge: float = 0.0
+    grand_total: float = 0.0
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    delivery_area: str | None = None
+    payment_method: str | None = None
+    order_status: str | None = None
+    missing_fields: list[str] = Field(default_factory=list)
+    ready_to_confirm: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Image search schemas
+# ---------------------------------------------------------------------------
+
+class ImageSearchRequest(BaseModel):
+    query_text: str = ""
+    image_b64: str | None = None
+    query_image_id: str | None = None
+    session_id: str | None = None
+    category_hint: str | None = None
+    color_hint: str | None = None
+    budget_max: float | None = None
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class ImageSearchHit(BaseModel):
+    product_id: str
+    name: str
+    score: float
+    match_type: str
+    reasons: list[str] = Field(default_factory=list)
+    price: float | None = None
+    currency: str = "BDT"
+    stock: int = 0
+    image_url: str | None = None
+    decision_label: str | None = None
+    variant_group_id: str | None = None
+    design_id: str | None = None
+    color: str | None = None
+    size: str | None = None
+    image_kind: str | None = None
+    is_reference: bool = False
+    score_breakdown: dict[str, Any] | None = None
+
+
+class ImageSearchResponse(BaseModel):
+    status: str
+    answer: str
+    trace_id: str | None = None
+    query_image_id: str | None = None
+    hits: list[ImageSearchHit] = Field(default_factory=list)
+    total: int = 0
+    decision_label: str | None = None
+    primary_product_id: str | None = None
+    same_design_variant_ids: list[str] = Field(default_factory=list)
+    similar_product_ids: list[str] = Field(default_factory=list)
+    requested_color: str | None = None
+    available_colors: list[str] = Field(default_factory=list)
+    score_breakdown: dict[str, Any] | None = None
+
+
+class ImageIndexStatusResponse(BaseModel):
+    status: str
+    index_path: str
+    catalog_count: int
+    image_asset_count: int
+    indexed_count: int
+    ready: bool
+    missing_product_ids: list[str] = Field(default_factory=list)
+    stale_product_ids: list[str] = Field(default_factory=list)
+    model_available: bool | None = None
+
+
+class ImageIndexRebuildRequest(BaseModel):
+    force: bool = False
+    include_embeddings: bool = True
+
+
+class ImageIndexRebuildResponse(BaseModel):
+    status: str
+    rebuilt_count: int
+    index_path: str
+    catalog_count: int
+    image_asset_count: int
+    indexed_count: int
+    ready: bool
+    missing_product_ids: list[str] = Field(default_factory=list)
+    stale_product_ids: list[str] = Field(default_factory=list)
+    model_available: bool | None = None
+
+
+class ImageSearchFailureListResponse(BaseModel):
+    status: str
+    total: int
+    failures: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ImageSearchCorrectionRequest(BaseModel):
+    query_image_id: str
+    correction_type: Literal["exact_product", "same_design", "similar", "no_match"]
+    correct_product_id: str | None = None
+    wrong_product_id: str | None = None
+    notes: str = ""
+    session_id: str | None = None
+    query_text: str | None = None
+
+
+class ImageSearchCorrectionResponse(BaseModel):
+    status: str
+    correction: dict[str, Any]
+
+
+class ImageSearchCorrectionListResponse(BaseModel):
+    status: str
+    total: int
+    corrections: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# POS sync schemas
+# ---------------------------------------------------------------------------
+
+class POSSyncImportRequest(BaseModel):
+    csv_text: str = Field(..., description="Raw CSV content as text.")
+    source: str = "manual_upload"
+
+
+class POSSyncWebhookRequest(BaseModel):
+    source: str = "pos"
+    event: str = "stock_updated"
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class POSSyncResponse(BaseModel):
+    status: str
+    inserted: int = 0
+    updated: int = 0
+    stock_changed: int = 0
+    deactivated: int = 0
+    skipped: int = 0
+    errors: list[str] = Field(default_factory=list)
+    summary: str = ""
+    timestamp: str = ""
+
+
+class POSSyncStatusResponse(BaseModel):
+    status: str
+    total_products: int = 0
+    active_products: int = 0
+    out_of_stock: int = 0
+    last_sync: str = "never"
+
+
+# ---------------------------------------------------------------------------
+# Customer profile schemas
+# ---------------------------------------------------------------------------
+
+class CustomerProfileResponse(BaseModel):
+    status: str
+    session_id: str
+    profile_summary: str
+    preferred_language: str | None = None
+    sizes: dict[str, str] = Field(default_factory=dict)
+    favorite_colors: list[str] = Field(default_factory=list)
+    budget_min: float | None = None
+    budget_max: float | None = None
+    preferred_categories: list[str] = Field(default_factory=list)
+    skin_type: str | None = None
+    delivery_area: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Policy QA schemas
+# ---------------------------------------------------------------------------
+
+class PolicyQARequest(BaseModel):
+    question: str
+
+
+class PolicyQAResponse(BaseModel):
+    status: str
+    answer: str
+    source: str = "policies.json"

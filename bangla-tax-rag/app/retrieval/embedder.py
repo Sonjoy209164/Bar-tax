@@ -19,6 +19,7 @@ class EmbeddingProvider(StrEnum):
     OPENAI = "openai"
     TRANSFORMERS = "transformers"
     DETERMINISTIC = "deterministic"
+    MULTILINGUAL = "multilingual"
 
 
 class EmbedderConfig(BaseModel):
@@ -143,6 +144,30 @@ class DeterministicTextEmbedder(TextEmbedder):
         )
 
 
+class MultilingualTextEmbedder(TextEmbedder):
+    """Wraps paraphrase-multilingual-MiniLM-L12-v2 via sentence-transformers.
+    Falls back to deterministic hashing if sentence-transformers is unavailable.
+    """
+
+    def embed_texts(self, texts: list[str]) -> EmbeddingBatch:
+        from app.retrieval.multilingual_provider import embed_batch, is_available
+        if not texts:
+            return EmbeddingBatch(vectors=[], model_name=self.config.model_name, provider=self.provider, dimensions=0)
+        if is_available():
+            vecs = embed_batch(texts)
+            if vecs:
+                dimensions = len(vecs[0])
+                return EmbeddingBatch(
+                    vectors=vecs,
+                    model_name=self.config.model_name or "paraphrase-multilingual-MiniLM-L12-v2",
+                    provider=self.provider,
+                    dimensions=dimensions,
+                )
+        # Graceful fallback to deterministic
+        fallback = DeterministicTextEmbedder(self.config)
+        return fallback.embed_texts(texts)
+
+
 def build_embedder(config: EmbedderConfig | None = None) -> TextEmbedder:
     resolved_config = config or embedder_config_from_settings()
     if resolved_config.provider is EmbeddingProvider.OPENAI:
@@ -151,6 +176,8 @@ def build_embedder(config: EmbedderConfig | None = None) -> TextEmbedder:
         return TransformersTextEmbedder(resolved_config)
     if resolved_config.provider is EmbeddingProvider.DETERMINISTIC:
         return DeterministicTextEmbedder(resolved_config)
+    if resolved_config.provider is EmbeddingProvider.MULTILINGUAL:
+        return MultilingualTextEmbedder(resolved_config)
     raise ValueError(f"Unsupported embedding provider: {resolved_config.provider}")
 
 

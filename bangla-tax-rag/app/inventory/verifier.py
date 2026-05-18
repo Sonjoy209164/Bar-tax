@@ -12,6 +12,14 @@ from app.core.schemas import (
 )
 from app.inventory.ontology import ProductOntology, normalize_inventory_text
 from app.inventory.preferences import InventorySpecRequirement
+from app.inventory.spec_utils import (
+    BOOLEAN_FALSE_VALUES,
+    BOOLEAN_TRUE_VALUES,
+    SPEC_METADATA_ALIASES,
+    coerce_spec_bool,
+    coerce_spec_number,
+    spec_requirement_satisfied,
+)
 
 
 class InventoryFinalAnswerVerifier:
@@ -49,17 +57,9 @@ class InventoryFinalAnswerVerifier:
     SUBSTITUTE_WORDS = ("alternative", "fallback", "substitute", "replacement", "instead", "switch to", "shift to")
     CAVEAT_WORDS = ("fallback", "related", "nearby", "not exact", "not equivalent", "not a substitute", "not a replacement")
     NO_MATCH_WORDS = ("could not find", "no reliable", "no exact", "not enough evidence", "do not have")
-    BOOLEAN_TRUE_VALUES = {"1", "true", "yes", "y", "on", "supported", "available", "included", "enabled"}
-    BOOLEAN_FALSE_VALUES = {"0", "false", "no", "n", "off", "none", "unsupported", "not supported", "disabled"}
-    SPEC_METADATA_ALIASES = {
-        "ram_gb": ("ram_gb", "ram"),
-        "storage_gb": ("storage_gb", "storage"),
-        "battery_hours": ("battery_hours",),
-        "screen_size_inch": ("screen_size_inch", "display_size_inch", "screen_size", "display"),
-        "gps_support": ("gps_support", "gps"),
-        "anc_support": ("anc_support", "anc", "noise_cancellation", "noise_cancelling", "noise_canceling"),
-        "inverter_support": ("inverter_support", "inverter"),
-    }
+    BOOLEAN_TRUE_VALUES = BOOLEAN_TRUE_VALUES
+    BOOLEAN_FALSE_VALUES = BOOLEAN_FALSE_VALUES
+    SPEC_METADATA_ALIASES = SPEC_METADATA_ALIASES
 
     def __init__(self, ontology: ProductOntology | None = None) -> None:
         self.ontology = ontology or ProductOntology()
@@ -119,6 +119,11 @@ class InventoryFinalAnswerVerifier:
             requested_type = ""
             requested_family = ""
             requested_category = ""
+        bundle_intent = "bundle" in answer_plan.intent or answer_plan.detected_intent == "cross_sell"
+        if bundle_intent:
+            requested_type = ""
+            requested_family = ""
+            requested_category = ""
         budget_min = self._coerce_float(preferences.get("budget_min"))
         budget_max = self._coerce_float(preferences.get("budget_max"))
         needs_in_stock = bool(preferences.get("needs_in_stock"))
@@ -127,13 +132,14 @@ class InventoryFinalAnswerVerifier:
             for value in preferences.get("avoid_product_types", [])
             if isinstance(value, str) and normalize_inventory_text(value)
         }
-        spec_requirements = self._spec_requirements_from_plan(preferences.get("spec_requirements"))
+        spec_requirements = () if bundle_intent else self._spec_requirements_from_plan(preferences.get("spec_requirements"))
 
         hit_by_id = {hit.product_id: hit for hit in hits}
         evidence_by_id = self._candidate_evidence_by_id(answer_plan.evidence_contract)
         issues: list[str] = []
+        primary_issues: list[str] = []
 
-        issues.extend(
+        primary_issues.extend(
             self._selection_fit_issues(
                 label="Primary recommendation",
                 role="primary",
@@ -150,6 +156,7 @@ class InventoryFinalAnswerVerifier:
                 avoid_product_types=avoid_product_types,
             )
         )
+        issues.extend(primary_issues)
         for product_id in answer_plan.alternative_product_ids:
             issues.extend(
                 self._selection_fit_issues(
@@ -170,11 +177,12 @@ class InventoryFinalAnswerVerifier:
             )
 
         deduped = self._dedupe(issues)
+        deduped_primary = self._dedupe(primary_issues)
         return InventoryAnswerVerification(
             passed=not deduped,
             issues=deduped,
             hard_constraint_issues=deduped,
-            requires_abstention=bool(deduped),
+            requires_abstention=bool(deduped_primary or deduped),
         )
 
     def _check_excluded_products(
@@ -266,6 +274,10 @@ class InventoryFinalAnswerVerifier:
         supported_prices = self._supported_prices(contract, hits)
         for first, second in combinations(sorted(supported_prices), 2):
             supported_prices.add(round(abs(first - second), 2))
+        sorted_prices = sorted(supported_prices)
+        for size in range(2, min(5, len(sorted_prices)) + 1):
+            for price_group in combinations(sorted_prices, size):
+                supported_prices.add(round(sum(price_group), 2))
         issues: list[str] = []
         for price in mentioned_prices:
             if not any(abs(price - supported) <= 0.01 for supported in supported_prices):
@@ -577,12 +589,7 @@ class InventoryFinalAnswerVerifier:
 
     @staticmethod
     def _coerce_float(value: object | None) -> float | None:
-        if value is None or value == "":
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+        return coerce_spec_number(value)
 
     @staticmethod
     def _spec_requirements_from_plan(payload: object | None) -> tuple[InventorySpecRequirement, ...]:
@@ -673,28 +680,18 @@ class InventoryFinalAnswerVerifier:
         if actual is None:
             return False
         if requirement.operator == "eq":
-            if isinstance(requirement.value, bool):
-                actual_bool = self._coerce_bool(actual)
-                return actual_bool is requirement.value
-            return str(actual).strip().casefold() == str(requirement.value).strip().casefold()
-        if requirement.operator == "gte":
-            if isinstance(actual, bool):
-                return False
-            actual_number = self._coerce_float(actual)
-            expected_number = self._coerce_float(requirement.value)
-            if actual_number is None or expected_number is None:
-                return False
-            return actual_number >= expected_number
-        return False
+            return spec_requirement_satisfied(
+                actual,
+                key=requirement.key,
+                operator=requirement.operator,
+                expected=requirement.value,
+            )
+        return spec_requirement_satisfied(
+            actual,
+            key=requirement.key,
+            operator=requirement.operator,
+            expected=requirement.value,
+        )
 
     def _coerce_bool(self, value: object | None) -> bool | None:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
-        normalized = normalize_inventory_text(str(value))
-        if normalized in self.BOOLEAN_TRUE_VALUES:
-            return True
-        if normalized in self.BOOLEAN_FALSE_VALUES:
-            return False
-        return None
+        return coerce_spec_bool(value)

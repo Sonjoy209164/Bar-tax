@@ -1,0 +1,15 @@
+{
+  "image_id": "hf-43993-police-women-passion-perfume-hf-43993-police-women-passion-perfume-primary-1",
+  "source": "frontend/assets/demo_catalog/hf-43993-police-women-passion-perfume/primary.jpg",
+  "full_path": "data/inventory/image_cache/hf-43993-police-women-passion-perfume-hf-43993-police-women-passion-perfume-primary-1/full.jpg",
+  "crop_path": "data/inventory/image_cache/hf-43993-police-women-passion-perfume-hf-43993-police-women-passion-perfume-primary-1/crop.jpg",
+  "gray_path": "data/inventory/image_cache/hf-43993-police-women-passion-perfume-hf-43993-police-women-passion-perfume-primary-1/gray.jpg",
+  "meta_path": "data/inventory/image_cache/hf-43993-police-women-passion-perfume-hf-43993-police-women-passion-perfume-primary-1/meta.json",
+  "width": 260,
+  "height": 346,
+  "crop_width": 83,
+  "crop_height": 236,
+  "dominant_color": "pink",
+  "color_family": "pink",
+  "preprocess_version": "image-preprocess-v1"
+}

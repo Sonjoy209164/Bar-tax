@@ -1119,7 +1119,7 @@ def generate_answer(
         analyzed_query.query_intent in EXTRACTIVE_INTENTS
         or bool(analyzed_query.subsection_id or analyzed_query.section_id)
     )
-    if should_use_extractive_builder and mocked_response is None:
+    if should_use_extractive_builder and (mocked_response is None or generation_options.provider != "mock"):
         answer_sentences, model_conflict_notes = build_mock_grounded_answer(
             question_text,
             evidence_hits,

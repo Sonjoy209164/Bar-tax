@@ -70,6 +70,16 @@ def check_case(case: dict[str, Any], response: dict[str, Any]) -> list[str]:
     if expected_primary and expected_primary not in {response.get("primary_product_id"), *hit_ids[:3]}:
         issues.append(f"expected {expected_primary} in primary/top-3, got {response.get('primary_product_id')} / {hit_ids[:3]}")
 
+    # Cross-category guard: products that must never appear for this query.
+    forbidden_ids = set(case.get("forbidden_product_ids") or [])
+    if forbidden_ids:
+        primary_id = response.get("primary_product_id")
+        if primary_id in forbidden_ids:
+            issues.append(f"forbidden product {primary_id} appeared as primary")
+        bad_hits = [hid for hid in hit_ids if hid in forbidden_ids]
+        if bad_hits:
+            issues.append(f"forbidden product(s) {bad_hits} appeared in hits")
+
     expected_variants = set(case.get("expected_same_design_variant_ids") or [])
     if expected_variants:
         actual_variants = set(response.get("same_design_variant_ids") or []) | set(hit_ids)
@@ -93,6 +103,12 @@ def check_case(case: dict[str, Any], response: dict[str, Any]) -> list[str]:
         names = " ".join(str(hit.get("name", "")) for hit in response.get("hits", [])).casefold()
         if expected_category.casefold() not in categories and expected_category.casefold() not in names:
             issues.append(f"expected category signal {expected_category} in hits")
+
+    expected_answer = case.get("expected_answer_contains")
+    if expected_answer:
+        answer = str(response.get("answer", "") or response.get("final_answer", ""))
+        if expected_answer.casefold() not in answer.casefold():
+            issues.append(f"expected answer to contain {expected_answer!r}")
 
     return issues
 

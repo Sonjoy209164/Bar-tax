@@ -62,6 +62,7 @@ const el = {
   catalogItems:    document.querySelector("#catalogItems"),
   catalogCount:    document.querySelector("#catalogCount"),
   catalogEmpty:    document.querySelector("#catalogEmpty"),
+  imageExamples:   document.querySelector("#imageExamples"),
 };
 
 init();
@@ -114,6 +115,11 @@ function bindEvents() {
     el.input.focus();
   });
   el.imageInput.addEventListener("change", handleImageSelect);
+  el.imageExamples?.addEventListener("click", e => {
+    const card = e.target.closest(".image-example-card");
+    if (!card) return;
+    void useImageExample(card);
+  });
   el.clearImageBtn.addEventListener("click", clearImage);
   el.confirmOrderBtn.addEventListener("click", () => void sendMessage("yes"));
   el.cancelOrderBtn.addEventListener("click", () => void cancelOrder());
@@ -664,6 +670,40 @@ function handleImageSelect(event) {
   reader.readAsDataURL(file);
 }
 
+async function useImageExample(card) {
+  if (state.busy) return;
+  const imagePath = card.dataset.image;
+  const question = card.dataset.question || "";
+  const name = card.dataset.name || "demo-product.jpg";
+  if (!imagePath) return;
+  try {
+    const response = await fetch(imagePath, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const dataUrl = await blobToDataUrl(blob);
+    state.pendingImageB64 = dataUrl.split(",", 2)[1];
+    state.pendingImageName = name;
+    el.imagePreview.src = dataUrl;
+    el.imagePreview.style.display = "block";
+    el.clearImageBtn.style.display = "inline";
+    el.imageLabel.textContent = name;
+    el.input.value = question;
+    resizeInput();
+    el.input.focus();
+  } catch (error) {
+    addMessage("assistant", `Could not load demo image: ${error.message}`);
+  }
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("FileReader failed"));
+    reader.readAsDataURL(blob);
+  });
+}
+
 function clearImage() {
   state.pendingImageB64 = null;
   state.pendingImageName = null;
@@ -954,17 +994,33 @@ function renderImageResults(node, response) {
 function renderImageQuickActions(node, response) {
   const primary = response?.primary_product_id;
   const colors = Array.isArray(response?.available_colors) ? response.available_colors.slice(0, 5) : [];
+  const decision = response?.decision_label;
+  // Backend-suggested next question goes first — it already knows the decision.
+  const suggested = (response?.follow_up_question || "").trim();
+  const requestedSize = (response?.requested_size || "").trim();
   const actions = [];
-  if (colors.length) actions.push(`same design colors: ${colors.join(", ")}`);
+  if (suggested) actions.push(suggested);
+  if (colors.length && decision !== "no_confident_match") {
+    actions.push("Other colors?");
+  }
   if (primary) {
-    actions.push("M size ache?");
-    actions.push("price koto?");
-    actions.push("show similar");
+    // Skip the size chip if the customer just got a size-specific answer.
+    if (!requestedSize) actions.push("M size ache?");
+    actions.push("Price koto?");
+    actions.push("Show similar");
+    if (decision === "confirmed_exact" || decision === "confirmed_same_design_variant") {
+      actions.push("Order this");
+    }
   }
   if (!actions.length) return;
+  // De-duplicate (the suggested question can collide with the defaults).
+  const seen = new Set();
   const row = document.createElement("div");
   row.className = "image-result-actions";
   actions.forEach(text => {
+    const key = text.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = text;

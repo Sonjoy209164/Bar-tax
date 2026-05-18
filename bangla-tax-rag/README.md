@@ -21,6 +21,36 @@ The repository supports two immediate use cases:
 
 The system can run without external APIs. By default it can fall back to deterministic grounded answer construction. If you run a local OpenAI-compatible model server such as Ollama, the same pipeline can use a real chat model for generation.
 
+## Documentation Map
+
+This repository has grown beyond one classic legal RAG README. Use this map as the main entry point for the connected docs.
+
+### Start Here
+
+- [READMERUN.md](READMERUN.md) - practical run guide for the boutique inventory assistant.
+- [readme_exec.md](readme_exec.md) - command-level execution guide for running, testing, benchmarking, and extending the project.
+- [query_flow_readme.md](query_flow_readme.md) - detailed query lifecycle: which function receives the user query, how routing/retrieval/decision/answering happens, and how data paths are used.
+
+### Inventory Chatbot And Commerce RAG
+
+- [README_inventory_current_architecture.md](README_inventory_current_architecture.md) - current inventory chatbot architecture and workflow.
+- [readmefullbuildtheory.md](readmefullbuildtheory.md) - full build theory for the boutique inventory chatbot, including frontend, API gateway, orchestrator, domain engines, image matcher, and order flow.
+- [frontend/README.md](frontend/README.md) - frontend demo guide and backend-mounted UI workflow.
+- [todo_agenticreadme.md](todo_agenticreadme.md) - agentic inventory reasoning notes and roadmap-style implementation context.
+
+### Legal/Tax RAG And Research Notes
+
+- [readmetheory.md](readmetheory.md) - big-picture theory of the repo as legal/tax RAG plus inventory intelligence stack.
+- [readme_theory.md](readme_theory.md) - retrieval theory and build notes.
+- [readme_ocr_uncertainty.md](readme_ocr_uncertainty.md) - OCR-uncertainty-aware chunking and retrieval research direction.
+- [README_RESEARCH.md](README_RESEARCH.md) - PlanRAG-Commerce research proposal.
+- [READMEA*.md](<READMEA*.md>) - A* roadmap for turning the legal/tax RAG work into a stronger research project.
+- [readme_futurework.md](readme_futurework.md) - future work, current gaps, and publication-oriented improvements.
+
+### How To Read The Docs
+
+If you want to run the system, start with [READMERUN.md](READMERUN.md). If you want to understand the current chatbot internals, read [query_flow_readme.md](query_flow_readme.md) and [readmefullbuildtheory.md](readmefullbuildtheory.md). If you want to explain the research direction, read [README_RESEARCH.md](README_RESEARCH.md), [readme_ocr_uncertainty.md](readme_ocr_uncertainty.md), and [READMEA*.md](<READMEA*.md>).
+
 ## What Is Implemented
 
 - PDF ingestion with `pdfplumber`, `PyMuPDF`, and `pymupdf4llm`

@@ -154,10 +154,87 @@ h1 {
   display: none;
 }
 
+.demo-drawer {
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.demo-drawer summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.demo-drawer summary::-webkit-details-marker {
+  display: none;
+}
+
+.demo-drawer summary::before {
+  content: "›";
+  color: var(--accent-strong);
+  font-size: 20px;
+  font-weight: 800;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+}
+
+.demo-drawer[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.demo-drawer summary > span:first-of-type {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.demo-drawer summary strong {
+  font-size: 13px;
+}
+
+.demo-drawer summary small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.demo-drawer-hint {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--accent-strong);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.demo-drawer[open] .demo-drawer-hint {
+  color: var(--muted);
+}
+
+.demo-drawer[open] .demo-drawer-hint::before {
+  content: "Close ";
+}
+
+.demo-drawer-body {
+  max-height: min(330px, 42vh);
+  overflow-y: auto;
+  display: grid;
+  gap: 10px;
+  padding: 0 14px 12px;
+  scrollbar-width: thin;
+}
+
 .messages {
   min-height: 0;
   overflow-y: auto;
-  padding: 22px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -187,9 +264,10 @@ h1 {
 
 .image-example-panel {
   min-width: 0;
-  border-bottom: 1px solid var(--line);
   background: #fff;
-  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
   display: grid;
   gap: 8px;
 }
@@ -265,6 +343,98 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.text-example-panel {
+  min-width: 0;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.text-example-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.text-example-head strong {
+  font-size: 13px;
+}
+
+.text-example-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.text-example-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.text-example-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  padding: 8px 9px;
+  cursor: pointer;
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  color: var(--ink);
+}
+
+.text-example-card:hover,
+.text-example-card:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1);
+  outline: none;
+}
+
+.text-example-card.boundary {
+  border-left: 4px solid #f59e0b;
+}
+
+.text-example-card.occasion {
+  border-left: 4px solid var(--accent);
+}
+
+.text-example-card.support {
+  border-left: 4px solid #2563eb;
+}
+
+.text-example-label {
+  min-width: 0;
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.text-example-question {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-example-note {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
 }
 
 .meta {
@@ -383,7 +553,9 @@ h1 {
   align-items: center;
   gap: 8px;
   overflow-x: auto;
-  padding: 0 16px 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  background: #fbfcfd;
   scrollbar-width: thin;
 }
 
@@ -402,8 +574,9 @@ h1 {
   border-radius: 999px;
   background: #fff;
   color: var(--ink);
-  padding: 8px 12px;
+  padding: 7px 11px;
   cursor: pointer;
+  font-size: 12px;
 }
 
 .chips button:hover {
@@ -507,5 +680,22 @@ textarea:focus {
 
   .image-example-card {
     flex: 0 0 210px;
+  }
+
+  .text-example-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .text-example-grid {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+
+  .text-example-card {
+    flex: 0 0 230px;
   }
 }

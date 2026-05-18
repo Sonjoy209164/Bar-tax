@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Inventory Chat</title>
-    <link rel="stylesheet" href="./chat.css?v=20260515-image-examples" />
+    <link rel="stylesheet" href="./chat.css?v=20260518-clean-demos" />
     <style>
       /* Image upload */
       .image-upload-area {
@@ -380,58 +380,125 @@
             </div>
             <button id="messagesToggle" type="button" aria-expanded="true">Hide Messages</button>
           </div>
-          <section class="image-example-panel" aria-label="Image search examples">
-            <div class="image-example-head">
-              <strong>Image Search Demos</strong>
-              <span>Tap a product photo, then send the prepared question.</span>
+          <details class="demo-drawer">
+            <summary>
+              <span>
+                <strong>Test Examples</strong>
+                <small>Image search, polite boundary, and occasion handling</small>
+              </span>
+              <span class="demo-drawer-hint">Open demos</span>
+            </summary>
+            <div class="demo-drawer-body">
+              <section class="image-example-panel" aria-label="Image search examples">
+                <div class="image-example-head">
+                  <strong>Image Search</strong>
+                  <span>Tap a product photo, then send the prepared question.</span>
+                </div>
+                <div class="image-example-grid" id="imageExamples">
+                  <button
+                    type="button"
+                    class="image-example-card"
+                    data-image="assets/demo_catalog/shirt-ribbed-polo-black/primary.jpg"
+                    data-name="ribbed-polo-black.jpg"
+                    data-question="Eta ache? M size ache?"
+                  >
+                    <img src="assets/demo_catalog/shirt-ribbed-polo-black/primary.jpg" alt="Black ribbed polo" loading="lazy" />
+                    <span class="image-example-label">Exact + size</span>
+                    <span class="image-example-question">Eta ache? M size ache?</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="image-example-card"
+                    data-image="assets/demo_catalog/shirt-ribbed-polo-white/primary.jpg"
+                    data-name="ribbed-polo-white.jpg"
+                    data-question="blue color ache?"
+                  >
+                    <img src="assets/demo_catalog/shirt-ribbed-polo-white/primary.jpg" alt="White ribbed polo" loading="lazy" />
+                    <span class="image-example-label">Other color</span>
+                    <span class="image-example-question">blue color ache?</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="image-example-card"
+                    data-image="assets/demo_catalog/saree-jmd-lotus-red/primary.jpg"
+                    data-name="red-jamdani-saree.jpg"
+                    data-question="eta exact ache? size clear ache?"
+                  >
+                    <img src="assets/demo_catalog/saree-jmd-lotus-red/primary.jpg" alt="Red Jamdani saree" loading="lazy" />
+                    <span class="image-example-label">Reference guard</span>
+                    <span class="image-example-question">eta exact ache?</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="image-example-card"
+                    data-image="assets/demo_catalog/jewelry-pearl-earring-white/primary.jpg"
+                    data-name="white-pearl-earring.jpg"
+                    data-question="do you have this?"
+                  >
+                    <img src="assets/demo_catalog/jewelry-pearl-earring-white/primary.jpg" alt="White pearl earring" loading="lazy" />
+                    <span class="image-example-label">Category guard</span>
+                    <span class="image-example-question">do you have this?</span>
+                  </button>
+                </div>
+              </section>
+              <section class="text-example-panel" aria-label="Boundary and occasion examples">
+                <div class="text-example-head">
+                  <strong>Boundary & Occasion</strong>
+                  <span>Tap one to test smooth redirects and hidden shopping intent.</span>
+                </div>
+                <div class="text-example-grid" id="textExamples">
+                  <button
+                    type="button"
+                    class="text-example-card boundary"
+                    data-question="amar ekta gf lagbe"
+                  >
+                    <span class="text-example-label">Playful boundary</span>
+                    <span class="text-example-question">amar ekta gf lagbe</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="text-example-card occasion"
+                    data-question="amar ekta biyete jaowa dorkar"
+                  >
+                    <span class="text-example-label">Hidden shopping intent</span>
+                    <span class="text-example-question">amar ekta biyete jaowa dorkar</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="text-example-card boundary"
+                    data-question="tumi ki amar sathe prem korba?"
+                  >
+                    <span class="text-example-label">Romantic boundary</span>
+                    <span class="text-example-question">tumi ki amar sathe prem korba?</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="text-example-card occasion"
+                    data-question="ajke amar birthday"
+                  >
+                    <span class="text-example-label">Birthday occasion</span>
+                    <span class="text-example-question">ajke amar birthday</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="text-example-card support"
+                    data-question="amar mon kharap, ki kinbo?"
+                  >
+                    <span class="text-example-label">Gentle support</span>
+                    <span class="text-example-question">amar mon kharap, ki kinbo?</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="text-example-card occasion"
+                    data-question="gf er jonno birthday gift chai"
+                  >
+                    <span class="text-example-label">Gift intent</span>
+                    <span class="text-example-question">gf er jonno birthday gift chai</span>
+                  </button>
+                </div>
+              </section>
             </div>
-            <div class="image-example-grid" id="imageExamples">
-              <button
-                type="button"
-                class="image-example-card"
-                data-image="assets/demo_catalog/shirt-ribbed-polo-black/primary.jpg"
-                data-name="ribbed-polo-black.jpg"
-                data-question="Eta ache? M size ache?"
-              >
-                <img src="assets/demo_catalog/shirt-ribbed-polo-black/primary.jpg" alt="Black ribbed polo" loading="lazy" />
-                <span class="image-example-label">Exact + size</span>
-                <span class="image-example-question">Eta ache? M size ache?</span>
-              </button>
-              <button
-                type="button"
-                class="image-example-card"
-                data-image="assets/demo_catalog/shirt-ribbed-polo-white/primary.jpg"
-                data-name="ribbed-polo-white.jpg"
-                data-question="blue color ache?"
-              >
-                <img src="assets/demo_catalog/shirt-ribbed-polo-white/primary.jpg" alt="White ribbed polo" loading="lazy" />
-                <span class="image-example-label">Other color</span>
-                <span class="image-example-question">blue color ache?</span>
-              </button>
-              <button
-                type="button"
-                class="image-example-card"
-                data-image="assets/demo_catalog/saree-jmd-lotus-red/primary.jpg"
-                data-name="red-jamdani-saree.jpg"
-                data-question="eta exact ache? size clear ache?"
-              >
-                <img src="assets/demo_catalog/saree-jmd-lotus-red/primary.jpg" alt="Red Jamdani saree" loading="lazy" />
-                <span class="image-example-label">Reference guard</span>
-                <span class="image-example-question">eta exact ache?</span>
-              </button>
-              <button
-                type="button"
-                class="image-example-card"
-                data-image="assets/demo_catalog/jewelry-pearl-earring-white/primary.jpg"
-                data-name="white-pearl-earring.jpg"
-                data-question="do you have this?"
-              >
-                <img src="assets/demo_catalog/jewelry-pearl-earring-white/primary.jpg" alt="White pearl earring" loading="lazy" />
-                <span class="image-example-label">Category guard</span>
-                <span class="image-example-question">do you have this?</span>
-              </button>
-            </div>
-          </section>
+          </details>
           <div class="messages" id="messages" aria-live="polite"></div>
 
           <!-- Order state bars -->
@@ -505,6 +572,12 @@
             <button type="button">red lipstick ache?</button>
             <button type="button">same design purple ache?</button>
             <button type="button">tomader ki gaming laptop ache?</button>
+            <span class="chip-label">Boundary</span>
+            <button type="button">amar ekta gf lagbe</button>
+            <button type="button">amar ekta biyete jaowa dorkar</button>
+            <button type="button">tumi ki amar sathe prem korba?</button>
+            <button type="button">amar mon kharap, ki kinbo?</button>
+            <button type="button">ajke amar birthday</button>
             <button type="button">which products should I restock?</button>
           </div>
 
@@ -554,6 +627,6 @@
         </aside>
       </div>
     </main>
-    <script src="./chat.js?v=20260515-image-examples"></script>
+    <script src="./chat.js?v=20260518-clean-demos"></script>
   </body>
 </html>

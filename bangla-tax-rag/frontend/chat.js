@@ -63,6 +63,7 @@ const el = {
   catalogCount:    document.querySelector("#catalogCount"),
   catalogEmpty:    document.querySelector("#catalogEmpty"),
   imageExamples:   document.querySelector("#imageExamples"),
+  textExamples:    document.querySelector("#textExamples"),
 };
 
 init();
@@ -119,6 +120,13 @@ function bindEvents() {
     const card = e.target.closest(".image-example-card");
     if (!card) return;
     void useImageExample(card);
+  });
+  el.textExamples?.addEventListener("click", e => {
+    const card = e.target.closest(".text-example-card");
+    if (!card) return;
+    el.input.value = card.dataset.question || "";
+    resizeInput();
+    el.input.focus();
   });
   el.clearImageBtn.addEventListener("click", clearImage);
   el.confirmOrderBtn.addEventListener("click", () => void sendMessage("yes"));

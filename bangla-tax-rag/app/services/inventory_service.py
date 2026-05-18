@@ -96,6 +96,7 @@ from app.inventory.image_matcher import (
     query_image_id_from_b64,
 )
 from app.inventory.natural_answer import generate_ollama_answer
+from app.inventory.polite_boundary import classify_polite_boundary
 from app.inventory.proactive import build_proactive_message
 from app.inventory.policy import (
     INVENTORY_POLICY_VERSION,
@@ -935,6 +936,14 @@ class InventoryService:
         )
         if image_followup is not None:
             return image_followup
+        polite_boundary_response = self._try_polite_boundary_ask(
+            request=request,
+            trace_id=trace_id,
+            started_at=started_at,
+            memory_resolution=memory_resolution,
+        )
+        if polite_boundary_response is not None:
+            return polite_boundary_response
         conversational_reply = self._build_conversational_reply(
             question=request.question,
             assistant_mode=request.assistant_mode,
@@ -1151,6 +1160,116 @@ class InventoryService:
             fallback_reason_override=fallback_reason,
             retrieval_stage_counts=retrieval_stage_counts,
             retrieval_steps=retrieval_steps,
+        )
+        return response
+
+    def _try_polite_boundary_ask(
+        self,
+        *,
+        request: InventoryAskRequest,
+        trace_id: str,
+        started_at: float,
+        memory_resolution: InventoryMemoryResolution,
+    ) -> InventoryAskResponse | None:
+        decision = classify_polite_boundary(
+            request.question,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+        )
+        if decision is None:
+            return None
+
+        plan = InventoryAnswerPlan(
+            intent=decision.boundary_type,
+            detected_intent=decision.boundary_type,
+            intent_confidence=decision.confidence,
+            intent_reasons=[
+                "Handled by polite boundary and smart redirection layer.",
+                *decision.reasoning,
+            ],
+            strategy="polite_boundary_redirect",
+            preferences={
+                **decision.slots,
+                "language": decision.language,
+                "recommended_categories": list(decision.recommended_categories),
+            },
+            product_family="commerce_conversation",
+            next_best_question=decision.follow_up_question,
+            confidence_breakdown={
+                "boundary_confidence": decision.confidence,
+                "boundary_type": decision.boundary_type,
+            },
+            reasoning_steps=[
+                "Classified the message before retrieval to avoid irrelevant long answers.",
+                "Applied a friendly boundary and redirected toward a shopping path.",
+                *decision.reasoning,
+            ],
+            metadata_used=[
+                "polite_boundary.keyword_signals",
+                "polite_boundary.event_categories",
+                "polite_boundary.language_hint",
+            ],
+            abstain=False,
+        )
+        verification = InventoryAnswerVerification(
+            passed=True,
+            issues=[],
+            checked_final_answer=True,
+            final_answer_issues=[],
+        )
+        response = InventoryAskResponse(
+            status="success",
+            question=request.question,
+            answer=decision.answer,
+            assistant_mode=request.assistant_mode,
+            reply_style=request.reply_style,
+            answer_engine="deterministic",
+            confidence_score=decision.confidence,
+            trace_id=trace_id,
+            abstained=False,
+            abstention_reason=None,
+            total_hits=0,
+            applied_filters=request.filters.model_copy(deep=True),
+            hits=[],
+            recommended_product_ids=[],
+            cross_sell_product_ids=[],
+            follow_up_question=decision.follow_up_question,
+            answer_plan=plan,
+            verification=verification,
+            memory_resolution=memory_resolution,
+        )
+        try:
+            session_id = getattr(request, "session_id", None)
+            if session_id:
+                from app.inventory.conversation_state import get_state_store
+
+                get_state_store().record_turn(
+                    session_id=session_id,
+                    question=request.question,
+                    intent=decision.boundary_type,
+                    slots={
+                        **decision.slots,
+                        "polite_boundary_type": decision.boundary_type,
+                        "recommended_categories": list(decision.recommended_categories),
+                    },
+                    product_ids=[],
+                    primary_product_id=None,
+                    confidence=decision.confidence,
+                    abstained=False,
+                    clarification_pending=decision.boundary_type,
+                )
+        except Exception as exc:
+            logger.debug("Polite boundary state save failed: %s", exc)
+        self._save_inventory_chat_trace(
+            trace_id=trace_id,
+            response=response,
+            execution_path="polite_boundary_redirect",
+            started_at=started_at,
+            requested_answer_engine=request.answer_engine,
+            retrieved_hits=[],
+            reranked_hits=[],
+            retrieval_stage_counts={"polite_boundary_requests": 1},
+            reasoning_summary=list(plan.reasoning_steps),
         )
         return response
 

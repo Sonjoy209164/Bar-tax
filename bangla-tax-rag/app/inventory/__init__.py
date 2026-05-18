@@ -12,6 +12,7 @@ from app.inventory.intent import InventoryIntentClassifier, InventoryIntentResul
 from app.inventory.llm_slot_extractor import extract_slots_via_llm, merge_llm_slots_into_fashion_slots
 from app.inventory.memory import InventoryMemoryResolver, InventoryResolvedMemory
 from app.inventory.ontology import ProductOntology
+from app.inventory.polite_boundary import PoliteBoundaryDecision, classify_polite_boundary
 from app.inventory.order_workflow import OrderDraft, OrderWorkflowEngine, load_order
 from app.inventory.planner import InventoryAnswerPlanner
 from app.inventory.policy_qa import PolicyQAEngine, is_policy_question
@@ -62,6 +63,7 @@ __all__ = [
     "ProductEvidenceScore",
     "ProductFactorGraph",
     "ProductOntology",
+    "PoliteBoundaryDecision",
     "RiskCostDecisionAutomaton",
     "SyncResult",
     "WaitlistManager",
@@ -72,6 +74,7 @@ __all__ = [
     "extract_slots_via_llm",
     "is_image_search_query",
     "is_policy_question",
+    "classify_polite_boundary",
     "load_order",
     "low_stock_notice",
     "merge_llm_slots_into_fashion_slots",

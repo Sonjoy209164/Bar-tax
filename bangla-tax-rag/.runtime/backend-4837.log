@@ -1,0 +1,153 @@
+INFO:     Started server process [1608185]
+INFO:     Waiting for application startup.
+2026-05-18 11:59:52,332 | INFO | app.main | FastAPI app started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:4837 (Press CTRL+C to quit)
+2026-05-18 12:00:12,940 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=f9276fb5-86f0-44e7-8d07-f990ce156967 execution_path=polite_boundary_redirect intent=romantic_boundary answer_engine=deterministic total_hits=0 latency_ms=14.838 fallback_reason=None
+INFO:     127.0.0.1:32886 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-18 12:00:12,952 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=ab80f84d-876f-4982-a90b-e833dbefe018 execution_path=polite_boundary_redirect intent=event_need answer_engine=deterministic total_hits=0 latency_ms=9.53 fallback_reason=None
+INFO:     127.0.0.1:32890 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     27.147.145.26:56922 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+2026-05-18 12:00:38,114 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=d240a3cf-fbdd-465f-a2d0-c5ac741448aa execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=171.946 fallback_reason=None
+INFO:     127.0.0.1:50854 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38588 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38590 - "GET /frontend/chat.css?v=20260518-boundary-examples HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/shirt-ribbed-polo-black/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/shirt-ribbed-polo-white/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/chat.js?v=20260518-boundary-examples HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/jewelry-pearl-earring-white/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     27.147.145.26:38604 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38604 - "GET /health HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38604 - "GET /inventory/items HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/jewelry-pearl-necklace-white/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/hf-45856-vishudh-women-brown-kurta/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-28690-w-women-printed-beige-kurta/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-15970-turtle-check-men-navy-blue-shirt/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/hf-58513-tonga-women-maroon-top/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-59263-titan-women-silver-watch/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-58183-rocky-s-women-white-handbag/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-22198-timberland-men-black-casual-shoes/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/hf-30039-skagen-men-black-watch/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-20851-spice-art-women-ribbon-embroidery-red-clutch/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/hf-54588-sushilas-women-printed-green-kurta/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/shirt-ribbed-polo-olive/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/hf-26735-reebok-men-pack-of-2-pirates-of-the-caribbea/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-55465-revlon-super-lusterous-lipstick-304/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-48578-revv-men-steel-bracelet/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-55462-revlon-super-lustrous-plum-baby-lipstick-313/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/shirt-ribbed-polo-grey/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-55491-revlon-gold-dust-poussiere-doree-colorburst-/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-55097-pond-s-gold-radiance-precious-youth-serum/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-53759-puma-men-grey-t-shirt/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-9204-puma-men-future-cat-remix-sf-black-casual-sh/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/hf-29928-police-men-black-dial-watch-pl12889jvsb/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-18005-puma-men-long-logo-black-bermuda/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/hf-43993-police-women-passion-perfume/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-39386-peter-england-men-party-blue-jeans/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/saree-msn-pastel-peach/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-48311-pitaraa-women-bronze-beaded-bracelet/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/hf-39524-peter-england-unisex-orange-sleeve-bag/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-35913-peperone-women-black-white-handbag/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/saree-msn-pastel-mint/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-47957-murcia-women-blue-handbag/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/hf-59863-olay-women-total-effects-anti-ageing-eye-cre/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-21977-murcia-women-casual-brown-handbag/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-3168-nike-men-s-incinerate-msl-white-blue-shoe/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-44187-nike-fragrances-women-5th-element-perfume-15/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/hf-49653-mineral-women-green-top/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/shirt-formal-white-l/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/pant-cargo-olive-34/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/shirt-check-red-l/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/pant-jeans-blue-32/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/pant-formal-black-34/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/shirt-oxford-blue-m/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/saree-ktn-meena-navy/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/saree-ktn-meena-maroon/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-23278-maxima-ssteele-men-off-white-watch/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/saree-ktn-meena-gold/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-44984-maxima-women-white-dial-watch/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-49005-lucera-women-silver-ring/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/hf-21379-manchester-united-men-solid-black-track-pant/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/hf-48781-lucera-women-silver-pendant/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-57794-lotus-herbals-pomegranate-plum-energizing-sk/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-57756-lotus-herbals-neem-clove-purifying-face-wash/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-55233-lakme-nine-to-five-flawless-makeup-shell-fou/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-55202-lakme-lip-love-hottie-lip-conditioner/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/saree-jmd-lotus-green/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/saree-jmd-lotus-blue/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-55234-lakme-9to5-flawless-makeup-marble-foundation/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-55039-lakme-absolute-matte-merlot-lipstick-45/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-29742-kiara-women-teal-handbag/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-26960-jealous-21-women-purple-shirt/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-36934-giorgio-armani-women-idole-perfume/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-39988-gas-men-europa-white-shoes/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/jewelry-gold-bangle-set/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/hf-1855-inkfruit-mens-chain-reaction-t-shirt/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/hf-42841-french-connection-women-beige-handbag/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-59638-fnf-green-wedding-collection-sari/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-59607-fnf-pink-grey-wedding-collection-sari/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/saree-silk-floral-pink/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-51658-fossil-women-copper-chronograph-watch-ch2589/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/saree-silk-floral-cream/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/hf-31923-fabindia-women-blue-silk-sling-bag/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-54924-do-u-speak-green-men-blue-shorts/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-35322-fabindia-women-anusuya-silver-earrings/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-18653-fila-men-cush-flex-black-slippers/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-30805-fabindia-men-striped-green-shirt/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/hf-43967-dkny-women-red-delicious-perfume/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-20099-diva-women-embroided-green-kurta/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/hf-18461-david-beckham-signature-men-deos/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/saree-cot-block-mustard/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-56026-colorbar-soft-touch-mousse-lipstick-025/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/saree-cot-block-indigo/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-56019-colorbar-soft-touch-show-stopper-copper-lips/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-55834-colorbar-miss-reflective-body-shimmer-001/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/hf-55833-colorbar-glamour-radiant-glow-001/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-10268-clarks-men-hang-work-leather-black-formal-sh/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38588 - "GET /frontend/assets/demo_catalog/hf-17429-casio-g-shock-men-black-digital-watch-g-7710/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-2886-catwalk-women-leather-brown-flats/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/hf-59051-carlton-london-women-black-gold-toned-flats/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-46885-ben-10-boys-navy-blue-slippers/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-9036-buckaroo-men-flores-black-formal-shoes/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-11188-carrera-men-dial-steel-finish-strap-silver-w/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38620 - "GET /frontend/assets/demo_catalog/hf-39140-aneri-women-black-maroon-salwar-suit/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38630 - "GET /frontend/assets/demo_catalog/hf-39716-arrow-woman-women-blue-dress/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38634 - "GET /frontend/assets/demo_catalog/hf-59435-arrow-men-black-formal-shoes/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38604 - "GET /frontend/assets/demo_catalog/hf-47359-baggit-women-brown-handbag/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     27.147.145.26:38590 - "GET /frontend/assets/demo_catalog/hf-12967-adidas-men-spry-m-black-sandals/primary.jpg HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:43176 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43182 - "GET /frontend/chat.css?v=20260518-clean-demos HTTP/1.1" 200 OK
+INFO:     27.147.145.26:45374 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+INFO:     27.147.145.26:42528 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+INFO:     27.147.145.26:42530 - "GET /frontend/chat.css?v=20260518-clean-demos HTTP/1.1" 200 OK
+INFO:     27.147.145.26:42528 - "GET /frontend/chat.js?v=20260518-clean-demos HTTP/1.1" 200 OK
+INFO:     27.147.145.26:42528 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     27.147.145.26:42528 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
+INFO:     27.147.145.26:42528 - "GET /health HTTP/1.1" 200 OK
+INFO:     27.147.145.26:42528 - "GET /inventory/items HTTP/1.1" 200 OK
+2026-05-18 12:22:23,732 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=48141512-4b6c-44e7-97ae-c05788f9b96c execution_path=polite_boundary_redirect intent=romantic_boundary answer_engine=deterministic total_hits=0 latency_ms=14.174 fallback_reason=None
+INFO:     27.147.145.26:50020 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-18 12:22:42,752 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=3088b484-dabc-4474-a540-8d7586f6b059 execution_path=polite_boundary_redirect intent=emotional_need answer_engine=deterministic total_hits=0 latency_ms=18.358 fallback_reason=None
+INFO:     27.147.145.26:32816 - "POST /inventory/ask HTTP/1.1" 200 OK
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 30603.36it/s]
+2026-05-18 12:23:08,372 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.039s]
+2026-05-18 12:23:08,388 | INFO | elastic_transport.transport | HEAD http://localhost:9200/inventory-rag [status:200 duration:0.002s]
+2026-05-18 12:23:08,404 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.016s]
+2026-05-18 12:23:08,449 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=6513ef67-a386-4d12-a1d9-bb8d7d3cefe2 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=6320.618 fallback_reason=That does not map cleanly to a supported inventory question I can answer from the current catalog.
+INFO:     27.147.145.26:42164 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-18 12:23:34,827 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.040s]
+2026-05-18 12:23:34,842 | INFO | elastic_transport.transport | HEAD http://localhost:9200/inventory-rag [status:200 duration:0.002s]
+2026-05-18 12:23:34,889 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.047s]
+2026-05-18 12:23:34,971 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=c383f0a8-8644-489a-917a-30e56a6ecc1b execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=374.289 fallback_reason=That does not map cleanly to a supported inventory question I can answer from the current catalog.
+INFO:     27.147.145.26:35660 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-18 12:23:47,842 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.021s]
+2026-05-18 12:23:47,856 | INFO | elastic_transport.transport | HEAD http://localhost:9200/inventory-rag [status:200 duration:0.003s]
+2026-05-18 12:23:47,879 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.022s]
+2026-05-18 12:23:47,958 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=ca5ff80f-bf28-49df-b63f-af20b7575069 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=317.026 fallback_reason=That does not map cleanly to a supported inventory question I can answer from the current catalog.
+INFO:     27.147.145.26:43042 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-18 12:33:22,569 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.026s]
+2026-05-18 12:33:22,582 | INFO | elastic_transport.transport | HEAD http://localhost:9200/inventory-rag [status:200 duration:0.002s]
+2026-05-18 12:33:22,600 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.018s]
+2026-05-18 12:33:22,615 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=26d01450-b60b-4c23-978f-c53ed81ab378 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=249.359 fallback_reason=That does not map cleanly to a supported inventory question I can answer from the current catalog.
+INFO:     27.147.145.26:47114 - "POST /inventory/ask HTTP/1.1" 200 OK

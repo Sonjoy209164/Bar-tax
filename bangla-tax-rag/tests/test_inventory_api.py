@@ -1917,6 +1917,45 @@ def test_inventory_support_mode_does_not_treat_white_product_name_as_greeting(tm
     assert response.answer_plan.detected_intent in {"product_search", "fashion_search"}
 
 
+def test_inventory_ask_uses_polite_boundary_for_romantic_joke(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+
+    response = service.ask(
+        InventoryAskRequest(
+            question="amar ekta gf lagbe",
+            assistant_mode="support",
+            reply_style="short",
+            answer_engine="deterministic",
+        )
+    )
+
+    assert response.total_hits == 0
+    assert response.answer_plan.intent == "romantic_boundary"
+    assert response.answer_plan.strategy == "polite_boundary_redirect"
+    assert "Girlfriend" in response.answer
+    assert "perfume" in response.answer
+    assert response.follow_up_question
+
+
+def test_inventory_ask_treats_vague_wedding_as_shopping_occasion(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    service = _build_inventory_service(tmp_path)
+
+    response = service.ask(
+        InventoryAskRequest(
+            question="amar ekta biyete jaowa dorkar",
+            assistant_mode="support",
+            reply_style="short",
+            answer_engine="deterministic",
+        )
+    )
+
+    assert response.total_hits == 0
+    assert response.answer_plan.intent == "event_need"
+    assert response.answer_plan.preferences["occasion"] == "wedding"
+    assert "saree" in response.answer_plan.preferences["recommended_categories"]
+    assert "wedding" in response.answer.casefold()
+
+
 @pytest.mark.anyio
 async def test_inventory_agentic_mode_handles_small_talk_without_searching(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     from app.api import routes_inventory

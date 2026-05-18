@@ -21,7 +21,7 @@ UGLY_FALLBACK_PHRASES = (
     "That does not map cleanly",
     "supported inventory question",
 )
-DEAD_INTENTS = {"sales_no_match", "support_no_match", "unknown"}
+DEAD_INTENTS = {"sales_no_match", "support_no_match"}
 
 
 def build_cases() -> list[dict[str, str]]:

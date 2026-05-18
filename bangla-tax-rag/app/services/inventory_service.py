@@ -146,6 +146,7 @@ _UNSUPPORTED_PRODUCT_TERMS = [
     "bike",
     "car",
 ]
+_STRICT_UNSUPPORTED_PRODUCT_TERMS = {"laptop", "phone", "mobile phone", "television", "tv", "camera"}
 _OUT_OF_DOMAIN_INVENTORY_PHRASES = ["income tax", "tax rate", "bangladesh tax", "legal question"]
 _FIRST_NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
 _BOOLEAN_TRUE_VALUES = {"1", "true", "yes", "y", "on", "supported", "available", "included"}
@@ -7230,6 +7231,17 @@ class InventoryService:
         except Exception:
             return False
         for item in catalog.values():
+            attributes = item.attributes or {}
+            exact_fields = (
+                item.category,
+                attributes.get("category_key"),
+                attributes.get("product_type"),
+                attributes.get("hf_article_type"),
+            )
+            if any(self._normalize_search_text(str(field)) == normalized_term for field in exact_fields if field):
+                return True
+            if normalized_term in _STRICT_UNSUPPORTED_PRODUCT_TERMS:
+                continue
             searchable = " ".join(
                 part
                 for part in (

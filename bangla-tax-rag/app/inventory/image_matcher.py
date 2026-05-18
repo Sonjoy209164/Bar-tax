@@ -621,11 +621,7 @@ def _apply_exact_match_gate(enriched: list[ImageMatchResult]) -> list[ImageMatch
             return _downgrade_primary(enriched, "likely_same_design", "pattern_only")
     if len(enriched) >= 2:
         runner_up = next(
-            (
-                hit for hit in enriched[1:]
-                if hit.product_id != primary.product_id
-                and not _same_visual_identity_group(primary, hit)
-            ),
+
             None,
         )
         if runner_up is not None:
@@ -634,25 +630,6 @@ def _apply_exact_match_gate(enriched: list[ImageMatchResult]) -> list[ImageMatch
                 return _downgrade_primary(enriched, "likely_same_design", "thin_top_margin")
     return enriched
 
-
-def _same_visual_identity_group(left: ImageMatchResult, right: ImageMatchResult) -> bool:
-    """True when two hits are catalog-confirmed sibling variants.
-
-    The exact-match gate should catch ambiguous unrelated near-twins. It should
-    not demote a real product-photo match just because same-design color
-    variants are close in embedding space; that is exactly why
-    `variant_group_id`/`design_id` exists.
-    """
-
-    left_keys = {
-        _normalize_identity(left.variant_group_id),
-        _normalize_identity(left.design_id),
-    } - {""}
-    right_keys = {
-        _normalize_identity(right.variant_group_id),
-        _normalize_identity(right.design_id),
-    } - {""}
-    return bool(left_keys & right_keys)
 
 
 def _downgrade_primary(

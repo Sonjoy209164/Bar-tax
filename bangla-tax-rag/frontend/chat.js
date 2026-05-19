@@ -22,6 +22,9 @@ const state = {
   answerEngine: "deterministic",
 };
 
+const IMAGE_UPLOAD_MAX_EDGE = 1280;
+const IMAGE_UPLOAD_JPEG_QUALITY = 0.86;
+
 const el = {
   workspace:       document.querySelector("#workspace"),
   chatPanel:       document.querySelector("#chatPanel"),
@@ -34,6 +37,7 @@ const el = {
   statusPill:      document.querySelector("#statusPill"),
   statusText:      document.querySelector("#statusText"),
   chips:           document.querySelector("#chips"),
+  imageUploadArea: document.querySelector("#imageUploadArea"),
   imageInput:      document.querySelector("#imageInput"),
   imagePreview:    document.querySelector("#imagePreview"),
   clearImageBtn:   document.querySelector("#clearImageBtn"),
@@ -116,6 +120,7 @@ function bindEvents() {
     el.input.focus();
   });
   el.imageInput.addEventListener("change", handleImageSelect);
+  bindImageDropAndPaste();
   el.imageExamples?.addEventListener("click", e => {
     const card = e.target.closest(".image-example-card");
     if (!card) return;
@@ -345,7 +350,12 @@ function catalogSearchText(item) {
 function firstCatalogImageUrl(item) {
   const images = Array.isArray(item?.images) ? item.images : [];
   const primary = images.find(image => image?.role === "primary") || images[0];
-  return primary?.url || primary?.local_path || null;
+  if (!primary) return null;
+  if (primary.url) return primary.url;
+  if (primary.local_path && item?.product_id && primary.image_id) {
+    return `/inventory/assets/${encodeURIComponent(item.product_id)}/${encodeURIComponent(primary.image_id)}`;
+  }
+  return primary.local_path || null;
 }
 
 function resolveCatalogAssetUrl(value) {
@@ -663,18 +673,99 @@ function addFeedbackRow(msgNode, question, answer, intent, feedbackContext = {})
 // ── Image Upload ───────────────────────────────────────────────────────────────
 
 function handleImageSelect(event) {
-  const file = event.target.files[0];
+  const file = event.target.files?.[0];
   if (!file) return;
+  setPendingImageFromFile(file);
+}
+
+function bindImageDropAndPaste() {
+  const dropTargets = [el.imageUploadArea, el.chatPanel].filter(Boolean);
+  let dragDepth = 0;
+
+  dropTargets.forEach(target => {
+    target.addEventListener("dragenter", event => {
+      if (!eventHasImageFile(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dragDepth += 1;
+      setImageDropActive(true);
+    });
+    target.addEventListener("dragover", event => {
+      if (!eventHasImageFile(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "copy";
+      setImageDropActive(true);
+    });
+    target.addEventListener("dragleave", event => {
+      if (!eventHasImageFile(event)) return;
+      event.stopPropagation();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (!dragDepth) setImageDropActive(false);
+    });
+    target.addEventListener("drop", event => {
+      if (!eventHasImageFile(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dragDepth = 0;
+      setImageDropActive(false);
+      const file = firstImageFile(event.dataTransfer?.files);
+      if (file) {
+        setPendingImageFromFile(file);
+      } else {
+        showImageHint("Drop an image file to search.");
+      }
+    });
+  });
+
+  document.addEventListener("paste", event => {
+    const file = firstClipboardImage(event.clipboardData);
+    if (!file) return;
+    event.preventDefault();
+    setPendingImageFromFile(file, file.name || "pasted-screenshot.png");
+  });
+}
+
+function eventHasImageFile(event) {
+  const types = Array.from(event.dataTransfer?.types || []);
+  if (types.includes("Files")) return true;
+  return firstImageFile(event.dataTransfer?.files) !== null;
+}
+
+function firstImageFile(fileList) {
+  return Array.from(fileList || []).find(file => isImageFile(file)) || null;
+}
+
+function firstClipboardImage(clipboardData) {
+  const items = Array.from(clipboardData?.items || []);
+  for (const item of items) {
+    if (String(item.type || "").startsWith("image/")) {
+      const file = item.getAsFile();
+      if (file) return file;
+    }
+  }
+  return firstImageFile(clipboardData?.files);
+}
+
+function isImageFile(file) {
+  return Boolean(file && String(file.type || "").startsWith("image/"));
+}
+
+function setPendingImageFromFile(file, fallbackName = "image-search-upload.png") {
+  if (!isImageFile(file)) {
+    showImageHint("Please use a JPG, PNG, WEBP, or screenshot image.");
+    return;
+  }
   const reader = new FileReader();
-  reader.onload = e => {
-    const dataUrl = e.target.result;
-    state.pendingImageB64 = dataUrl.split(",")[1];
-    state.pendingImageName = file.name;
-    el.imagePreview.src = dataUrl;
-    el.imagePreview.style.display = "block";
-    el.clearImageBtn.style.display = "inline";
-    el.imageLabel.textContent = file.name.slice(0, 24) + (file.name.length > 24 ? "…" : "");
+  reader.onload = async e => {
+    try {
+      const dataUrl = await normalizeImageDataUrl(String(e.target.result || ""));
+      setPendingImageFromDataUrl(dataUrl, file.name || fallbackName);
+    } catch (_) {
+      setPendingImageFromDataUrl(String(e.target.result || ""), file.name || fallbackName);
+    }
   };
+  reader.onerror = () => showImageHint("Could not read this image. Try another file.");
   reader.readAsDataURL(file);
 }
 
@@ -689,12 +780,7 @@ async function useImageExample(card) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const blob = await response.blob();
     const dataUrl = await blobToDataUrl(blob);
-    state.pendingImageB64 = dataUrl.split(",", 2)[1];
-    state.pendingImageName = name;
-    el.imagePreview.src = dataUrl;
-    el.imagePreview.style.display = "block";
-    el.clearImageBtn.style.display = "inline";
-    el.imageLabel.textContent = name;
+    setPendingImageFromDataUrl(dataUrl, name);
     el.input.value = question;
     resizeInput();
     el.input.focus();
@@ -712,6 +798,71 @@ function blobToDataUrl(blob) {
   });
 }
 
+function normalizeImageDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const width = img.naturalWidth || img.width;
+      const height = img.naturalHeight || img.height;
+      if (!width || !height) {
+        resolve(dataUrl);
+        return;
+      }
+      const maxEdge = Math.max(width, height);
+      if (maxEdge <= IMAGE_UPLOAD_MAX_EDGE) {
+        resolve(dataUrl);
+        return;
+      }
+      const scale = IMAGE_UPLOAD_MAX_EDGE / maxEdge;
+      const nextWidth = Math.max(1, Math.round(width * scale));
+      const nextHeight = Math.max(1, Math.round(height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = nextWidth;
+      canvas.height = nextHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, nextWidth, nextHeight);
+      ctx.drawImage(img, 0, 0, nextWidth, nextHeight);
+      resolve(canvas.toDataURL("image/jpeg", IMAGE_UPLOAD_JPEG_QUALITY));
+    };
+    img.onerror = () => reject(new Error("Image resize failed"));
+    img.src = dataUrl;
+  });
+}
+
+function setPendingImageFromDataUrl(dataUrl, name) {
+  const imageB64 = dataUrl.split(",", 2)[1];
+  if (!imageB64) {
+    showImageHint("Could not prepare this image. Try a JPG or PNG.");
+    return;
+  }
+  state.pendingImageB64 = imageB64;
+  state.pendingImageName = name || "image-search-upload.png";
+  el.imagePreview.src = dataUrl;
+  el.imagePreview.style.display = "block";
+  el.clearImageBtn.style.display = "inline";
+  el.imageUploadArea?.classList.add("image-ready");
+  showImageHint(`Ready: ${shortImageName(state.pendingImageName)}`);
+  el.input.focus();
+}
+
+function setImageDropActive(active) {
+  el.imageUploadArea?.classList.toggle("drag-active", Boolean(active));
+}
+
+function showImageHint(text) {
+  el.imageLabel.textContent = text;
+}
+
+function shortImageName(name) {
+  const clean = String(name || "image").trim();
+  return clean.length > 28 ? `${clean.slice(0, 25)}...` : clean;
+}
+
 function clearImage() {
   state.pendingImageB64 = null;
   state.pendingImageName = null;
@@ -719,7 +870,8 @@ function clearImage() {
   el.imagePreview.style.display = "none";
   el.imagePreview.src = "";
   el.clearImageBtn.style.display = "none";
-  el.imageLabel.textContent = "";
+  el.imageUploadArea?.classList.remove("drag-active", "image-ready");
+  el.imageLabel.textContent = "Drag, paste, or choose a product photo.";
 }
 
 // ── Send ───────────────────────────────────────────────────────────────────────
@@ -793,6 +945,7 @@ async function sendMessage(rawText) {
     const response = await apiPost("/inventory/ask", payload);
     const answer = response.answer || "No answer returned.";
     thinking.querySelector(".body").textContent = answer;
+    renderProductResults(thinking, response);
     renderMeta(thinking, response);
 
     const intent = response?.answer_plan?.intent;
@@ -964,39 +1117,119 @@ function renderImageResults(node, response) {
   const grid = document.createElement("div");
   grid.className = "image-results";
   hits.forEach(hit => {
-    const card = document.createElement("div");
-    card.className = "image-result-card";
-    if (hit.image_url) {
-      const img = document.createElement("img");
-      img.src = resolveCatalogAssetUrl(hit.image_url);
-      img.alt = hit.name || "Matched product";
-      img.loading = "lazy";
-      card.appendChild(img);
-    }
-    const body = document.createElement("div");
-    body.className = "image-result-body";
-    const badge = document.createElement("div");
-    badge.className = `image-result-badge ${badgeClass(hit.decision_label)}`;
-    badge.textContent = labelText(hit.decision_label || hit.match_type || "similar_style");
-    const name = document.createElement("p");
-    name.className = "image-result-name";
-    name.textContent = hit.name || hit.product_id || "Product";
-    const facts = document.createElement("div");
-    facts.className = "image-result-facts";
-    const price = typeof hit.price === "number" ? `BDT ${hit.price.toLocaleString()}` : "Price N/A";
-    const stock = Number.isFinite(hit.stock) ? `${hit.stock} in stock` : "Stock N/A";
-    const score = typeof hit.score === "number" ? `${Math.round(hit.score * 100)}% visual` : "visual match";
-    const color = hit.color ? ` · ${hit.color}` : "";
-    const size = hit.size ? ` · ${hit.size}` : "";
-    facts.textContent = `${price} · ${stock}${color}${size} · ${score}`;
-    body.appendChild(badge);
-    body.appendChild(name);
-    body.appendChild(facts);
-    card.appendChild(body);
-    grid.appendChild(card);
+    grid.appendChild(renderResultCard(hit, {
+      badge: hit.decision_label || hit.match_type || "similar_style",
+      scoreLabel: typeof hit.score === "number" ? `${Math.round(hit.score * 100)}% visual` : "visual match",
+      fallbackAlt: "Matched product",
+    }));
   });
   node.appendChild(grid);
   renderImageQuickActions(node, response);
+}
+
+function renderProductResults(node, response) {
+  const hits = productCardsFromResponse(response).slice(0, 6);
+  if (!hits.length) return;
+  const grid = document.createElement("div");
+  grid.className = "image-results product-results";
+  hits.forEach((hit, index) => {
+    grid.appendChild(renderResultCard(hit, {
+      badge: index === 0 ? "catalog_primary" : "catalog_match",
+      scoreLabel: typeof hit.score === "number" ? `${Math.round(hit.score * 100)}% match` : "catalog match",
+      fallbackAlt: "Product",
+    }));
+  });
+  node.appendChild(grid);
+  renderProductQuickActions(node, hits);
+}
+
+function productCardsFromResponse(response) {
+  const byId = new Map();
+  const catalogById = new Map((state.catalogItems || []).map(item => [String(item.product_id), item]));
+
+  function addProduct(productId, source = {}) {
+    const id = String(productId || source?.product_id || "").trim();
+    if (!id || byId.has(id)) return;
+    const catalogItem = catalogById.get(id);
+    const merged = {
+      ...(catalogItem || {}),
+      ...(source || {}),
+      product_id: id,
+    };
+    const imageUrl = source?.image_url || firstCatalogImageUrl(catalogItem) || firstCatalogImageUrl(source);
+    if (imageUrl) merged.image_url = imageUrl;
+    if (catalogItem?.attributes && !merged.attributes) merged.attributes = catalogItem.attributes;
+    byId.set(id, merged);
+  }
+
+  (response?.recommended_product_ids || []).forEach(id => addProduct(id));
+  (response?.cross_sell_product_ids || []).forEach(id => addProduct(id));
+  (response?.hits || []).forEach(hit => addProduct(hit?.product_id, hit));
+
+  return Array.from(byId.values()).filter(hit => hit.image_url || hit.name || hit.product_id);
+}
+
+function renderResultCard(hit, options = {}) {
+  const card = document.createElement("div");
+  card.className = "image-result-card";
+
+  const imageUrl = hit.image_url || firstCatalogImageUrl(hit);
+  if (imageUrl) {
+    const img = document.createElement("img");
+    img.src = resolveCatalogAssetUrl(imageUrl);
+    img.alt = hit.name || options.fallbackAlt || "Product";
+    img.loading = "lazy";
+    card.appendChild(img);
+  }
+
+  const body = document.createElement("div");
+  body.className = "image-result-body";
+  const badge = document.createElement("div");
+  badge.className = `image-result-badge ${badgeClass(options.badge)}`;
+  badge.textContent = labelText(options.badge || "catalog_match");
+  const name = document.createElement("p");
+  name.className = "image-result-name";
+  name.textContent = hit.name || hit.product_id || "Product";
+  const facts = document.createElement("div");
+  facts.className = "image-result-facts";
+  facts.textContent = resultFacts(hit, options.scoreLabel);
+  body.appendChild(badge);
+  body.appendChild(name);
+  body.appendChild(facts);
+  card.appendChild(body);
+  return card;
+}
+
+function resultFacts(hit, scoreLabel) {
+  const price = typeof hit.price === "number"
+    ? `${hit.currency || "BDT"} ${hit.price.toLocaleString()}`
+    : "Price N/A";
+  const stock = Number.isFinite(hit.stock) ? `${hit.stock} in stock` : "Stock N/A";
+  const attrs = hit.attributes || {};
+  const color = hit.color || attrs.color || attrs.color_family || "";
+  const size = hit.size || attrs.size || attrs.sizes || "";
+  const colorText = color ? ` · ${String(color).replaceAll("|", ", ")}` : "";
+  const sizeText = size ? ` · ${String(size).replaceAll("|", ", ")}` : "";
+  return `${price} · ${stock}${colorText}${sizeText} · ${scoreLabel || "catalog match"}`;
+}
+
+function renderProductQuickActions(node, hits) {
+  if (!hits.length) return;
+  const actions = ["Price koto?", "Available size?", "Show similar", "Order this"];
+  const row = document.createElement("div");
+  row.className = "image-result-actions product-result-actions";
+  actions.forEach(text => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = text;
+    btn.addEventListener("click", () => {
+      el.input.value = text;
+      resizeInput();
+      el.input.focus();
+    });
+    row.appendChild(btn);
+  });
+  node.appendChild(row);
 }
 
 function renderImageQuickActions(node, response) {
@@ -1051,6 +1284,8 @@ function labelText(value) {
     no_confident_match: "Not confident",
     visual_similar: "Similar",
     same_design_variant: "Same design",
+    catalog_primary: "Top match",
+    catalog_match: "Catalog match",
   };
   return labels[value] || String(value || "Similar").replaceAll("_", " ");
 }
@@ -1059,6 +1294,8 @@ function badgeClass(value) {
   if (value === "confirmed_exact") return "exact";
   if (value === "confirmed_same_design_variant" || value === "likely_same_design") return "design";
   if (value === "no_confident_match") return "weak";
+  if (value === "catalog_primary") return "exact";
+  if (value === "catalog_match") return "similar";
   return "similar";
 }
 

@@ -116,18 +116,29 @@ class FashionRetailAssistant:
         "blouse": ("blouse", "blouses", "ready blouse", "stitched blouse", "ব্লাউজ", "রেডি ব্লাউজ"),
         "panjabi": ("panjabi", "punjabi", "kurta", "kurta pajama", "পাঞ্জাবি", "পাঞ্জাবী", "কুর্তা"),
         "kurti": ("kurti", "kameez", "tops", "কুর্তি", "কামিজ", "টপ"),
+        "dress": (
+            "dress",
+            "dresses",
+            "maxi",
+            "frock",
+            "gown",
+            "kaftan",
+            "ড্রেস",
+            "ম্যাক্সি",
+            "ফ্রক",
+            "গাউন",
+        ),
+        "tunic": ("tunic", "tunics", "টিউনিক"),
         "salwar_kameez": (
             "salwar kameez",
             "three piece",
             "3 piece",
             "three-piece",
-            "dress",
             "salwar",
             "সালোয়ার কামিজ",
             "সালওয়ার কামিজ",
             "থ্রি পিস",
             "৩ পিস",
-            "ড্রেস",
         ),
         "dupatta": ("dupatta", "orna", "orhna", "scarf", "দুপাট্টা", "ওড়না", "ওড়না", "স্কার্ফ"),
         "shawl": ("shawl", "stole", "শাল", "স্টোল"),
@@ -205,6 +216,8 @@ class FashionRetailAssistant:
         "blouse": "Blouse",
         "panjabi": "Panjabi",
         "kurti": "Kurti",
+        "dress": "Dress",
+        "tunic": "Tunic",
         "salwar_kameez": "Salwar Kameez",
         "dupatta": "Dupatta",
         "shawl": "Shawl",
@@ -227,6 +240,12 @@ class FashionRetailAssistant:
         "punjabi",
         "kurta",
         "kurti",
+        "dress",
+        "maxi",
+        "frock",
+        "gown",
+        "kaftan",
+        "tunic",
         "salwar",
         "kameez",
         "dupatta",
@@ -604,6 +623,14 @@ class FashionRetailAssistant:
         if not fashion_items:
             return None
 
+        exact_product_title = self.answer_exact_product_title(
+            question=question,
+            catalog=catalog,
+            top_k=top_k,
+        )
+        if exact_product_title is not None:
+            return exact_product_title
+
         # Carry prior turns only for true follow-up language ("same design",
         # "eta", "tar dam"). If the current message names a fresh category,
         # budget, occasion, or gender, old context must not override it.
@@ -622,6 +649,15 @@ class FashionRetailAssistant:
         )
         if not self.should_handle(question=question, slots=slots, fashion_items=fashion_items):
             return None
+
+        exact_product_title = self._answer_exact_product_title(
+            question=question,
+            items=fashion_items,
+            slots=slots,
+            top_k=top_k,
+        )
+        if exact_product_title is not None:
+            return exact_product_title
 
         # Clarification gate — runs once, before dispatching to intent handlers.
         # If the bot is uncertain or the query is too broad, ask one focused
@@ -661,6 +697,23 @@ class FashionRetailAssistant:
                 return outcome
 
         return self._answer_fashion_search(question=question, items=fashion_items, slots=slots, top_k=top_k)
+
+    def answer_exact_product_title(
+        self,
+        *,
+        question: str,
+        catalog: dict[str, InventoryItemRecord],
+        top_k: int = 5,
+    ) -> FashionRetailOutcome | None:
+        fashion_items = [item for item in catalog.values() if self.is_fashion_item(item)]
+        if not fashion_items:
+            return None
+        return self._answer_exact_product_title(
+            question=question,
+            items=fashion_items,
+            slots=FashionRetailSlots(language=self._detect_language(question)),
+            top_k=top_k,
+        )
 
     def _should_use_conversation_context(self, question: str) -> bool:
         text = normalize_fashion_text(question)
@@ -1028,6 +1081,175 @@ class FashionRetailAssistant:
                 f"Clarification triggered: {decision.reason}",
                 f"Missing slot: {decision.missing_slot}",
             ),
+        )
+
+    def _answer_exact_product_title(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        top_k: int,
+    ) -> FashionRetailOutcome | None:
+        """
+        Product names and SKUs are hard catalog evidence. They must bypass the
+        broad-category clarification gate; otherwise a title like
+        "Long Sleeve Hooded T-Shirt" gets treated as "shirt" and the bot asks
+        irrelevant occasion/color questions.
+        """
+        query_key = self._product_lookup_key(question)
+        if not query_key:
+            return None
+        query_compact = self._compact_lookup_key(query_key)
+
+        matches: list[tuple[InventoryItemRecord, int]] = []
+        seen: set[str] = set()
+        for item in items:
+            name_key = self._product_lookup_key(item.name)
+            sku_key = self._product_lookup_key(item.sku)
+            name_compact = self._compact_lookup_key(name_key)
+            sku_compact = self._compact_lookup_key(sku_key)
+
+            name_match = (
+                self._is_specific_product_name(name_key)
+                and (
+                    name_key == query_key
+                    or name_key in query_key
+                    or (len(name_compact) >= 8 and name_compact in query_compact)
+                )
+            )
+            sku_match = bool(sku_key) and (
+                sku_key == query_key
+                or sku_key in query_key
+                or (len(sku_compact) >= 5 and sku_compact in query_compact)
+            )
+            if not (name_match or sku_match):
+                continue
+            if item.product_id in seen:
+                continue
+            seen.add(item.product_id)
+            specificity = 1000 + len(sku_key) if sku_match else len(name_key.split())
+            matches.append((item, specificity))
+
+        if not matches:
+            return None
+
+        max_specificity = max(specificity for _item, specificity in matches)
+        matches = [(item, specificity) for item, specificity in matches if specificity == max_specificity]
+        matched_items = [item for item, _specificity in matches]
+
+        matches = sorted(
+            matched_items,
+            key=lambda item: (
+                0 if item.stock > 0 else 1,
+                -item.stock,
+                self._item_price_value(item),
+                item.name.casefold(),
+                self._item_color_sort_text(item),
+            ),
+        )
+        selected = matches[:top_k]
+        canonical_name = selected[0].name
+        colors = self._color_stock_list(matches, include_stock=False)
+        in_stock = [item for item in matches if item.stock > 0]
+
+        if in_stock:
+            answer = (
+                f"Yes — I found {len(matches)} catalog match(es) for {canonical_name}. "
+                f"Best match: {self._format_option(selected[0])}."
+            )
+            if len(selected) > 1:
+                answer += f" More variants: {self._natural_join(self._format_option(item) for item in selected[1:3])}."
+            if colors:
+                answer += f" Colors I can see: {colors}."
+            confidence = 0.96
+        else:
+            answer = (
+                f"I found {len(matches)} catalog match(es) for {canonical_name}, "
+                "but they are currently out of stock."
+            )
+            if colors:
+                answer += f" Colors in the catalog: {colors}."
+            answer += f" Catalog records: {self._natural_join(self._format_option(item) for item in selected[:3])}."
+            confidence = 0.93
+
+        exact_slots = replace(slots, intent="fashion_search", ambiguity_reason=None)
+        return self._outcome(
+            answer=answer,
+            intent="fashion_search",
+            product_ids=tuple(item.product_id for item in selected),
+            total_matches=len(matches),
+            confidence=confidence,
+            slots=exact_slots,
+            follow_up_question=None,
+            abstained=False,
+            abstention_reason=None,
+            reasoning_steps=(
+                "Detected an exact catalog product title/SKU in the user query and bypassed broad-category clarification.",
+                "Returned catalog facts directly, including stock status, so the answer cannot drift into occasion guessing.",
+            ),
+        )
+
+    @staticmethod
+    def _product_lookup_key(value: object | None) -> str:
+        text = normalize_fashion_text(value)
+        text = text.replace("-", " ").replace("+", " plus ")
+        return " ".join(text.split())
+
+    @staticmethod
+    def _compact_lookup_key(value: object | None) -> str:
+        return re.sub(r"[^a-z0-9\u0980-\u09ff]+", "", str(value or ""))
+
+    def _is_specific_product_name(self, name_key: str) -> bool:
+        if self._is_generic_product_lookup_name(name_key):
+            return False
+        tokens = name_key.split()
+        if len(tokens) >= 2:
+            return True
+        # Single-word catalog names such as "shirt", "saree", or "panjabi"
+        # are category labels, not safe exact-title evidence.
+        return len(name_key) >= 12
+
+    def _is_generic_product_lookup_name(self, name_key: str) -> bool:
+        if not name_key:
+            return True
+        generic_names = {
+            "accessory",
+            "accessories",
+            "bag",
+            "beauty",
+            "blouse",
+            "cosmetic",
+            "cosmetics",
+            "dress",
+            "dupatta",
+            "frock",
+            "jewelry",
+            "kurti",
+            "pant",
+            "panjabi",
+            "perfume",
+            "salwar",
+            "salwar kameez",
+            "saree",
+            "shawl",
+            "shirt",
+            "shoe",
+            "shoes",
+            "t shirt",
+            "tee shirt",
+            "tshirt",
+            "trouser",
+            "trousers",
+            "tunic",
+            "watch",
+        }
+        if name_key in generic_names:
+            return True
+        return any(
+            name_key == self._product_lookup_key(alias)
+            for aliases in self.CATEGORY_ALIASES.values()
+            for alias in aliases
         )
 
     def _estimate_match_count(

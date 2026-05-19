@@ -91,6 +91,165 @@ def test_fashion_retail_searches_fashion_slots_not_old_office_category() -> None
     assert "Pastel Soft Muslin Saree" in outcome.answer
 
 
+def test_fashion_retail_treats_dress_as_dress_not_salwar_kameez() -> None:
+    assistant = FashionRetailAssistant()
+    catalog = {
+        "dress-black-maxi": InventoryItemRecord(
+            product_id="dress-black-maxi",
+            sku="DRESS001",
+            name="Black Georgette Maxi",
+            category="Dress",
+            price=2500,
+            stock=1,
+            status="active",
+            attributes={
+                "category_key": "dress",
+                "color": "Black",
+                "color_family": "black",
+                "garment_type": "maxi",
+            },
+            tags=["Dress", "Black", "Georgette"],
+        ),
+        "salwar-black": InventoryItemRecord(
+            product_id="salwar-black",
+            sku="SALWAR001",
+            name="Black Salwar Kameez",
+            category="Salwar Kameez",
+            price=2200,
+            stock=1,
+            status="active",
+            attributes={
+                "category_key": "salwar_kameez",
+                "color": "Black",
+                "color_family": "black",
+            },
+            tags=["Salwar Kameez", "Black"],
+        ),
+    }
+
+    outcome = assistant.answer(
+        question="black dress under 3000",
+        catalog=catalog,
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.slots.category_key == "dress"
+    assert outcome.slots.category_label == "Dress"
+    assert outcome.product_ids[0] == "dress-black-maxi"
+
+
+def test_fashion_retail_exact_product_title_bypasses_clarification() -> None:
+    assistant = FashionRetailAssistant()
+    catalog = {
+        "hooded-blue": InventoryItemRecord(
+            product_id="hooded-blue",
+            sku="MLHTS14055",
+            name="Long Sleeve Hooded T-Shirt",
+            category="T Shirt",
+            price=1290,
+            currency="BDT",
+            stock=0,
+            status="inactive",
+            attributes={
+                "category_key": "shirt",
+                "color": "Blue",
+                "color_family": "blue",
+            },
+            tags=["Long Sleeve Hooded T-Shirt", "T Shirt", "Blue"],
+        ),
+        "hooded-red": InventoryItemRecord(
+            product_id="hooded-red",
+            sku="MLHTS14057",
+            name="Long Sleeve Hooded T-Shirt",
+            category="T Shirt",
+            price=1290,
+            currency="BDT",
+            stock=0,
+            status="inactive",
+            attributes={
+                "category_key": "shirt",
+                "color": "Red",
+                "color_family": "red",
+            },
+            tags=["Long Sleeve Hooded T-Shirt", "T Shirt", "Red"],
+        ),
+        "generic-tshirt": InventoryItemRecord(
+            product_id="generic-tshirt",
+            sku="TSHIRT001",
+            name="T-Shirt",
+            category="T Shirt",
+            price=700,
+            currency="BDT",
+            stock=5,
+            status="active",
+            attributes={"category_key": "shirt"},
+            tags=["T Shirt"],
+        ),
+    }
+    for index in range(20):
+        product_id = f"generic-shirt-{index}"
+        catalog[product_id] = InventoryItemRecord(
+            product_id=product_id,
+            sku=f"SHIRT{index:03d}",
+            name=f"Everyday Shirt {index}",
+            category="Shirt",
+            price=1500 + index,
+            currency="BDT",
+            stock=3,
+            status="active",
+            attributes={"category_key": "shirt"},
+            tags=["shirt"],
+        )
+
+    outcome = assistant.answer(
+        question="Long Sleeve Hooded T-Shirt",
+        catalog=catalog,
+        filters=InventorySearchFilters(),
+        allow_llm_slots=False,
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_search"
+    assert outcome.follow_up_question is None
+    assert outcome.product_ids == ("hooded-blue", "hooded-red")
+    assert "generic-tshirt" not in outcome.product_ids
+    assert "out of stock" in outcome.answer.casefold()
+    assert "occasion" not in outcome.answer.casefold()
+    assert "preferred color" not in outcome.answer.casefold()
+
+
+def test_fashion_retail_exact_product_title_inside_phrase_returns_catalog_facts() -> None:
+    assistant = FashionRetailAssistant()
+    catalog = {
+        "hooded-blue": InventoryItemRecord(
+            product_id="hooded-blue",
+            sku="MLHTS14055",
+            name="Long Sleeve Hooded T-Shirt",
+            category="T Shirt",
+            price=1290,
+            currency="BDT",
+            stock=4,
+            status="active",
+            attributes={"category_key": "shirt", "color": "Blue", "color_family": "blue"},
+            tags=["Long Sleeve Hooded T-Shirt", "T Shirt", "Blue"],
+        ),
+    }
+
+    outcome = assistant.answer(
+        question="do you have Long Sleeve Hooded T Shirt?",
+        catalog=catalog,
+        filters=InventorySearchFilters(),
+        allow_llm_slots=False,
+    )
+
+    assert outcome is not None
+    assert outcome.product_ids == ("hooded-blue",)
+    assert "Yes" in outcome.answer
+    assert "4 in stock" in outcome.answer
+    assert outcome.follow_up_question is None
+
+
 def test_fashion_retail_matches_accessories_by_compatibility_metadata() -> None:
     assistant = FashionRetailAssistant()
     outcome = assistant.answer(

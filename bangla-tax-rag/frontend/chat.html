@@ -14,6 +14,14 @@
         padding: 4px 10px;
         border-top: 1px solid var(--line);
         background: var(--panel);
+        transition: background 0.15s ease, box-shadow 0.15s ease;
+      }
+      .image-upload-area.drag-active {
+        background: var(--soft);
+        box-shadow: inset 0 0 0 2px rgba(15, 118, 110, 0.3);
+      }
+      .image-upload-area.image-ready {
+        background: #f7fbfa;
       }
       .image-upload-area label {
         cursor: pointer;
@@ -583,11 +591,11 @@
 
           <!-- Image upload -->
           <div class="image-upload-area" id="imageUploadArea">
-            <label for="imageInput">📷 Find by Image</label>
+            <label for="imageInput" title="Choose, drag, or paste a product screenshot">📷 Image Search</label>
             <input type="file" id="imageInput" accept="image/*" />
             <img id="imagePreview" alt="Selected image" />
             <button type="button" id="clearImageBtn" title="Remove image">✕</button>
-            <span id="imageLabel" style="font-size:0.75rem;color:var(--muted);"></span>
+            <span id="imageLabel" style="font-size:0.75rem;color:var(--muted);">Drag, paste, or choose a product photo.</span>
           </div>
 
           <!-- Composer with mic -->
@@ -627,6 +635,6 @@
         </aside>
       </div>
     </main>
-    <script src="./chat.js?v=20260518-clean-demos"></script>
+    <script src="./chat.js?v=20260519-text-product-cards"></script>
   </body>
 </html>

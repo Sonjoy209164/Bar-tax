@@ -1027,7 +1027,11 @@ def primary_image_asset(item: InventoryItemRecord) -> InventoryImageAsset | None
 def primary_image_url(item: InventoryItemRecord) -> str | None:
     asset = primary_image_asset(item)
     if asset is not None:
-        return asset.url or asset.local_path
+        if asset.url:
+            return asset.url
+        if asset.local_path and asset.image_id:
+            return f"/inventory/assets/{item.product_id}/{asset.image_id}"
+        return asset.local_path
     images = item.metadata.get("images") or item.attributes.get("images")
     if isinstance(images, list) and images:
         first = images[0]

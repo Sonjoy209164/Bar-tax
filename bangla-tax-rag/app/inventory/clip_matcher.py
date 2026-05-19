@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import logging
+import os
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,7 +31,18 @@ _HTTP_HEADERS = {"User-Agent": "bangla-tax-rag-image-search/1.0"}
 _PATTERN_SUFFIX = "::pattern"
 
 # Persisted cache so cold start does not re-encode the whole catalog.
-_CACHE_PATH = Path("data/inventory/clip_embeddings_cache.json")
+_CACHE_PATH = Path(os.environ.get("IMAGE_SEARCH_CLIP_CACHE_PATH", "data/inventory/clip_embeddings_cache.json"))
+_MAX_SYNC_PRECOMPUTE_ITEMS = int(os.environ.get("IMAGE_SEARCH_MAX_SYNC_PRECOMPUTE_ITEMS", "300"))
+_ALLOW_SYNC_PRECOMPUTE = os.environ.get("IMAGE_SEARCH_ALLOW_SYNC_PRECOMPUTE", "").casefold() in {
+    "1",
+    "true",
+    "yes",
+}
+_LOCAL_FILES_ONLY = os.environ.get("IMAGE_SEARCH_CLIP_LOCAL_ONLY", "1").casefold() not in {
+    "0",
+    "false",
+    "no",
+}
 
 # A channel counts as "matched" for the agreement gate when its cosine clears
 # this floor. Low enough that genuine fashion neighbours register, high enough
@@ -76,10 +88,13 @@ def _load_clip():
     if _clip_model is not None:
         return _clip_model, _clip_processor
     try:
+        if _LOCAL_FILES_ONLY:
+            os.environ.setdefault("HF_HUB_OFFLINE", "1")
+            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         from transformers import CLIPModel, CLIPProcessor  # type: ignore[import]
-        logger.info("Loading CLIP model: %s", _MODEL_NAME)
-        _clip_processor = CLIPProcessor.from_pretrained(_MODEL_NAME)
-        _clip_model = CLIPModel.from_pretrained(_MODEL_NAME)
+        logger.info("Loading CLIP model: %s local_files_only=%s", _MODEL_NAME, _LOCAL_FILES_ONLY)
+        _clip_processor = CLIPProcessor.from_pretrained(_MODEL_NAME, local_files_only=_LOCAL_FILES_ONLY)
+        _clip_model = CLIPModel.from_pretrained(_MODEL_NAME, local_files_only=_LOCAL_FILES_ONLY)
         _clip_model.eval()
         logger.info("CLIP model loaded successfully")
     except ImportError:
@@ -282,6 +297,88 @@ def _try_load_persisted_cache(
     return True
 
 
+def _try_load_source_vector_cache(
+    catalog: dict[str, Any],
+    signature: tuple[tuple[str, str], ...],
+    *,
+    cache_path: Path = _CACHE_PATH,
+) -> bool:
+    """Load the Le Reve/baseline vector cache format without re-encoding images.
+
+    Research scripts save cache entries by image-source fingerprint:
+
+        {path}|{mtime_ns}|{size}|{embedding_version} -> vector
+
+    The online matcher needs product/image embedding keys. This adapter bridges
+    those formats and avoids doing a catalog-wide CLIP encode inside chat.
+    """
+    global _catalog_embeddings, _catalog_image_urls, _catalog_embedding_product_ids
+    global _catalog_embedding_signature
+
+    if not cache_path.exists():
+        return False
+    try:
+        with cache_path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception as exc:  # pragma: no cover - corrupt cache must not crash
+        logger.debug("CLIP source-vector cache read failed: %s", exc)
+        return False
+    if data.get("embedding_version") != EMBEDDING_VERSION:
+        return False
+    vectors = data.get("vectors")
+    if not isinstance(vectors, dict) or not vectors:
+        return False
+
+    embeddings: dict[str, list[float]] = {}
+    image_urls: dict[str, str] = {}
+    product_ids: dict[str, str] = {}
+    missing = 0
+    for item in catalog.values():
+        pid = str(getattr(item, "product_id", "") or "")
+        if not pid:
+            continue
+        loaded_for_product = False
+        for image_id, source in _image_sources(item):
+            cache_key = _source_cache_key(source)
+            if not cache_key:
+                continue
+            vec = vectors.get(cache_key)
+            if not vec:
+                continue
+            embedding_key = f"{pid}::{image_id}"
+            embeddings[embedding_key] = list(vec)
+            image_urls[embedding_key] = source
+            product_ids[embedding_key] = pid
+            loaded_for_product = True
+        if not loaded_for_product:
+            missing += 1
+
+    if not embeddings:
+        return False
+    _catalog_embeddings = embeddings
+    _catalog_image_urls = image_urls
+    _catalog_embedding_product_ids = product_ids
+    _catalog_embedding_signature = signature
+    logger.info(
+        "CLIP source-vector cache hit: loaded %d embeddings from %s; missing_products=%d",
+        len(_catalog_embeddings),
+        cache_path,
+        missing,
+    )
+    return True
+
+
+def _source_cache_key(source: str) -> str | None:
+    if source.startswith(("http://", "https://")):
+        return None
+    try:
+        path = Path(source)
+        stat = path.stat()
+    except Exception:
+        return None
+    return f"{path}|{stat.st_mtime_ns}|{stat.st_size}|{EMBEDDING_VERSION}"
+
+
 def _persist_cache(
     signature: tuple[tuple[str, str], ...],
     *,
@@ -313,6 +410,19 @@ def precompute_catalog_embeddings(
         return len(_catalog_embeddings)
     if not force and _try_load_persisted_cache(signature):
         return len(_catalog_embeddings)
+    if not force and _try_load_source_vector_cache(catalog, signature):
+        return len(_catalog_embeddings)
+    if not force and not _ALLOW_SYNC_PRECOMPUTE and len(catalog) > _MAX_SYNC_PRECOMPUTE_ITEMS:
+        logger.warning(
+            "Skipping synchronous CLIP catalog precompute for %d items. "
+            "Build a cache first or set IMAGE_SEARCH_ALLOW_SYNC_PRECOMPUTE=1.",
+            len(catalog),
+        )
+        _catalog_embeddings = {}
+        _catalog_image_urls = {}
+        _catalog_embedding_product_ids = {}
+        _catalog_embedding_signature = signature
+        return 0
     model, _ = _load_clip()
     if model is None:
         return 0

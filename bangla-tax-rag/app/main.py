@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
+import asyncio
+import os
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes_eval import router as eval_router
@@ -22,6 +24,7 @@ from app.core.security import (
     require_api_key,
 )
 from app.core.settings import get_settings
+from app.services.inventory_service import get_inventory_service
 
 configure_logging()
 initial_settings = get_settings()
@@ -50,7 +53,35 @@ async def lifespan(_app: FastAPI):
             "sparse_index_dir": settings.sparse_index_dir,
         },
     )
+    if os.environ.get("IMAGE_SEARCH_WARM_ON_STARTUP", "").casefold() in {"1", "true", "yes"}:
+        await asyncio.to_thread(_warm_image_search)
     yield
+
+
+def _warm_image_search() -> None:
+    """Load image-search cache/model before the first customer screenshot.
+
+    This keeps the first drag/paste image query from paying catalog-cache and
+    CLIP model load costs. Failures are non-fatal because metadata fallback can
+    still answer.
+    """
+
+    try:
+        from app.inventory.clip_matcher import CLIPImageMatcher, precompute_catalog_embeddings
+
+        catalog = get_inventory_service().load_catalog()
+        embedding_count = precompute_catalog_embeddings(catalog)
+        clip_ready = CLIPImageMatcher.is_available() if embedding_count else False
+        logger.info(
+            "Image search warmup finished",
+            extra={
+                "catalog_items": len(catalog),
+                "embedding_count": embedding_count,
+                "clip_ready": clip_ready,
+            },
+        )
+    except Exception as exc:  # pragma: no cover - startup should stay resilient
+        logger.warning("Image search warmup skipped: %s", exc)
 
 
 app = FastAPI(title=initial_settings.app_name, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -95,6 +126,37 @@ async def frontend_runtime_config(request: Request) -> JSONResponse:
             "frontendPath": "/frontend/",
         }
     )
+
+
+@app.get("/inventory/assets/{product_id}/{image_id}", include_in_schema=False)
+async def inventory_image_asset(product_id: str, image_id: str) -> FileResponse:
+    """Serve catalog-owned local product images through a browser-safe URL.
+
+    Catalog records may store absolute POS/dataset paths such as
+    /mnt/nvme0n1p3/... Browsers cannot load those paths directly, so the UI uses
+    this route. The caller cannot provide an arbitrary filesystem path: the path
+    must already belong to the active catalog product/image record.
+    """
+
+    item = get_inventory_service().get_item(product_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail={"error": "inventory_item_not_found"})
+
+    image = next((asset for asset in item.images if asset.image_id == image_id), None)
+    if image is None or not image.local_path:
+        raise HTTPException(status_code=404, detail={"error": "inventory_image_not_found"})
+
+    candidate = Path(image.local_path)
+    if not candidate.is_absolute():
+        candidate = Path(__file__).resolve().parents[1] / candidate
+    candidate = candidate.resolve()
+
+    if candidate.suffix.casefold() not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        raise HTTPException(status_code=404, detail={"error": "unsupported_inventory_image_type"})
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail={"error": "inventory_image_file_not_found"})
+
+    return FileResponse(candidate)
 
 
 app.include_router(health_router)

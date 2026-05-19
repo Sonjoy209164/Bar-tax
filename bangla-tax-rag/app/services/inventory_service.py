@@ -966,6 +966,18 @@ class InventoryService:
         )
         if image_followup is not None:
             return image_followup
+        if self._should_try_fast_exact_title_lookup(request.question):
+            exact_title_response = self._try_fashion_retail_ask(
+                request=request,
+                trace_id=trace_id,
+                started_at=started_at,
+                effective_filters=request.filters.model_copy(deep=True),
+                memory_resolution=memory_resolution,
+                session_id=getattr(request, "session_id", None),
+                fast_exact_title_only=True,
+            )
+            if exact_title_response is not None:
+                return exact_title_response
         polite_boundary_response = self._try_polite_boundary_ask(
             request=request,
             trace_id=trace_id,
@@ -1192,6 +1204,54 @@ class InventoryService:
             retrieval_steps=retrieval_steps,
         )
         return response
+
+    @staticmethod
+    def _should_try_fast_exact_title_lookup(question: str) -> bool:
+        normalized = re.sub(r"[^a-z0-9\u0980-\u09ff\s+-]", " ", question.casefold())
+        normalized = normalized.replace("-", " ")
+        tokens = [token for token in normalized.split() if token]
+        if len(tokens) < 2:
+            return False
+        product_terms = {
+            "bag",
+            "blouse",
+            "dress",
+            "earring",
+            "earrings",
+            "frock",
+            "hooded",
+            "jacket",
+            "jeans",
+            "kameez",
+            "kurti",
+            "necklace",
+            "panjabi",
+            "pant",
+            "pearl",
+            "perfume",
+            "polo",
+            "sandal",
+            "saree",
+            "shirt",
+            "shoe",
+            "shoes",
+            "t",
+            "tee",
+            "trouser",
+            "tshirt",
+            "watch",
+        }
+        if any(token in product_terms for token in tokens):
+            return True
+        if any(char.isdigit() for char in question):
+            return True
+        if "-" in question or "/" in question:
+            return True
+        title_like_tokens = [
+            token for token in question.split()
+            if token[:1].isupper() and any(char.isalpha() for char in token)
+        ]
+        return len(title_like_tokens) >= 2
 
     def _try_polite_boundary_ask(
         self,
@@ -1461,14 +1521,13 @@ class InventoryService:
         raw_top_k = min(max(top_k * 4, 12), 20)
         retrieval_engine = "metadata"
         try:
-            clip_available = CLIPImageMatcher.is_available()
-        except Exception:  # pragma: no cover - model probing must not break retrieval
-            clip_available = False
-
-        if clip_available:
             from app.inventory.clip_matcher import precompute_catalog_embeddings
 
-            precompute_catalog_embeddings(catalog)
+            clip_embedding_count = precompute_catalog_embeddings(catalog)
+        except Exception:  # pragma: no cover - model probing must not break retrieval
+            clip_embedding_count = 0
+
+        if clip_embedding_count:
             results = CLIPImageMatcher().search(
                 query_text=query_text or "",
                 image_b64=image_b64,
@@ -2125,6 +2184,7 @@ class InventoryService:
         effective_filters: InventorySearchFilters,
         memory_resolution: InventoryMemoryResolution,
         session_id: str | None = None,
+        fast_exact_title_only: bool = False,
     ) -> InventoryAskResponse | None:
         catalog = self._load_catalog()
         last_primary_product_id = request.last_answer_plan.primary_product_id if request.last_answer_plan else None
@@ -2157,11 +2217,23 @@ class InventoryService:
             except Exception as exc:
                 logger.debug("Conversation state load failed: %s", exc)
 
+        # Product-title/SKU lookup is already grounded in the catalog. Do it
+        # before the LLM planner so exact searches like "Long Sleeve Hooded
+        # T-Shirt" do not wait on Ollama or get turned into broad
+        # category-clarification questions.
+        fast_exact_title_outcome = self.fashion_retail_assistant.answer_exact_product_title(
+            question=request.question,
+            catalog=catalog,
+            top_k=request.top_k,
+        )
+        if fast_exact_title_only and fast_exact_title_outcome is None:
+            return None
+
         # Top-of-pipeline thinking layer. The planner reads the whole
         # conversation, the customer's profile, and recent state — and
         # writes a structured plan that downstream layers can lean on.
         intent_plan = None
-        if request.answer_engine == "auto":
+        if request.answer_engine == "auto" and fast_exact_title_outcome is None:
             try:
                 from app.inventory.intent_planner import (
                     plan as plan_intent,
@@ -2207,7 +2279,12 @@ class InventoryService:
         # it needs to clarify, return that question now and skip the
         # pipeline entirely. This is a deeper "ask back" than the per-turn
         # clarification gate downstream.
-        if intent_plan is not None and intent_plan.should_clarify and intent_plan.clarifying_question:
+        if (
+            fast_exact_title_outcome is None
+            and intent_plan is not None
+            and intent_plan.should_clarify
+            and intent_plan.clarifying_question
+        ):
             return self._build_planner_clarification_response(
                 request=request,
                 trace_id=trace_id,
@@ -2217,7 +2294,7 @@ class InventoryService:
                 plan=intent_plan,
             )
 
-        outcome = self.fashion_retail_assistant.answer(
+        outcome = fast_exact_title_outcome or self.fashion_retail_assistant.answer(
             question=request.question,
             catalog=catalog,
             filters=effective_filters,
@@ -2237,6 +2314,8 @@ class InventoryService:
         reasoning_note: str | None = None
         if (
             request.answer_engine == "auto"
+            and
+            fast_exact_title_outcome is None
             and
             outcome.intent == "fashion_search"
             and not outcome.abstained
@@ -2414,11 +2493,15 @@ class InventoryService:
         natural = None
         critique_passed = True
         critique_issues: list[str] = []
-        requested_fashion_answer_engine = self._resolve_inventory_answer_engine(
-            requested_answer_engine=request.answer_engine,
-            confidence_score=outcome.confidence,
-            hits=response_hits,
-            abstention_reason=outcome.abstention_reason,
+        requested_fashion_answer_engine = (
+            "deterministic"
+            if fast_exact_title_outcome is not None
+            else self._resolve_inventory_answer_engine(
+                requested_answer_engine=request.answer_engine,
+                confidence_score=outcome.confidence,
+                hits=response_hits,
+                abstention_reason=outcome.abstention_reason,
+            )
         )
         if requested_fashion_answer_engine == "natural" and not outcome.abstained and product_snippets:
             from app.inventory.llm_slot_extractor import is_ollama_available
@@ -8236,6 +8319,7 @@ class InventoryService:
             tags=list(item.tags),
             updated_at=item.updated_at,
             snippet=self._build_snippet(item),
+            image_url=primary_image_url(item),
             attributes=dict(item.attributes),
             metadata=metadata,
             score=round(score, 4),
@@ -8794,6 +8878,7 @@ class InventoryService:
                     tags=list(item.tags),
                     updated_at=item.updated_at,
                     snippet=item.short_description,
+                    image_url=primary_image_url(item),
                     attributes=dict(item.attributes),
                     metadata={"source": "polite_boundary_redirect"},
                     evidence_scores={"boundary_pick": 1.0},

@@ -20,3 +20,4 @@ results/*
 data/conversation_logs/*
 !data/conversation_logs/.gitkeep
 frontend/config.local.json
+data/inventory/lereve_clip*_clip_vectors.json

@@ -778,6 +778,7 @@ class InventorySearchHit(BaseModel):
     tags: list[str] = Field(default_factory=list)
     updated_at: str | None = None
     snippet: str | None = None
+    image_url: str | None = None
     attributes: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     evidence_scores: dict[str, Any] = Field(

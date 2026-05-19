@@ -57,8 +57,9 @@ Required JSON schema:
             fashion_multi_brand_clarification, policy_delivery, policy_payment,
             policy_refund, policy_exchange, order_place, order_status, order_cancel,
             smalltalk, unknown>,
-  "category":      <saree | blouse | panjabi | kurti | salwar_kameez | dupatta | shawl |
-                    bag | shoes | jewelry | watch | cosmetics | fragrance | null>,
+  "category":      <saree | blouse | panjabi | kurti | dress | tunic | salwar_kameez |
+                    dupatta | shawl | bag | shoes | jewelry | watch | cosmetics |
+                    fragrance | null>,
   "color":         <english color name or null>,
   "fabric":        <jamdani | katan | muslin | silk | cotton | georgette | chiffon |
                     linen | denim | velvet | crepe | organza | net | null>,

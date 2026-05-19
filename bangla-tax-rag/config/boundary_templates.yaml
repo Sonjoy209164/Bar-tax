@@ -1,0 +1,276 @@
+# Reply templates for the conversation entry layer.
+#
+# Editing rules:
+#   - One block per boundary_type (or "occasion" for any occasion_*).
+#   - Three languages required: english, banglish, bangla.
+#   - Use {event} and {categories} as the only slots in answers/follow_ups.
+#   - Keep strings short, friendly, never claim medical/legal/political stance.
+#   - Tests assert exact substrings: "Girlfriend", "perfume", "Sorry",
+#     "self-care", "wedding", "Budget", "Medical advice", "neutral",
+#     "shopping assistant", "বিয়ে" — preserve these when editing.
+
+event_labels:
+  wedding:
+    english: "wedding"
+    banglish: "wedding"
+    bangla: "বিয়ে"
+  birthday:
+    english: "birthday"
+    banglish: "birthday"
+    bangla: "জন্মদিন"
+  anniversary:
+    english: "anniversary"
+    banglish: "anniversary"
+    bangla: "বার্ষিকী"
+  graduation:
+    english: "graduation"
+    banglish: "graduation"
+    bangla: "গ্র্যাজুয়েশন"
+  eid:
+    english: "eid"
+    banglish: "eid"
+    bangla: "ঈদ"
+  puja:
+    english: "puja"
+    banglish: "puja"
+    bangla: "পূজা"
+  pohela_boishakh:
+    english: "Pohela Boishakh"
+    banglish: "Pohela Boishakh"
+    bangla: "পহেলা বৈশাখ"
+  office:
+    english: "office"
+    banglish: "office"
+    bangla: "অফিস"
+  new_job:
+    english: "new job"
+    banglish: "new job"
+    bangla: "নতুন চাকরি"
+  interview:
+    english: "interview"
+    banglish: "interview"
+    bangla: "ইন্টারভিউ"
+  date:
+    english: "date"
+    banglish: "date"
+    bangla: "ডেট"
+  party:
+    english: "party"
+    banglish: "party"
+    bangla: "পার্টি"
+  travel:
+    english: "travel"
+    banglish: "travel"
+    bangla: "ট্রাভেল"
+
+category_labels:
+  bangla:
+    gift: "গিফট"
+    outfit: "আউটফিট"
+    perfume: "পারফিউম"
+    watch: "ঘড়ি"
+    bag: "ব্যাগ"
+    shoes: "জুতা"
+    jewelry: "গয়না"
+    saree: "শাড়ি"
+    panjabi: "পাঞ্জাবি"
+
+defaults:
+  english:
+    answer: "I may not be able to help with that directly, but I can help you find the right product for the situation."
+    follow_up: "Are you looking for something for yourself, a gift, or an event?"
+  banglish:
+    answer: "Eta niye directly help korte parbo na, but situation er jonno right product khujte help korte pari."
+    follow_up: "Nijer jonno, gift, naki kono event er jonno khujchen?"
+  bangla:
+    answer: "এটা নিয়ে সরাসরি সাহায্য করতে পারব না, তবে আপনার পরিস্থিতির জন্য ঠিক পণ্য খুঁজে দিতে পারি।"
+    follow_up: "নিজের জন্য, গিফট, নাকি কোনো ইভেন্টের জন্য খুঁজছেন?"
+
+templates:
+
+  self_harm_or_crisis:
+    english:
+      answer: "If you may be in immediate danger, please contact local emergency support or someone you trust right now. I can help with shopping, but your safety comes first."
+      follow_up: null
+    banglish:
+      answer: "Apni jodi ekhon safe feel na koren, please ekjon trusted manush ba local emergency support er sathe jogajog korun. Ami shopping help korte pari, but ei moment e apnar safety first."
+      follow_up: null
+    bangla:
+      answer: "আপনি যদি এখন নিরাপদ না অনুভব করেন, দয়া করে কাছের বিশ্বস্ত কাউকে বা স্থানীয় জরুরি সহায়তায় যোগাযোগ করুন। আমি শপিংয়ে সাহায্য করতে পারি, কিন্তু এই মুহূর্তে আপনার নিরাপত্তাই সবচেয়ে গুরুত্বপূর্ণ।"
+      follow_up: null
+
+  romantic_off_topic:
+    english:
+      answer: "I cannot help you find a girlfriend or boyfriend, but I can help you choose a perfume, outfit, watch, or gift that makes a good impression."
+      follow_up: "Are you shopping for yourself or for someone special?"
+    banglish:
+      answer: "Girlfriend/boyfriend khuje dite parbo na, but impress korar jonno ekta smart perfume, outfit, watch, ba gift suggest korte pari."
+      follow_up: "Apni nijer jonno, naki karo jonno kichu khujchen?"
+    bangla:
+      answer: "আমি ডেটিং বা সম্পর্ক খুঁজে দিতে পারি না, কিন্তু কাউকে ইমপ্রেস করার জন্য পারফিউম, আউটফিট, ঘড়ি বা গিফট বেছে দিতে পারি।"
+      follow_up: "আপনি নিজের জন্য, নাকি কারও জন্য কিছু খুঁজছেন?"
+
+  impression_shopping:
+    english:
+      answer: "If you want to make a good impression, I can suggest a perfume, outfit, watch, or gift from the store."
+      follow_up: "What is your Budget?"
+    banglish:
+      answer: "Kauke impress korte chaile perfume, smart outfit, watch, ba gift er moddhe bhalo option suggest korte pari."
+      follow_up: "Apnar Budget koto?"
+    bangla:
+      answer: "কাউকে ইমপ্রেস করার জন্য পারফিউম, আউটফিট, ঘড়ি বা গিফট ভালো অপশন হতে পারে।"
+      follow_up: "আপনার Budget কত?"
+
+  gift_recommendation:
+    english:
+      answer: "For a gift, I can suggest {categories}."
+      follow_up: "What is your Budget?"
+    banglish:
+      answer: "Gift er jonno {categories} bhalo option hote pare."
+      follow_up: "Apnar Budget koto?"
+    bangla:
+      answer: "গিফটের জন্য {categories} ভালো অপশন হতে পারে।"
+      follow_up: "আপনার Budget কত?"
+
+  occasion:
+    english:
+      answer: "Good occasion to shop smart. For {event}, I can suggest {categories}."
+      follow_up: "Are you attending as a guest, close friend, or family member?"
+    banglish:
+      answer: "Perfect, {event} er jonno {categories} suggest korte pari."
+      follow_up: "Apni guest, close friend, naki family side?"
+    bangla:
+      answer: "ভালো, {event} এর জন্য {categories} সাজেস্ট করতে পারি।"
+      follow_up: "আপনি গেস্ট, কাছের বন্ধু, নাকি পরিবারের পক্ষ থেকে যাচ্ছেন?"
+
+  emotional_low_mood:
+    english:
+      answer: "Sorry you are feeling low. I can suggest something comforting: self-care, perfume, a simple outfit, or a small gift for yourself."
+      follow_up: "What kind of product usually makes you feel good?"
+    banglish:
+      answer: "Sorry je emon feel korchen. Nijer jonno comforting kichu, self-care item, perfume, ba simple outfit suggest korte pari."
+      follow_up: "Apni kon type er product normally pochondo koren?"
+    bangla:
+      answer: "শুনে খারাপ লাগল। নিজের জন্য আরামদায়ক কিছু, পারফিউম, সেলফ-কেয়ার আইটেম বা ছোট গিফট সাজেস্ট করতে পারি।"
+      follow_up: "আপনি কোন ধরনের জিনিস পছন্দ করেন?"
+
+  abusive_mild:
+    english:
+      answer: "I can help respectfully with shopping, products, prices, orders, and delivery."
+      follow_up: "What product are you looking for?"
+    banglish:
+      answer: "Ami respectful bhabe shopping, product, price, order, delivery niye help korte pari."
+      follow_up: "Kon product khujchen?"
+    bangla:
+      answer: "আমি ভদ্রভাবে শপিং, পণ্য, দাম, অর্ডার আর ডেলিভারি নিয়ে সাহায্য করতে পারি।"
+      follow_up: "কোন পণ্য খুঁজছেন?"
+
+  abusive_severe:
+    english:
+      answer: "I can help respectfully with shopping, products, prices, orders, and delivery."
+      follow_up: "What product are you looking for?"
+    banglish:
+      answer: "Ami respectful bhabe shopping, product, price, order, delivery niye help korte pari."
+      follow_up: "Kon product khujchen?"
+    bangla:
+      answer: "আমি ভদ্রভাবে শপিং, পণ্য, দাম, অর্ডার আর ডেলিভারি নিয়ে সাহায্য করতে পারি।"
+      follow_up: "কোন পণ্য খুঁজছেন?"
+
+  order_tracking_support:
+    english:
+      answer: "I can help track an order, but I need the order ID or phone number first."
+      follow_up: "Please share the order ID or phone number."
+    banglish:
+      answer: "Order track korte order ID ba phone number lagbe."
+      follow_up: "Order ID ba phone number din."
+    bangla:
+      answer: "অর্ডার ট্র্যাক করতে অর্ডার আইডি বা ফোন নম্বর দরকার।"
+      follow_up: "অর্ডার আইডি বা ফোন নম্বর দিন।"
+
+  payment_support:
+    english:
+      answer: "I can help with payment or COD questions. For a specific order, availability depends on checkout and store policy."
+      follow_up: "Do you want COD, bKash/Nagad, or card payment information?"
+    banglish:
+      answer: "Payment or COD niye help korte pari. Specific order hole checkout/store policy onujayi confirm korte hobe."
+      follow_up: "Apni COD, bKash/Nagad, naki card payment jante chan?"
+    bangla:
+      answer: "পেমেন্ট বা COD সম্পর্কে সাহায্য করতে পারি। নির্দিষ্ট অর্ডার হলে চেকআউট/স্টোর পলিসি অনুযায়ী কনফার্ম করতে হবে।"
+      follow_up: "আপনি COD, bKash/Nagad, নাকি কার্ড পেমেন্ট জানতে চান?"
+
+  personal_question_about_bot:
+    english:
+      answer: "I am this store's shopping assistant. I can help with products, prices, orders, delivery, and gift suggestions."
+      follow_up: "What product or category are you looking for?"
+    banglish:
+      answer: "Ami ei store er shopping assistant. Product, price, order, delivery, and gift suggestion niye help korte pari."
+      follow_up: "Kon product ba category khujchen?"
+    bangla:
+      answer: "আমি এই স্টোরের শপিং অ্যাসিস্ট্যান্ট। পণ্য, দাম, অর্ডার, ডেলিভারি আর গিফট সাজেশনে সাহায্য করতে পারি।"
+      follow_up: "কোন ধরনের পণ্য খুঁজছেন?"
+
+  joke_chitchat:
+    english:
+      answer: "Haha, I can chat a little, but I should keep it shopping-focused. I can help with products, gifts, outfits, or deals."
+      follow_up: "What kind of item are you looking for?"
+    banglish:
+      answer: "Haha, adda dite pari, but amar main kaj shopping e help kora. Product, gift, outfit, ba deal suggest korte pari."
+      follow_up: "Kon type er kichu khujchen?"
+    bangla:
+      answer: "হাহা, আমি আড্ডা দিতে পারি, কিন্তু মূল কাজ শপিংয়ে সাহায্য করা। পণ্য, গিফট, আউটফিট বা ডিল সাজেস্ট করতে পারি।"
+      follow_up: "কোন ধরনের কিছু খুঁজছেন?"
+
+  political:
+    english:
+      answer: "I stay neutral on political topics. I can help with products, prices, delivery, orders, or gift suggestions."
+      follow_up: "What are you shopping for?"
+    banglish:
+      answer: "Political topic e ami neutral thaki. Ami product, price, order, delivery, gift, or shopping suggestions niye help korte pari."
+      follow_up: "Kon type er product khujchen?"
+    bangla:
+      answer: "রাজনৈতিক বিষয়ে আমি নিরপেক্ষ থাকি। পণ্য, দাম, অর্ডার, ডেলিভারি বা গিফট সাজেশনে সাহায্য করতে পারি।"
+      follow_up: "কোন ধরনের পণ্য খুঁজছেন?"
+
+  medical_or_health_advice:
+    english:
+      answer: "I cannot provide medical advice. Please consult a qualified doctor or pharmacist. I can help with product label information, ingredients, or available wellness items."
+      follow_up: null
+    banglish:
+      answer: "Medical advice dite parbo na. Doctor or pharmacist er sathe check kora best. Product label, ingredient, or available wellness item dekhte chaile ami help korte pari."
+      follow_up: null
+    bangla:
+      answer: "আমি মেডিকেল পরামর্শ দিতে পারি না। ডাক্তার বা ফার্মাসিস্টের সাথে কথা বলা ভালো। পণ্যের লেবেল, ইনগ্রেডিয়েন্ট বা ওয়েলনেস আইটেম দেখতে চাইলে সাহায্য করতে পারি।"
+      follow_up: null
+
+  legal_advice:
+    english:
+      answer: "I cannot provide legal advice. Please consult a qualified lawyer. I can help with store policies, orders, refunds, or delivery questions."
+      follow_up: null
+    banglish:
+      answer: "Legal advice dite parbo na. Qualified lawyer er sathe check kora best. Store policy, order, refund, or delivery niye question thakle ami help korte pari."
+      follow_up: null
+    bangla:
+      answer: "আমি আইনি পরামর্শ দিতে পারি না। আইনজীবীর সাথে কথা বলা ভালো। স্টোর পলিসি, অর্ডার, রিফান্ড বা ডেলিভারি নিয়ে সাহায্য করতে পারি।"
+      follow_up: null
+
+  vague_shopping:
+    english:
+      answer: "Sure. Tell me your budget and purpose, and I can suggest the best options."
+      follow_up: "Is it for yourself, a gift, office, an event, or daily use?"
+    banglish:
+      answer: "Sure. Budget and purpose bolle ami best options suggest korte parbo."
+      follow_up: "Nijer jonno, gift, office, event, naki daily use?"
+    bangla:
+      answer: "অবশ্যই। বাজেট আর উদ্দেশ্য বললে ভালো অপশন সাজেস্ট করতে পারব।"
+      follow_up: "নিজের জন্য, গিফট, অফিস, ইভেন্ট, নাকি ডেইলি ইউজ?"
+
+  random_tech:
+    english:
+      answer: "That is outside my store-support role. I can help with products, prices, orders, delivery, gifts, and shopping suggestions."
+      follow_up: "What product or category are you looking for?"
+    banglish:
+      answer: "Eta amar shop support er baire. Ami product, price, order, delivery, gift, and shopping suggestions niye help korte pari."
+      follow_up: "Kon product ba category khujchen?"
+    bangla:
+      answer: "এটা আমার শপ সাপোর্টের বাইরে। আমি পণ্য, দাম, অর্ডার, ডেলিভারি, গিফট আর শপিং সাজেশনে সাহায্য করতে পারি।"
+      follow_up: "কোন ধরনের পণ্য খুঁজছেন?"

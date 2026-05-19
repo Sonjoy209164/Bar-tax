@@ -1,0 +1,10 @@
+# evaluation/offtopic_real_labeled.jsonl
+#
+# Phase-1 ground truth for the conversation entry layer. One JSON object per line.
+# See evaluation/labeling_guide.md for the schema and labeling rules.
+#
+# Comments (lines starting with #) are ignored by both the scorer and the
+# regression test. Delete this header once you have ≥10 real labeled rows.
+#
+# Example row (kept for schema reference — remove once real rows land):
+# {"id":"real_0001","question":"amar ekta gf lagbe","language":"banglish","expected_intent":"romantic_off_topic","expected_reply_type":"playful","risk_level":"low","should_redirect_to_shopping":true,"should_recommend_categories":["perfume","gift"],"notes":"baseline romantic boundary"}

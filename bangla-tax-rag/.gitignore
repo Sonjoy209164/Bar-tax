@@ -17,4 +17,6 @@ results/*
 !results/.gitkeep
 !results/ablation_archive/
 !results/ablation_archive/**
+data/conversation_logs/*
+!data/conversation_logs/.gitkeep
 frontend/config.local.json

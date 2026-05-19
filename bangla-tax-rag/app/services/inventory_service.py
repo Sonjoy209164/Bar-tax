@@ -95,6 +95,11 @@ from app.inventory.image_matcher import (
     primary_image_url,
     query_image_id_from_b64,
 )
+from app.inventory.boundary_enrichment import (
+    build_prior_context,
+    enrich as enrich_boundary_reply,
+)
+from app.inventory.conversation_logger import log_boundary_trigger
 from app.inventory.natural_answer import generate_ollama_answer
 from app.inventory.polite_boundary import classify_polite_boundary
 from app.inventory.proactive import build_proactive_message
@@ -1204,6 +1209,44 @@ class InventoryService:
         if decision is None:
             return None
 
+        log_boundary_trigger(
+            question=request.question,
+            language=decision.language,
+            boundary_type=decision.boundary_type,
+            confidence=decision.confidence,
+            risk_level=decision.risk_level,
+            allowed_action=decision.allowed_action,
+            source=getattr(decision, "source", "fallback"),
+            handoff_recommended=decision.handoff_recommended,
+            slots=dict(decision.slots),
+            trace_id=trace_id,
+        )
+
+        # --- enrichment: prior memory, tone, catalog picks, handoff line ---
+        prior_context = None
+        session_id = getattr(request, "session_id", None)
+        if session_id:
+            try:
+                from app.inventory.conversation_state import get_state_store
+
+                prior_state = get_state_store().get(session_id)
+                prior_context = build_prior_context(prior_state)
+            except Exception as exc:  # pragma: no cover — never let memory crash a reply
+                logger.debug("polite boundary prior-state read failed: %s", exc)
+
+        try:
+            catalog = self._load_catalog()
+        except Exception as exc:  # pragma: no cover
+            logger.debug("polite boundary catalog read failed: %s", exc)
+            catalog = {}
+
+        enriched = enrich_boundary_reply(
+            decision=decision,
+            question=request.question,
+            catalog=catalog,
+            prior=prior_context,
+        )
+
         guardrail_abstained = decision.risk_level in {"high", "critical"}
         guardrail_reason = (
             f"{decision.boundary_type} handled by {decision.allowed_action}"
@@ -1226,14 +1269,19 @@ class InventoryService:
                 "allowed_action": decision.allowed_action,
                 "handoff_recommended": decision.handoff_recommended,
                 "recommended_categories": list(decision.recommended_categories),
+                "tone": enriched.tone,
+                "memory_ack_used": bool(enriched.memory_ack),
+                "handoff_surfaced": bool(enriched.handoff_line),
+                "catalog_pick_count": len(enriched.catalog_picks),
             },
             product_family="commerce_conversation",
-            next_best_question=decision.follow_up_question,
+            next_best_question=enriched.follow_up,
             confidence_breakdown={
                 "boundary_confidence": decision.confidence,
                 "boundary_type": decision.boundary_type,
                 "risk_level": decision.risk_level,
                 "allowed_action": decision.allowed_action,
+                "tone": enriched.tone,
             },
             reasoning_steps=[
                 "Classified the message before retrieval to avoid irrelevant long answers.",
@@ -1245,6 +1293,10 @@ class InventoryService:
                 "polite_boundary.keyword_signals",
                 "polite_boundary.event_categories",
                 "polite_boundary.language_hint",
+                "boundary_enrichment.tone",
+                "boundary_enrichment.memory_ack",
+                "boundary_enrichment.catalog_picks",
+                "boundary_enrichment.handoff_line",
             ],
             abstain=guardrail_abstained,
             abstention_reason=guardrail_reason,
@@ -1255,10 +1307,12 @@ class InventoryService:
             checked_final_answer=True,
             final_answer_issues=[],
         )
+        pick_ids = [pick.product_id for pick in enriched.catalog_picks]
+        boundary_hits = self._build_boundary_hits(enriched.catalog_picks, catalog)
         response = InventoryAskResponse(
             status="success",
             question=request.question,
-            answer=decision.answer,
+            answer=enriched.answer,
             assistant_mode=request.assistant_mode,
             reply_style=request.reply_style,
             answer_engine="deterministic",
@@ -1266,18 +1320,17 @@ class InventoryService:
             trace_id=trace_id,
             abstained=guardrail_abstained,
             abstention_reason=guardrail_reason,
-            total_hits=0,
+            total_hits=len(boundary_hits),
             applied_filters=request.filters.model_copy(deep=True),
-            hits=[],
-            recommended_product_ids=[],
+            hits=boundary_hits,
+            recommended_product_ids=pick_ids,
             cross_sell_product_ids=[],
-            follow_up_question=decision.follow_up_question,
+            follow_up_question=enriched.follow_up,
             answer_plan=plan,
             verification=verification,
             memory_resolution=memory_resolution,
         )
         try:
-            session_id = getattr(request, "session_id", None)
             if session_id:
                 from app.inventory.conversation_state import get_state_store
 
@@ -1292,9 +1345,10 @@ class InventoryService:
                         "allowed_action": decision.allowed_action,
                         "handoff_recommended": decision.handoff_recommended,
                         "recommended_categories": list(decision.recommended_categories),
+                        "tone": enriched.tone,
                     },
-                    product_ids=[],
-                    primary_product_id=None,
+                    product_ids=pick_ids,
+                    primary_product_id=pick_ids[0] if pick_ids else None,
                     confidence=decision.confidence,
                     abstained=guardrail_abstained,
                     clarification_pending=decision.boundary_type,
@@ -8711,6 +8765,39 @@ class InventoryService:
 
     def _persist_catalog(self, items: dict[str, InventoryItemRecord]) -> None:
         self.mirror_store.persist_catalog(items)
+
+    @staticmethod
+    def _build_boundary_hits(
+        picks: list[Any],
+        catalog: dict[str, InventoryItemRecord],
+    ) -> list[InventorySearchHit]:
+        """Turn catalog picks from the enrichment layer into InventorySearchHit rows."""
+        hits: list[InventorySearchHit] = []
+        for pick in picks:
+            item = catalog.get(getattr(pick, "product_id", ""))
+            if item is None:
+                continue
+            hits.append(
+                InventorySearchHit(
+                    product_id=item.product_id,
+                    sku=item.sku,
+                    name=item.name,
+                    category=item.category,
+                    brand=item.brand,
+                    status=item.status,
+                    price=item.price,
+                    currency=item.currency,
+                    stock=item.stock,
+                    tags=list(item.tags),
+                    updated_at=item.updated_at,
+                    snippet=item.short_description,
+                    attributes=dict(item.attributes),
+                    metadata={"source": "polite_boundary_redirect"},
+                    evidence_scores={"boundary_pick": 1.0},
+                    score=0.5,
+                )
+            )
+        return hits
 
     @staticmethod
     def _matches_text_filter(actual: str | None, expected_values: list[str]) -> bool:

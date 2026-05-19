@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls /home/dipto-saha/bartax/Bar-tax/bangla-tax-rag/.venv/bin/python /home/dipto-saha/bartax/Bar-tax/bangla-tax-rag/tests/__init__.py /home/dipto-saha/bartax/Bar-tax/bangla-tax-rag/pyproject.toml 2>&1 | head -10)",
+      "Read(//usr/bin/**)",
+      "Bash(.venv/bin/python -m pytest tests/test_polite_boundary.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/test_polite_boundary.py tests/test_offtopic_real_regression.py -v)",
+      "Bash(.venv/bin/python scripts/score_response_quality.py)",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(.venv/bin/python -c \"from app.services.inventory_service import InventoryService\")",
+      "Bash(.venv/bin/python -m pytest tests/ -q --ignore=tests/test_inventory_api.py)",
+      "Bash(.venv/bin/python -m pytest tests/test_repo_smoke.py tests/test_dataset_validation.py tests/test_dataset_builder.py tests/test_inventory_eval.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/test_boundary_enrichment.py -v)",
+      "Bash(.venv/bin/python -m pytest tests/ -q)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(gh auth *)"
+    ]
+  }
+}

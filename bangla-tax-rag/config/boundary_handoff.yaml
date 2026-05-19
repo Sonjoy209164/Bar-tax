@@ -1,0 +1,17 @@
+# Human-handoff configuration for the conversation entry layer.
+#
+# Surfaced in replies when BoundaryDecision.handoff_recommended is True
+# (medical, legal, severe abuse, crisis with consent). The line is appended
+# AFTER the safety boundary so the customer always has a real way to reach
+# a human.
+
+handoff:
+  enabled: true
+  channels:
+    phone: "+880-1700-000000"
+    whatsapp: "+880-1700-000000"
+    hours: "Sat-Thu 10am-7pm"
+  per_language:
+    english: "Or talk to our team: {phone} (WhatsApp also works) — {hours}."
+    banglish: "Or amader team er sathe kotha bolun: {phone} (WhatsApp e o paben) — {hours}."
+    bangla: "অথবা আমাদের টিমের সাথে কথা বলুন: {phone} (WhatsApp-এও পাবেন) — {hours}।"

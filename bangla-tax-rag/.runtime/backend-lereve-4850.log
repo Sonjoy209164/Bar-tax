@@ -1,0 +1,105 @@
+INFO:     Started server process [1910128]
+INFO:     Waiting for application startup.
+2026-05-19 19:56:11,491 | INFO | app.main | FastAPI app started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:4850 (Press CTRL+C to quit)
+INFO:     127.0.0.1:33860 - "GET /health HTTP/1.1" 200 OK
+2026-05-19 19:56:24,769 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=90015dcf-b46b-45bb-b545-b1f17c7054f2 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=2890.189 fallback_reason=None
+INFO:     127.0.0.1:34416 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-19 19:56:45,189 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=67d292cc-f88a-4b67-93ae-4b2baf78d42a execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=2990.799 fallback_reason=None
+INFO:     27.147.145.26:35904 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38540 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+2026-05-19 20:54:15,831 | INFO | app.inventory.clip_matcher | CLIP source-vector cache hit: loaded 5000 embeddings from data/inventory/lereve_clip5000_clip_vectors.json; missing_products=0
+2026-05-19 20:54:16,630 | INFO | app.inventory.clip_matcher | Loading CLIP model: openai/clip-vit-base-patch32 local_files_only=True
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights: 100%|██████████| 398/398 [00:00<00:00, 31796.21it/s]
+[1mCLIPModel LOAD REPORT[0m from: openai/clip-vit-base-patch32
+Key                                  | Status     |  | 
+-------------------------------------+------------+--+-
+text_model.embeddings.position_ids   | UNEXPECTED |  | 
+vision_model.embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+2026-05-19 20:54:16,979 | INFO | app.inventory.clip_matcher | CLIP model loaded successfully
+2026-05-19 20:54:17,480 | INFO | app.services.inventory_service | inventory_image_search_trace trace_id=3799148c-d557-4b6b-825b-7d3b130d088a execution_path=inventory_image_search engine=clip decision=similar_style hits=5 latency_ms=5737.399
+INFO:     27.147.145.26:38548 - "POST /inventory/image-search HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38540 - "GET /frontend/chat.js?v=20260519-text-product-cards HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38540 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
+INFO:     27.147.145.26:38540 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38540 - "GET /health HTTP/1.1" 200 OK
+INFO:     27.147.145.26:38540 - "GET /inventory/items HTTP/1.1" 200 OK
+2026-05-19 20:54:18,439 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32 "HTTP/1.1 200 OK"
+2026-05-19 20:54:18,798 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32/commits/main "HTTP/1.1 200 OK"
+2026-05-19 20:54:20,441 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32/discussions?p=0 "HTTP/1.1 200 OK"
+2026-05-19 20:54:21,109 | INFO | httpx | HTTP Request: GET https://huggingface.co/api/models/openai/clip-vit-base-patch32/commits/refs%2Fpr%2F66 "HTTP/1.1 200 OK"
+2026-05-19 20:54:21,443 | INFO | httpx | HTTP Request: HEAD https://huggingface.co/openai/clip-vit-base-patch32/resolve/refs%2Fpr%2F66/model.safetensors.index.json "HTTP/1.1 404 Not Found"
+INFO:     27.147.145.26:34778 - "GET /inventory/assets/lereve_109880_mlhts14057/lereve_109880_mlhts14057_primary_7ec956a5d2 HTTP/1.1" 200 OK
+2026-05-19 20:55:35,126 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=f02a822b-57e2-4576-a364-3917c786d8e3 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=2850.991 fallback_reason=None
+INFO:     27.147.145.26:33526 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     27.147.145.26:33554 - "GET /inventory/assets/lereve_109872_mlhts14053/lereve_109872_mlhts14053_primary_046ec5e047 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:33526 - "GET /inventory/assets/lereve_297793_mlhts14058/lereve_297793_mlhts14058_primary_bb7fad7edd HTTP/1.1" 200 OK
+INFO:     27.147.145.26:33546 - "GET /inventory/assets/lereve_106388_mlhts14055/lereve_106388_mlhts14055_primary_6b7609e377 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:33540 - "GET /inventory/assets/lereve_109781_mlhts14054/lereve_109781_mlhts14054_primary_8bdcf98a14 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40318 - "GET /inventory/assets/lereve_546392_mwc14194/lereve_546392_mwc14194_primary_b3510f1ec1 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40322 - "GET /inventory/assets/lereve_546290_lsts14059/lereve_546290_lsts14059_primary_d9b319bf42 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40322 - "GET /inventory/assets/lereve_544608_kbps14233/lereve_544608_kbps14233_primary_a9ac4564d5 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40318 - "GET /inventory/assets/lereve_544625_kbps14234/lereve_544625_kbps14234_primary_2b64e90153 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40318 - "GET /inventory/assets/lereve_227557_lpt16477/lereve_227557_lpt16477_primary_809368f55c HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_229253_lpt16107/lereve_229253_lpt16107_primary_9f6137da8e HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_18766_kgfk14779/lereve_18766_kgfk14779_primary_3556f82d55 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_18774_kgfk14789/lereve_18774_kgfk14789_primary_32f1eeb87f HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_544651_kbps14236/lereve_544651_kbps14236_primary_6e7afc2b62 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_545014_lwt14410/lereve_545014_lwt14410_primary_00c66d403a HTTP/1.1" 200 OK
+INFO:     27.147.145.26:53124 - "GET /inventory/assets/lereve_545674_lwt14402/lereve_545674_lwt14402_primary_dd0115fbf2 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50258 - "GET /inventory/assets/lereve_544922_lwt14409/lereve_544922_lwt14409_primary_194810f58d HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50246 - "GET /inventory/assets/lereve_513210_ldupatta14165/lereve_513210_ldupatta14165_primary_420988b2db HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40312 - "GET /inventory/assets/lereve_544638_kbps14235/lereve_544638_kbps14235_primary_e106d3d0fa HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50242 - "GET /inventory/assets/lereve_513343_ldupatta14161/lereve_513343_ldupatta14161_primary_3c783c6572 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50242 - "GET /inventory/assets/lereve_513867_lsf14462/lereve_513867_lsf14462_primary_946f3f060d HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40312 - "GET /inventory/assets/lereve_517029_lpsf14009/lereve_517029_lpsf14009_primary_284e86deff HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50258 - "GET /inventory/assets/lereve_513915_lsf14334/lereve_513915_lsf14334_primary_966337a776 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:53124 - "GET /inventory/assets/lereve_463039_lsf14260/lereve_463039_lsf14260_primary_9c7d7353f4 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50246 - "GET /inventory/assets/lereve_517345_lsb14528/lereve_517345_lsb14528_primary_4544bcb603 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_514677_mwc14151/lereve_514677_mwc14151_primary_c7a23c9af0 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40312 - "GET /inventory/assets/lereve_463033_lsf14257/lereve_463033_lsf14257_primary_2acb8c5bd4 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50246 - "GET /inventory/assets/lereve_463030_lsf14254/lereve_463030_lsf14254_primary_ae4477bbc1 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:53124 - "GET /inventory/assets/lereve_463288_lsf14225/lereve_463288_lsf14225_primary_9a75a04c77 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50242 - "GET /inventory/assets/lereve_338677_lshr15850/lereve_338677_lshr15850_primary_06a3c52fc3 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50258 - "GET /inventory/assets/lereve_463695_lhb15092/lereve_463695_lhb15092_primary_f7f7fb9b5c HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_463279_lsf14218/lereve_463279_lsf14218_primary_e320667f3f HTTP/1.1" 200 OK
+INFO:     27.147.145.26:53124 - "GET /inventory/assets/lereve_311580_lshe14340/lereve_311580_lshe14340_primary_1694ed8904 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50258 - "GET /inventory/assets/lereve_393659_kgwlp14045/lereve_393659_kgwlp14045_primary_7ff87893c2 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50242 - "GET /inventory/assets/lereve_393613_kbwlp14089/lereve_393613_kbwlp14089_primary_32304b3da0 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50246 - "GET /inventory/assets/lereve_301026_mptn14012/lereve_301026_mptn14012_primary_3119968ed8 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_301013_mptn14013/lereve_301013_mptn14013_primary_2badd29b3e HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40312 - "GET /inventory/assets/lereve_458894_lmxi14043/lereve_458894_lmxi14043_primary_6fac946fef HTTP/1.1" 200 OK
+INFO:     27.147.145.26:53124 - "GET /inventory/assets/lereve_359234_kbjk14202/lereve_359234_kbjk14202_primary_d6873502c4 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40312 - "GET /inventory/assets/lereve_315083_skd15727/lereve_315083_skd15727_primary_164a2a997b HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_359237_kbjk14203/lereve_359237_kbjk14203_primary_b1581c5bda HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50242 - "GET /inventory/assets/lereve_359544_mbjk14012/lereve_359544_mbjk14012_primary_12cac5bf9a HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40312 - "GET /inventory/assets/lereve_359549_mbjk14008/lereve_359549_mbjk14008_primary_ec38ee0f07 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:53124 - "GET /inventory/assets/lereve_359591_mbjk14009/lereve_359591_mbjk14009_primary_3300aa9afa HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50246 - "GET /inventory/assets/lereve_108161_mcjk14197/lereve_108161_mcjk14197_primary_7f33a1dcb7 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50242 - "GET /inventory/assets/lereve_228156_kbss14336/lereve_228156_kbss14336_primary_68831d4f08 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50258 - "GET /inventory/assets/lereve_225898_mpp15337/lereve_225898_mpp15337_primary_74372e710d HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_259751_kbts14945/lereve_259751_kbts14945_primary_d838f66cd4 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:40312 - "GET /inventory/assets/lereve_240517_msts15249/lereve_240517_msts15249_primary_8f8c7f6cfc HTTP/1.1" 200 OK
+INFO:     27.147.145.26:53124 - "GET /inventory/assets/lereve_247487_mlfs14586/lereve_247487_mlfs14586_primary_9b341ea493 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_213843_msts15235/lereve_213843_msts15235_primary_51e777556f HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50258 - "GET /inventory/assets/lereve_18912_mpp14411/lereve_18912_mpp14411_primary_021c8cd368 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50242 - "GET /inventory/assets/lereve_18874_lshr14001/lereve_18874_lshr14001_primary_a73343f285 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50246 - "GET /inventory/assets/lereve_18812_kgtn14227/lereve_18812_kgtn14227_primary_ee052747ff HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50258 - "GET /inventory/assets/lereve_18751_kgfk14796/lereve_18751_kgfk14796_primary_a463dbaa44 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50264 - "GET /inventory/assets/lereve_18672_lkz14478/lereve_18672_lkz14478_primary_0c0ac7f1ae HTTP/1.1" 200 OK
+2026-05-19 20:56:37,127 | INFO | app.services.inventory_service | inventory_image_search_trace trace_id=476f5c47-272b-490f-b699-35c08f0bd2b2 execution_path=inventory_image_search engine=clip decision=likely_same_design hits=5 latency_ms=718.725
+INFO:     27.147.145.26:56068 - "POST /inventory/image-search HTTP/1.1" 200 OK
+INFO:     27.147.145.26:56068 - "GET /inventory/assets/lereve_462286_nbgst14107/lereve_462286_nbgst14107_primary_5f93c9501d HTTP/1.1" 200 OK
+INFO:     27.147.145.26:56054 - "GET /inventory/assets/lereve_527326_nbgbt14074/lereve_527326_nbgbt14074_primary_50926e1c2d HTTP/1.1" 200 OK
+INFO:     27.147.145.26:34534 - "GET /inventory/assets/lereve_541156_nbgst14118/lereve_541156_nbgst14118_primary_c339481ad9 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:34520 - "GET /inventory/assets/lereve_450190_nbgst14084/lereve_450190_nbgst14084_primary_a79aa04117 HTTP/1.1" 200 OK
+INFO:     27.147.145.26:34544 - "GET /inventory/assets/lereve_462245_nbggc14103/lereve_462245_nbggc14103_primary_8d01f287de HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50322 - "GET /inventory/assets/lereve_17188_lpt14940/lereve_17188_lpt14940_primary_6b0b6f271e HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50322 - "GET /inventory/assets/lereve_18356_lkz14301/lereve_18356_lkz14301_primary_a3929af9d7 HTTP/1.1" 200 OK
+2026-05-19 20:57:32,945 | INFO | app.services.inventory_service | inventory_image_search_trace trace_id=ec498c86-b076-427d-90c8-6d718638bf1d execution_path=inventory_image_search engine=clip decision=likely_same_design hits=5 latency_ms=802.202
+INFO:     27.147.145.26:50320 - "POST /inventory/image-search HTTP/1.1" 200 OK
+INFO:     27.147.145.26:50320 - "GET /inventory/assets/lereve_321862_nbgst14070/lereve_321862_nbgst14070_primary_ecfe3fd5fe HTTP/1.1" 200 OK

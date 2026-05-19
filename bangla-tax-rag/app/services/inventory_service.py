@@ -1253,6 +1253,9 @@ class InventoryService:
             if guardrail_abstained
             else None
         )
+        enriched_slots = dict(decision.slots)
+        if enriched.budget_max is not None:
+            enriched_slots["budget_max"] = enriched.budget_max
         plan = InventoryAnswerPlan(
             intent=decision.boundary_type,
             detected_intent=decision.boundary_type,
@@ -1263,7 +1266,7 @@ class InventoryService:
             ],
             strategy="polite_boundary_redirect",
             preferences={
-                **decision.slots,
+                **enriched_slots,
                 "language": decision.language,
                 "risk_level": decision.risk_level,
                 "allowed_action": decision.allowed_action,
@@ -1339,7 +1342,7 @@ class InventoryService:
                     question=request.question,
                     intent=decision.boundary_type,
                     slots={
-                        **decision.slots,
+                        **enriched_slots,
                         "polite_boundary_type": decision.boundary_type,
                         "risk_level": decision.risk_level,
                         "allowed_action": decision.allowed_action,

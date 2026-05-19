@@ -44,6 +44,24 @@ _SHOPPABLE_ACTIONS: frozenset[str] = frozenset(
         "store_support_redirect",
     }
 )
+_PICK_BLOCKED_BOUNDARY_TYPES: frozenset[str] = frozenset(
+    {
+        "personal_question_about_bot",
+        "joke_chitchat",
+        "abusive_mild",
+        "abusive_severe",
+        "order_tracking_support",
+        "payment_support",
+    }
+)
+_MEMORY_ELIGIBLE_BOUNDARY_TYPES: frozenset[str] = frozenset(
+    {
+        "impression_shopping",
+        "gift_recommendation",
+        "emotional_low_mood",
+        "vague_shopping",
+    }
+)
 
 # Categories the bot redirects to → catalog terms (category / category_key / tag)
 # we'll match against. Map soft synonyms ("self-care", "outfit") to real
@@ -167,6 +185,7 @@ class EnrichedReply:
     catalog_picks: list[CatalogPick] = field(default_factory=list)
     memory_ack: str | None = None
     handoff_line: str | None = None
+    budget_max: float | None = None
 
 
 # ----------------------------------------------------------------------
@@ -183,8 +202,10 @@ def enrich(
     """Compose the final user-facing reply from the base decision."""
     language = decision.language
     tone = detect_tone(question)
+    explicit_budget_max = _extract_budget_max(question)
+    effective_budget_max = explicit_budget_max or (prior.budget_max if prior else None)
 
-    memory_ack = build_memory_ack(prior=prior, language=language) if prior else None
+    memory_ack = build_memory_ack(prior=prior, language=language) if prior and _can_use_memory(decision) else None
 
     picks: list[CatalogPick] = []
     catalog_snippet = ""
@@ -192,6 +213,7 @@ def enrich(
         picks = pick_catalog_products(
             catalog=catalog,
             recommended_categories=decision.recommended_categories,
+            budget_max=effective_budget_max,
         )
         catalog_snippet = format_catalog_snippet(picks, language=language)
 
@@ -208,15 +230,22 @@ def enrich(
     )
     return EnrichedReply(
         answer=final,
-        follow_up=decision.follow_up_question,
+        follow_up=_adjust_follow_up(
+            decision.follow_up_question,
+            language=language,
+            explicit_budget_max=explicit_budget_max,
+        ),
         tone=tone,
         catalog_picks=picks,
         memory_ack=memory_ack,
         handoff_line=handoff_line or None,
+        budget_max=effective_budget_max,
     )
 
 
 def _can_show_products(decision: BoundaryDecision) -> bool:
+    if decision.boundary_type in _PICK_BLOCKED_BOUNDARY_TYPES:
+        return False
     if not decision.recommended_categories:
         return False
     if decision.allowed_action not in _SHOPPABLE_ACTIONS:
@@ -224,6 +253,12 @@ def _can_show_products(decision: BoundaryDecision) -> bool:
     if decision.risk_level in {"high", "critical"}:
         return False
     return True
+
+
+def _can_use_memory(decision: BoundaryDecision) -> bool:
+    if decision.boundary_type.startswith("occasion_"):
+        return True
+    return decision.boundary_type in _MEMORY_ELIGIBLE_BOUNDARY_TYPES
 
 
 # ----------------------------------------------------------------------
@@ -366,14 +401,19 @@ def pick_catalog_products(
     catalog: Mapping[str, InventoryItemRecord],
     recommended_categories: tuple[str, ...],
     n: int = 3,
+    budget_max: float | None = None,
 ) -> list[CatalogPick]:
     """Pick up to n in-stock products matching any recommended category."""
     if not catalog or not recommended_categories:
         return []
 
-    search_terms = _expand_categories(recommended_categories)
-    if not search_terms:
+    category_groups = _expand_category_groups(recommended_categories)
+    if not category_groups:
         return []
+    priority_bonus = {
+        category: max(0.0, (len(category_groups) - index) * 3.0)
+        for index, (category, _terms) in enumerate(category_groups)
+    }
 
     matches: list[tuple[float, CatalogPick]] = []
     for item in catalog.values():
@@ -381,7 +421,9 @@ def pick_catalog_products(
             continue
         if not item.include_in_rag:
             continue
-        score = _match_score(item, search_terms)
+        if budget_max is not None and item.price is not None and item.price > budget_max:
+            continue
+        score = _match_score_for_groups(item, category_groups, priority_bonus=priority_bonus)
         if score <= 0:
             continue
         pick = CatalogPick(
@@ -399,6 +441,30 @@ def pick_catalog_products(
     return [pick for _, pick in matches[:n]]
 
 
+def _expand_category_groups(categories: Iterable[str]) -> list[tuple[str, tuple[str, ...]]]:
+    groups: list[tuple[str, tuple[str, ...]]] = []
+    seen_categories: set[str] = set()
+    assigned_terms: set[str] = set()
+    for cat in categories:
+        if not cat:
+            continue
+        key = cat.casefold()
+        if key in seen_categories:
+            continue
+        seen_categories.add(key)
+        seen_terms: set[str] = set()
+        terms: list[str] = []
+        for synonym in _CATEGORY_SYNONYMS.get(key, (key,)):
+            s = synonym.casefold()
+            if s not in seen_terms and s not in assigned_terms:
+                seen_terms.add(s)
+                terms.append(s)
+        if terms:
+            assigned_terms.update(terms)
+            groups.append((key, tuple(terms)))
+    return groups
+
+
 def _expand_categories(categories: Iterable[str]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -414,7 +480,31 @@ def _expand_categories(categories: Iterable[str]) -> list[str]:
     return out
 
 
-def _match_score(item: InventoryItemRecord, search_terms: list[str]) -> float:
+def _match_score_for_groups(
+    item: InventoryItemRecord,
+    category_groups: list[tuple[str, tuple[str, ...]]],
+    *,
+    priority_bonus: Mapping[str, float] | None = None,
+) -> float:
+    """Score by recommended category group, not by every synonym.
+
+    Without this, a category with multiple aliases (`shoes`, `shoe`) can
+    unfairly outrank the first business priority (`saree` for wedding).
+    """
+    score = 0.0
+    for category, terms in category_groups:
+        best_term_score = max((_term_score(item, term) for term in terms), default=0.0)
+        if best_term_score > 0:
+            score += best_term_score + (priority_bonus or {}).get(category, 0.0)
+    return score
+
+
+def _match_score(
+    item: InventoryItemRecord,
+    search_terms: list[str],
+    *,
+    priority_bonus: Mapping[str, float] | None = None,
+) -> float:
     """Cheap weighted scorer — higher = better match for one of the terms."""
     haystacks: list[tuple[float, str]] = []
     if item.category:
@@ -430,12 +520,77 @@ def _match_score(item: InventoryItemRecord, search_terms: list[str]) -> float:
 
     score = 0.0
     for term in search_terms:
+        matched_term = False
         for weight, hay in haystacks:
             if term == hay:
                 score += weight * 2
+                matched_term = True
             elif term in hay:
                 score += weight
+                matched_term = True
+        if matched_term and priority_bonus:
+            score += priority_bonus.get(term, 0.0)
     return score
+
+
+def _term_score(item: InventoryItemRecord, term: str) -> float:
+    haystacks: list[tuple[float, str]] = []
+    if item.category:
+        haystacks.append((3.0, item.category.casefold()))
+    cat_key = (item.attributes or {}).get("category_key", "")
+    if cat_key:
+        haystacks.append((3.0, cat_key.casefold()))
+    for tag in item.tags or []:
+        haystacks.append((1.5, tag.casefold()))
+    for v in (item.attributes or {}).values():
+        if isinstance(v, str) and v:
+            haystacks.append((0.5, v.casefold()))
+
+    score = 0.0
+    for weight, hay in haystacks:
+        if term == hay:
+            score += weight * 2
+        elif term in hay:
+            score += weight
+    return score
+
+
+_BUDGET_MAX_RE = re.compile(
+    r"(?:under|below|less than|within|up to|max|maximum|budget|around|about|কম|নিচে|মধ্যে|ভিতরে|বাজেট)\s*"
+    r"(?:bdt|tk|taka|টাকা|টাকার|৳)?\s*(\d{2,7}(?:\.\d+)?)|"
+    r"(?:bdt|tk|taka|টাকা|টাকার|৳)\s*(\d{2,7}(?:\.\d+)?)\s*"
+    r"(?:er modhe|er moddhe|modhe|moddhe|within|এর মধ্যে|মধ্যে|ভিতরে)?|"
+    r"(\d{2,7}(?:\.\d+)?)\s*(?:taka|tk|bdt|টাকা|টাকার|৳)\s*"
+    r"(?:er modhe|er moddhe|modhe|moddhe|within|এর মধ্যে|মধ্যে|ভিতরে)?",
+    re.IGNORECASE,
+)
+
+
+def _extract_budget_max(text: str) -> float | None:
+    for match in _BUDGET_MAX_RE.finditer(text or ""):
+        raw = next((group for group in match.groups() if group), None)
+        if not raw:
+            continue
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        if value > 0:
+            return value
+    return None
+
+
+def _adjust_follow_up(follow_up: str | None, *, language: str, explicit_budget_max: float | None) -> str | None:
+    if not follow_up or explicit_budget_max is None:
+        return follow_up
+    lower = follow_up.casefold()
+    if "budget" not in lower and "বাজেট" not in lower:
+        return follow_up
+    if language == "bangla":
+        return "পারফিউম, মেকআপ, ব্যাগ, ঘড়ি, নাকি জুয়েলারি পছন্দ?"
+    if language == "banglish":
+        return "Perfume, makeup, bag, watch, naki jewelry pochondo?"
+    return "Do you prefer perfume, makeup, bag, watch, or jewelry?"
 
 
 def format_catalog_snippet(picks: list[CatalogPick], *, language: str) -> str:

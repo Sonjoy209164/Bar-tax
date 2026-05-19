@@ -206,6 +206,13 @@ def test_pick_catalog_products_returns_empty_on_no_match() -> None:
     assert picks == []
 
 
+def test_pick_catalog_products_respects_budget_max() -> None:
+    catalog = _make_catalog()
+    picks = pick_catalog_products(catalog=catalog, recommended_categories=("perfume",), n=3, budget_max=1000)
+    ids = {p.product_id for p in picks}
+    assert ids == {"perfume-musk"}
+
+
 def test_format_catalog_snippet_renders_bdt_marker() -> None:
     catalog = _make_catalog()
     picks = pick_catalog_products(catalog=catalog, recommended_categories=("perfume",), n=2)
@@ -269,6 +276,34 @@ def test_enrich_assembles_memory_tone_base_catalog_handoff() -> None:
     assert enriched.handoff_line is None
 
 
+def test_enrich_budget_question_switches_follow_up_after_budget_given() -> None:
+    catalog = _make_catalog()
+    decision = BoundaryDecision(
+        boundary_type="gift_recommendation",
+        answer="For a gift, I can suggest perfume, watch.",
+        follow_up_question="What is your Budget?",
+        confidence=0.9,
+        language="english",
+        risk_level="low",
+        allowed_action="ask_clarifying_question",
+        handoff_recommended=False,
+        slots={"recipient": "girlfriend"},
+        recommended_categories=("perfume", "watch"),
+        reasoning=("gift intent",),
+        source="fallback",
+    )
+
+    enriched = enrich(
+        decision=decision,
+        question="gift for girlfriend under 1000",
+        catalog=catalog,
+        prior=None,
+    )
+
+    assert all((pick.price or 0) <= 1000 for pick in enriched.catalog_picks)
+    assert enriched.follow_up == "Do you prefer perfume, makeup, bag, watch, or jewelry?"
+
+
 def test_enrich_does_not_show_products_on_safe_refusal() -> None:
     catalog = _make_catalog()
     decision = BoundaryDecision(
@@ -298,6 +333,35 @@ def test_enrich_does_not_show_products_on_safe_refusal() -> None:
     # But a handoff line is appended.
     assert enriched.handoff_line is not None
     assert "+880" in enriched.answer
+
+
+def test_enrich_does_not_show_products_for_personal_bot_question() -> None:
+    catalog = _make_catalog()
+    decision = BoundaryDecision(
+        boundary_type="personal_question_about_bot",
+        answer="I am this store's shopping assistant.",
+        follow_up_question="Which product are you looking for?",
+        confidence=0.8,
+        language="english",
+        risk_level="low",
+        allowed_action="short_humor_then_redirect",
+        handoff_recommended=False,
+        slots={},
+        recommended_categories=("products", "gift", "outfit"),
+        reasoning=("personal bot question",),
+        source="fallback",
+    )
+
+    enriched = enrich(
+        decision=decision,
+        question="how old are you?",
+        catalog=catalog,
+        prior=PriorContext(occasion="birthday", budget_max=3000),
+    )
+
+    assert enriched.catalog_picks == []
+    assert "For example" not in enriched.answer
+    assert enriched.memory_ack is None
 
 
 def test_enrich_prepends_tone_ack_for_frustrated_customer() -> None:

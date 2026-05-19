@@ -126,7 +126,8 @@ def _category_phrase(categories: tuple[str, ...], *, language: str, data: dict[s
         labels = [cat.replace("_", " ") for cat in categories[:5]]
     if len(labels) == 1:
         return labels[0]
-    return ", ".join(labels[:-1]) + ", or " + labels[-1]
+    joiner = ", বা " if language == "bangla" else ", or "
+    return ", ".join(labels[:-1]) + joiner + labels[-1]
 
 
 def _event_label(event_key: str | None, *, language: str, data: dict[str, Any]) -> str:

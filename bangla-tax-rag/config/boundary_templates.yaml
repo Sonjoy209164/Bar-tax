@@ -74,6 +74,15 @@ category_labels:
     jewelry: "গয়না"
     saree: "শাড়ি"
     panjabi: "পাঞ্জাবি"
+    shirt: "শার্ট"
+    pant: "প্যান্ট"
+    shoes: "জুতা"
+    salwar_kameez: "সালোয়ার কামিজ"
+    dress: "ড্রেস"
+    cosmetics: "কসমেটিকস"
+    self-care: "সেলফ-কেয়ার"
+    comfortable outfit: "আরামদায়ক আউটফিট"
+    products: "পণ্য"
 
 defaults:
   english:

@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.core.schemas import InventoryItemRecord  # noqa: E402
+from app.inventory.catalog_taxonomy import canonicalize, compatible_categories_for  # noqa: E402
 from app.inventory.clip_matcher import EMBEDDING_VERSION, _cosine, embedding_metadata  # noqa: E402
 from scripts.run_lereve_clip100_baseline import (  # noqa: E402
     cached_encode,
@@ -375,22 +376,27 @@ def run_methods(
     return {
         "clip_only_rgb_cosine": {
             "metrics": compute_metrics(clip_rows, decision_mode=False),
+            "per_category_metrics": compute_per_category_metrics(clip_rows, decision_mode=False),
             "rows": clip_rows,
         },
         "clip_metadata_factor_rerank": {
             "metrics": compute_metrics(metadata_rows, decision_mode=False),
+            "per_category_metrics": compute_per_category_metrics(metadata_rows, decision_mode=False),
             "rows": metadata_rows,
         },
         "cif_rag_without_claim_contracts": {
             "metrics": compute_metrics(no_contract_rows, decision_mode=True),
+            "per_category_metrics": compute_per_category_metrics(no_contract_rows, decision_mode=True),
             "rows": no_contract_rows,
         },
         "cif_rag_without_risk_policy": {
             "metrics": compute_metrics(no_risk_rows, decision_mode=True),
+            "per_category_metrics": compute_per_category_metrics(no_risk_rows, decision_mode=True),
             "rows": no_risk_rows,
         },
         "cif_rag_guarded_decision": {
             "metrics": compute_metrics(cif_rows, decision_mode=True),
+            "per_category_metrics": compute_per_category_metrics(cif_rows, decision_mode=True),
             "rows": cif_rows,
         },
     }
@@ -425,7 +431,9 @@ def build_catalog_factor_cache(
         stock_mask[index] = item.stock > 0
         product_photo_mask[index] = image_can_confirm_exact(item)
         for category in normalized_item_categories(item):
-            category_to_mask.setdefault(category, np.zeros(len(product_ids), dtype=bool))[index] = True
+            # Index by canonical form so query and catalog agree on aliases.
+            canon = canonicalize(category) or category
+            category_to_mask.setdefault(canon, np.zeros(len(product_ids), dtype=bool))[index] = True
         for color in normalized_item_colors(item):
             color_to_mask.setdefault(color, np.zeros(len(product_ids), dtype=bool))[index] = True
 
@@ -446,11 +454,20 @@ def metadata_factor_score_arrays(
     query_category = normalized_case_category(case)
     query_color = normalize_token(case.get("color_hint"))
 
-    category_matches = empty_mask
+    # No query category → no category evidence → treat all items as compatible
+    # so the category guard does not incorrectly block unknown-category products.
+    all_true_mask = np.ones(len(empty_mask), dtype=bool)
+    category_matches = all_true_mask
     color_matches = empty_mask
 
     if query_category:
-        category_matches = catalog_factors["category_to_mask"].get(query_category, empty_mask)
+        # Build a union mask across all canonically compatible categories so
+        # that aliases (e.g. dupatta/scarf, pant/jeans) are not penalised.
+        compatible = compatible_categories_for(query_category)
+        compat_mask = np.zeros(len(empty_mask), dtype=bool)
+        for cat in compatible:
+            compat_mask |= catalog_factors["category_to_mask"].get(cat, empty_mask)
+        category_matches = compat_mask
         score += np.where(category_matches, 0.18, -0.08).astype(np.float32)
 
     if query_color:
@@ -816,6 +833,18 @@ def compute_metrics(rows: list[dict[str, Any]], *, decision_mode: bool) -> dict[
     }
 
 
+def compute_per_category_metrics(rows: list[dict[str, Any]], *, decision_mode: bool) -> dict[str, dict[str, Any]]:
+    """Group rows by query category_hint and compute per-category metrics."""
+    by_category: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        cat = canonicalize(row["case"].get("category_hint") or "") or "unknown"
+        by_category.setdefault(cat, []).append(row)
+    return {
+        cat: compute_metrics(cat_rows, decision_mode=decision_mode)
+        for cat, cat_rows in sorted(by_category.items())
+    }
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     lines = [
         f"# Le Reve Image Search Comparison {payload['selection']['query_images']}",
@@ -866,6 +895,31 @@ def render_markdown(payload: dict[str, Any]) -> str:
             f"{m['mean_reciprocal_rank']:.3f} | {m['median_rank']} | {m['p90_rank']} |"
         )
 
+    lines.extend(["", "## Per-Category Breakdown (Full CIF-RAG)", ""])
+    cif_method = payload["methods"]["cif_rag_guarded_decision"]
+    per_cat = compute_per_category_metrics(cif_method["rows"], decision_mode=True)
+    lines.append(
+        "| Category | Cases | Top-1 Exact | Top-5 Recall | Accepted Exact Rate | Accepted Exact Precision | Wrong Category Top-1 |"
+    )
+    lines.append("|---|---:|---:|---:|---:|---:|---:|")
+    for cat, m in sorted(per_cat.items(), key=lambda kv: -kv[1]["cases"]):
+        lines.append(
+            f"| `{cat}` | {m['cases']} | {m['top1_accuracy']:.1%} | {m['top5_recall']:.1%} | "
+            f"{m['accepted_exact_rate']:.1%} | {m['accepted_exact_precision']:.1%} | "
+            f"{m['wrong_category_top1_rate']:.1%} |"
+        )
+
+    # Worst categories by accepted exact rate (how much coverage is lost)
+    sorted_by_coverage = sorted(per_cat.items(), key=lambda kv: kv[1]["accepted_exact_rate"])
+    lines.extend(["", "### Worst 5 Categories by Accepted Exact Rate", ""])
+    lines.append("| Category | Cases | Accepted Exact Rate | Accepted Exact Precision | Top-5 Recall |")
+    lines.append("|---|---:|---:|---:|---:|")
+    for cat, m in sorted_by_coverage[:5]:
+        lines.append(
+            f"| `{cat}` | {m['cases']} | {m['accepted_exact_rate']:.1%} | "
+            f"{m['accepted_exact_precision']:.1%} | {m['top5_recall']:.1%} |"
+        )
+
     lines.extend(["", "## Top CIF Blocks", ""])
     cif_rows = payload["methods"]["cif_rag_guarded_decision"]["rows"]
     blocked = [
@@ -912,8 +966,8 @@ def cache_or_encode(image_path: str, cache: dict[str, Any], *, allow_encode: boo
 
 
 def normalized_case_category(case: dict[str, Any]) -> str:
-    category = normalize_token(case.get("category_hint")) or normalize_token(case.get("expected_category"))
-    return "" if category in UNKNOWN_VALUES else category
+    raw = case.get("category_hint") or case.get("expected_category") or ""
+    return canonicalize(raw)
 
 
 def normalized_item_categories(item: InventoryItemRecord) -> set[str]:
@@ -923,7 +977,9 @@ def normalized_item_categories(item: InventoryItemRecord) -> set[str]:
         attrs.get("category_key"),
         attrs.get("garment_type"),
     ]
-    return {token for value in values for token in split_normalized_values(value)} - UNKNOWN_VALUES
+    raw_tokens = {token for value in values for token in split_normalized_values(value)} - UNKNOWN_VALUES
+    # Return raw tokens; callers that need canonical form apply canonicalize().
+    return raw_tokens
 
 
 def normalized_item_colors(item: InventoryItemRecord) -> set[str]:

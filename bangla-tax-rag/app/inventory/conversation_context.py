@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,7 @@ from app.inventory.conversation_state import ConversationState
 from app.inventory.coreference_resolver import resolve_coreference
 from app.inventory.memory_policy import (
     product_focus_expired,
+    question_has_product_mention,
     should_use_product_focus,
 )
 from app.inventory.ontology import ProductOntology, normalize_inventory_text
@@ -59,6 +61,15 @@ _FOLLOW_UP_TERMS = (
     "second one",
     "third one",
     "last one",
+    "it",
+    "tell me more",
+    "more about it",
+    "show similar",
+    "similar",
+    "matching",
+    "sathe matching",
+    "go with",
+    "what goes with",
     "this",
     "this one",
     "that",
@@ -208,11 +219,9 @@ def hydrate_request_from_state(
 
 def question_looks_like_followup(question: str) -> bool:
     text = normalize_inventory_text(question)
-    if not text:
+    if not text and not question.strip():
         return False
-    return any(term in text for term in _FOLLOW_UP_TERMS) or any(
-        term in question for term in ("এটা", "ওটা", "সেটা", "দাম", "সাইজ", "আছে")
-    )
+    return _has_any_followup_phrase(text, question.casefold(), _FOLLOW_UP_TERMS)
 
 
 def question_looks_like_new_request(question: str, ontology: ProductOntology | None = None) -> bool:
@@ -220,10 +229,56 @@ def question_looks_like_new_request(question: str, ontology: ProductOntology | N
     text = normalize_inventory_text(question)
     if not text:
         return False
-    has_product_type = bool(ontology.detect_product_type(text=text))
-    if not has_product_type:
+    if question_has_direct_anchor_reference(question):
         return False
-    return any(term in text for term in _NEW_REQUEST_TERMS)
+    return question_has_product_mention(question, ontology=ontology)
+
+
+def question_has_direct_anchor_reference(question: str) -> bool:
+    text = normalize_inventory_text(question)
+    raw = question.casefold()
+    return _has_any_followup_phrase(
+        text,
+        raw,
+        (
+            "eta",
+            "eita",
+            "etar",
+            "eitar",
+            "ei ta",
+            "this",
+            "this one",
+            "that",
+            "that one",
+            "it",
+            "এটা",
+            "এটার",
+            "এটি",
+            "এটির",
+            "এইটা",
+            "এইটার",
+            "ওটা",
+            "ওটার",
+            "সেটা",
+            "সেটার",
+        ),
+    )
+
+
+def _has_any_followup_phrase(text: str, raw: str, phrases: tuple[str, ...]) -> bool:
+    for phrase in phrases:
+        normalized = normalize_inventory_text(phrase)
+        if normalized:
+            pattern = re.escape(normalized).replace(r"\ ", r"\s+")
+            if re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", text):
+                return True
+        if _has_bangla(phrase) and phrase in raw:
+            return True
+    return False
+
+
+def _has_bangla(text: str) -> bool:
+    return any("\u0980" <= char <= "\u09ff" for char in text)
 
 
 def build_answer_plan_from_state(state: ConversationState) -> InventoryAnswerPlan:

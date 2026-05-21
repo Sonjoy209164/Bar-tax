@@ -340,6 +340,8 @@ function renderMemoryExamples() {
   if (!el.memoryExamples) return;
   el.memoryExamples.innerHTML = "";
   const anchor = pickMemoryAnchor();
+  const switchItem = pickMemorySwitchItem(anchor);
+  const freshItem = pickMemoryFreshItem(anchor, switchItem);
   const anchorQuestion = anchor
     ? `do you have ${anchor.name}?`
     : "Panjabi ache?";
@@ -351,27 +353,77 @@ function renderMemoryExamples() {
     {
       label: "1. Focus product",
       question: anchorQuestion,
-      note: anchorLabel,
+      note: `Creates focus: ${anchorLabel}`,
     },
     {
       label: "2. Price follow-up",
       question: "etar dam koto?",
-      note: "Should use the focused product.",
+      note: "Should resolve to the focused product.",
     },
     {
       label: "3. Size follow-up",
       question: "M size ache?",
-      note: "Should keep the same product context.",
+      note: "Should keep the same focus.",
     },
     {
-      label: "4. Cheaper similar",
+      label: "4. Variant color",
+      question: "same design blue color e ache?",
+      note: "Should use design/product focus.",
+    },
+    {
+      label: "5. Boundary detour",
+      question: "amar ekta gf lagbe",
+      note: "Should reply smoothly, not overwrite focus.",
+    },
+    {
+      label: "6. Resume focus",
+      question: "etar stock ache?",
+      note: "Should still remember the product.",
+    },
+    {
+      label: "7. Similar cheaper",
       question: "er cheye kom dam er similar ache?",
       note: "Should search alternatives around the anchor.",
     },
     {
-      label: "5. Second option",
+      label: "8. Second option",
       question: "second one er details dao",
       note: "Should resolve list position from last answer.",
+    },
+    {
+      label: "9. Category switch",
+      question: switchItem ? `do you have ${switchItem.name}?` : "red saree dekhao",
+      note: "New category must override old focus.",
+    },
+    {
+      label: "10. Switched follow-up",
+      question: "etar price koto?",
+      note: "Should use the new focused product.",
+    },
+    {
+      label: "11. Anchored matching",
+      question: "etar sathe matching blouse ache?",
+      note: "Should use current product as anchor.",
+    },
+    {
+      label: "12. Fresh product guard",
+      question: freshItem ? `do you have ${freshItem.name}?` : "white pearl earrings",
+      note: "Fresh product must not reuse old memory.",
+    },
+    {
+      label: "13. Bangla price",
+      question: "এটার দাম কত?",
+      note: "Bangla pronoun should resolve current focus.",
+    },
+    {
+      label: "14. Support guard",
+      question: "delivery charge koto?",
+      note: "Support question should not use product focus.",
+    },
+    {
+      label: "15. Sensitive guard",
+      question: "rash er jonno kon medicine khabo?",
+      note: "Should refuse safely, no shopping memory write.",
     },
   ];
 
@@ -398,6 +450,31 @@ function renderMemoryExamples() {
 
     el.memoryExamples.appendChild(card);
   });
+}
+
+function pickMemorySwitchItem(anchor) {
+  const anchorCategory = anchor ? normalizedCategory(anchor) : "";
+  const preferred = ["saree", "panjabi", "shirt", "salwar_kameez", "bag", "sandal", "shoe"];
+  return rankedCatalogItems()
+    .filter(isSafeDemoProductName)
+    .find(item => preferred.includes(normalizedCategory(item)) && normalizedCategory(item) !== anchorCategory)
+    || rankedCatalogItems().find(item => normalizedCategory(item) !== anchorCategory)
+    || null;
+}
+
+function pickMemoryFreshItem(anchor, switchItem) {
+  const blocked = new Set(
+    [anchor, switchItem]
+      .filter(Boolean)
+      .map(item => item.product_id || item.sku || item.name)
+  );
+  const preferred = ["earring", "jewelry", "necklace", "bag", "sandal", "shoe", "watch"];
+  return rankedCatalogItems()
+    .filter(item => !blocked.has(item.product_id || item.sku || item.name))
+    .filter(isSafeDemoProductName)
+    .find(item => preferred.some(key => normalizedCategory(item).includes(key)))
+    || rankedCatalogItems().find(item => !blocked.has(item.product_id || item.sku || item.name))
+    || null;
 }
 
 function pickCatalogExamples() {

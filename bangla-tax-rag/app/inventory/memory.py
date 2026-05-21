@@ -57,7 +57,36 @@ class InventoryMemoryResolver:
         "tell me more",
         "more about it",
         "more about that",
+        "same design",
+        "same design e",
+        "same design er",
+        "ei design",
+        "same color",
+        "same colour",
+        "another color",
+        "other color",
+        "onno color",
+        "ar ki color",
+        "aro color",
+        "white",
+        "black",
+        "blue",
+        "red",
+        "green",
+        "grey",
+        "gray",
+        "brown",
+        "available",
+        "show similar",
+        "similar",
+        "cheaper",
+        "matching",
+        "sathe matching",
+        "go with",
+        "what goes with",
         "এটা",
+        "এটি",
+        "এটির",
         "এটার",
         "ওটা",
         "ওটার",
@@ -66,8 +95,17 @@ class InventoryMemoryResolver:
         "তার",
         "এর দাম",
         "দাম",
+        "কত",
         "সাইজ",
         "স্টক",
+        "দ্বিতীয়",
+        "দ্বিতীয়টার",
+        "তৃতীয়",
+        "তৃতীয়টার",
+        "আর কালার",
+        "একই ডিজাইন",
+        "এই ডিজাইন",
+        "অর্ডার",
     )
     NEW_REQUEST_TERMS = (
         "show me",
@@ -109,7 +147,7 @@ class InventoryMemoryResolver:
         active_filters: InventorySearchFilters | None,
         last_answer_plan: InventoryAnswerPlan | None,
     ) -> InventoryResolvedMemory:
-        normalized_question = normalize_inventory_text(question)
+        normalized_question = self._memory_text(question)
         explicit_request = self._has_explicit_new_request(normalized_question, filters)
         has_memory = bool(focused_product_ids or active_filters or last_answer_plan)
         if not has_memory:
@@ -121,6 +159,18 @@ class InventoryMemoryResolver:
                 resolution=InventoryMemoryResolution(
                     ignored_memory_reason="Current request already includes explicit product_ids.",
                     memory_policy_reason="explicit product filter beats conversation memory",
+                ),
+            )
+
+        if (
+            self.ontology.detect_product_type(text=normalized_question)
+            and not self._has_direct_anchor_reference(normalized_question)
+        ):
+            return InventoryResolvedMemory(
+                filters=filters,
+                resolution=InventoryMemoryResolution(
+                    ignored_memory_reason="Current question contains a fresh product/category mention.",
+                    memory_policy_reason="new product/category mention blocks old product focus",
                 ),
             )
 
@@ -195,7 +245,11 @@ class InventoryMemoryResolver:
         last_answer_plan: InventoryAnswerPlan | None,
     ) -> list[str]:
         if self._has_any(normalized_question, self.CROSS_SELL_TERMS):
-            return self._dedupe(list((last_answer_plan.cross_sell_product_ids if last_answer_plan else []) or []))
+            cross_sell = list((last_answer_plan.cross_sell_product_ids if last_answer_plan else []) or [])
+            if cross_sell:
+                return self._dedupe(cross_sell)
+            primary = [last_answer_plan.primary_product_id] if last_answer_plan and last_answer_plan.primary_product_id else []
+            return self._dedupe(primary or focused_product_ids[:1])
         if self._has_any(normalized_question, self.ALTERNATIVE_TERMS):
             candidates = list((last_answer_plan.alternative_product_ids if last_answer_plan else []) or [])
             if candidates:
@@ -249,7 +303,38 @@ class InventoryMemoryResolver:
     def _has_reference(self, normalized_question: str) -> bool:
         if self._has_any(normalized_question, self.REFERENCE_TERMS):
             return True
+        if self._has_any(normalized_question, self.CROSS_SELL_TERMS):
+            return True
+        if self._has_any(normalized_question, self.ALTERNATIVE_TERMS):
+            return True
         return bool(re.search(r"\b(the\s+)?(?:first|second|third)\s+(?:one|product|item|option)\b", normalized_question))
+
+    def _has_direct_anchor_reference(self, normalized_question: str) -> bool:
+        return self._has_any(
+            normalized_question,
+            (
+                "eta",
+                "eita",
+                "etar",
+                "eitar",
+                "ei ta",
+                "this",
+                "this one",
+                "that",
+                "that one",
+                "it",
+                "এটা",
+                "এটার",
+                "এটি",
+                "এটির",
+                "এইটা",
+                "এইটার",
+                "ওটা",
+                "ওটার",
+                "সেটা",
+                "সেটার",
+            ),
+        )
 
     @staticmethod
     def _merge_context_filters(
@@ -299,9 +384,21 @@ class InventoryMemoryResolver:
     def _has_phrase(text: str, phrase: str) -> bool:
         normalized_phrase = normalize_inventory_text(phrase)
         if not normalized_phrase:
+            if InventoryMemoryResolver._has_bangla(phrase):
+                return phrase in text
             return False
         pattern = re.escape(normalized_phrase).replace(r"\ ", r"\s+")
         return bool(re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", text))
+
+    @staticmethod
+    def _memory_text(text: str) -> str:
+        normalized = normalize_inventory_text(text)
+        raw = text.casefold()
+        return f"{normalized} {raw}".strip()
+
+    @staticmethod
+    def _has_bangla(text: str) -> bool:
+        return any("\u0980" <= char <= "\u09ff" for char in text)
 
     @staticmethod
     def _dedupe(product_ids: list[str | None]) -> list[str]:

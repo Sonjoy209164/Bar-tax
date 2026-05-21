@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -69,6 +70,13 @@ REFERENCE_TERMS = (
     "tell me more",
     "more about it",
     "more about that",
+    "show similar",
+    "similar",
+    "cheaper",
+    "matching",
+    "sathe matching",
+    "go with",
+    "what goes with",
     "এটা",
     "এটার",
     "ওটা",
@@ -108,6 +116,75 @@ FOLLOWUP_FACT_TERMS = (
     "আছে",
 )
 
+COLOR_TERMS = (
+    "black",
+    "blue",
+    "brown",
+    "green",
+    "grey",
+    "gray",
+    "maroon",
+    "navy",
+    "olive",
+    "pink",
+    "purple",
+    "red",
+    "white",
+    "yellow",
+    "কালো",
+    "নীল",
+    "লাল",
+    "সাদা",
+    "সবুজ",
+)
+
+PRODUCT_TERMS = (
+    "bag",
+    "belt",
+    "blouse",
+    "dress",
+    "earring",
+    "frock",
+    "gift",
+    "jewelry",
+    "kameez",
+    "necklace",
+    "panjabi",
+    "pant",
+    "polo",
+    "sandal",
+    "saree",
+    "shirt",
+    "shoe",
+    "watch",
+    "শাড়ি",
+    "সাড়ি",
+    "পাঞ্জাবি",
+    "স্যান্ডেল",
+    "জুতা",
+    "ব্লাউজ",
+)
+
+NON_PRODUCT_FACT_TOPICS = (
+    "age",
+    "boyosh",
+    "biryani",
+    "case",
+    "charge",
+    "delivery",
+    "kacchi",
+    "kachchi",
+    "legal",
+    "order status",
+    "where is my order",
+    "বয়স",
+    "বয়স",
+    "বিরিয়ানি",
+    "ডেলিভারি",
+    "চার্জ",
+    "আইনি",
+)
+
 NEW_REQUEST_TERMS = (
     "show me",
     "show",
@@ -119,6 +196,8 @@ NEW_REQUEST_TERMS = (
     "suggest",
     "do you have",
     "have any",
+    "ache",
+    "ase",
     "dekhao",
     "dekhaw",
     "dekhate",
@@ -205,11 +284,22 @@ def product_focus_expired(state: Any, *, now: datetime | None = None) -> bool:
 
 def question_has_reference_language(question: str) -> bool:
     text = normalize_inventory_text(question)
-    if not text:
+    raw = question.casefold()
+    if not text and not raw.strip():
         return False
-    return any(term in text for term in REFERENCE_TERMS) or any(
-        term in text for term in FOLLOWUP_FACT_TERMS
-    )
+    if _has_any(text, raw, NON_PRODUCT_FACT_TOPICS):
+        return False
+    if _has_any(text, raw, REFERENCE_TERMS):
+        return True
+    if _has_price_followup(text, raw):
+        return True
+    if _has_size_followup(text, raw):
+        return True
+    if _has_color_availability_followup(text, raw):
+        return True
+    if _is_bare_availability_followup(text, raw):
+        return True
+    return False
 
 
 def question_has_new_product_request(
@@ -217,13 +307,28 @@ def question_has_new_product_request(
     *,
     ontology: ProductOntology | None = None,
 ) -> bool:
+    if not question_has_product_mention(question, ontology=ontology):
+        return False
+    text = normalize_inventory_text(question)
+    raw = question.casefold()
+    return _has_any(text, raw, NEW_REQUEST_TERMS)
+
+
+def question_has_product_mention(
+    question: str,
+    *,
+    ontology: ProductOntology | None = None,
+) -> bool:
     ontology = ontology or ProductOntology()
     text = normalize_inventory_text(question)
-    if not text:
+    raw = question.casefold()
+    if not text and not raw.strip():
         return False
-    if not ontology.detect_product_type(text=text):
-        return False
-    return any(term in text for term in NEW_REQUEST_TERMS)
+    return bool(ontology.detect_product_type(text=text)) or _has_any(
+        text,
+        raw,
+        PRODUCT_TERMS,
+    )
 
 
 def should_use_product_focus(
@@ -251,7 +356,18 @@ def should_use_product_focus(
             ttl_seconds=ttl,
         )
 
-    if question_has_new_product_request(question, ontology=ontology) and not _is_variant_followup(question):
+    has_direct_anchor = _has_direct_anchor_reference(question)
+    if question_has_product_mention(question, ontology=ontology) and not has_direct_anchor:
+        return MemoryPolicyDecision(
+            False,
+            "current question is a new explicit product/category request",
+            source=getattr(state, "product_focus_source", None),
+            confidence=float(getattr(state, "product_focus_confidence", 0.0) or 0.0),
+            age_seconds=age,
+            ttl_seconds=ttl,
+        )
+
+    if question_has_new_product_request(question, ontology=ontology) and not has_direct_anchor:
         return MemoryPolicyDecision(
             False,
             "current question is a new explicit product/category request",
@@ -346,9 +462,11 @@ def filter_safe_slots_for_memory(
 
 def _is_variant_followup(question: str) -> bool:
     text = normalize_inventory_text(question)
-    return any(
-        phrase in text
-        for phrase in (
+    raw = question.casefold()
+    return _has_any(
+        text,
+        raw,
+        (
             "same design",
             "same color",
             "same colour",
@@ -362,5 +480,85 @@ def _is_variant_followup(question: str) -> bool:
             "অন্য রঙ",
             "অন্য কালার",
             "আর কালার",
-        )
+        ),
     )
+
+
+def _has_direct_anchor_reference(question: str) -> bool:
+    text = normalize_inventory_text(question)
+    raw = question.casefold()
+    return _has_any(
+        text,
+        raw,
+        (
+            "eta",
+            "etar",
+            "eita",
+            "this",
+            "this one",
+            "that",
+            "that one",
+            "it",
+            "go with this",
+            "what goes with this",
+            "এটা",
+            "এটার",
+            "এটি",
+            "এটির",
+            "এর",
+        ),
+    )
+
+
+def _has_price_followup(text: str, raw: str) -> bool:
+    if _has_any(text, raw, ("delivery", "charge", "order", "boyosh", "age", "ডেলিভারি", "চার্জ", "বয়স", "বয়স")):
+        return False
+    return _has_any(text, raw, ("price", "dam", "er dam", "দাম"))
+
+
+def _has_size_followup(text: str, raw: str) -> bool:
+    return _has_any(
+        text,
+        raw,
+        ("size", "m size", "l size", "xl", "xxl", "সাইজ", "মাপ", "38", "39", "40", "41", "42"),
+    )
+
+
+def _has_color_availability_followup(text: str, raw: str) -> bool:
+    if _has_any(text, raw, PRODUCT_TERMS):
+        return False
+    has_color = _has_any(text, raw, COLOR_TERMS)
+    has_availability = _has_any(
+        text,
+        raw,
+        ("ache", "ase", "available", "stock", "color", "colour", "আছে", "কালার", "রঙ"),
+    )
+    return has_color and has_availability
+
+
+def _is_bare_availability_followup(text: str, raw: str) -> bool:
+    compact = text.strip()
+    raw_compact = " ".join(raw.split())
+    return compact in {"ache", "ase", "available", "stock", "stock ache"} or raw_compact in {
+        "আছে",
+        "স্টক আছে",
+    }
+
+
+def _has_any(text: str, raw: str, phrases: tuple[str, ...]) -> bool:
+    for phrase in phrases:
+        normalized = normalize_inventory_text(phrase)
+        if normalized and _contains_ascii_phrase(text, normalized):
+            return True
+        if _has_bangla(phrase) and phrase in raw:
+            return True
+    return False
+
+
+def _contains_ascii_phrase(text: str, phrase: str) -> bool:
+    pattern = re.escape(phrase).replace(r"\ ", r"\s+")
+    return bool(re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", text))
+
+
+def _has_bangla(text: str) -> bool:
+    return any("\u0980" <= char <= "\u09ff" for char in text)

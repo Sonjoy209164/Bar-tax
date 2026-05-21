@@ -1873,9 +1873,14 @@ class FashionRetailAssistant:
             category_key = self._canonical_category_key(category)
             if category_key:
                 return category_key
+        matched: list[tuple[int, str]] = []
         for key, aliases in self.CATEGORY_ALIASES.items():
-            if any(self._contains_phrase(text, alias) for alias in aliases):
-                return key
+            for alias in aliases:
+                if self._contains_phrase(text, alias):
+                    matched.append((len(normalize_fashion_text(alias)), key))
+        if matched:
+            matched.sort(reverse=True)
+            return matched[0][1]
         return None
 
     def _extract_requested_accessory_keys(self, text: str) -> tuple[str, ...]:

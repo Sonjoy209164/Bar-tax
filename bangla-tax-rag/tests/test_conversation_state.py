@@ -156,6 +156,61 @@ def test_record_turn_persists_last_shown_products(store: ConversationStateStore)
     assert state.last_primary_product_id == "p1"
 
 
+def test_record_turn_preserves_last_products_when_no_new_products(store: ConversationStateStore) -> None:
+    store.record_turn(
+        session_id="sid",
+        question="red saree",
+        intent="fashion_search",
+        slots={"category_key": "saree"},
+        product_ids=["p1", "p2"],
+        primary_product_id="p1",
+        confidence=0.9,
+        abstained=False,
+    )
+    store.record_turn(
+        session_id="sid",
+        question="thanks",
+        intent="thanks",
+        slots={},
+        product_ids=[],
+        primary_product_id=None,
+        confidence=0.9,
+        abstained=False,
+    )
+    state = store.get("sid")
+    assert state.last_shown_product_ids == ["p1", "p2"]
+    assert state.last_primary_product_id == "p1"
+
+
+def test_record_turn_merges_slots_but_resets_product_specific_slots_on_new_category(
+    store: ConversationStateStore,
+) -> None:
+    store.record_turn(
+        session_id="sid",
+        question="red saree under 3000",
+        intent="fashion_search",
+        slots={"category_key": "saree", "color_family": "red", "budget_max": 3000},
+        product_ids=["p1"],
+        primary_product_id="p1",
+        confidence=0.9,
+        abstained=False,
+    )
+    store.record_turn(
+        session_id="sid",
+        question="black panjabi dekhao",
+        intent="fashion_search",
+        slots={"category_key": "panjabi", "color_family": "black"},
+        product_ids=["p2"],
+        primary_product_id="p2",
+        confidence=0.9,
+        abstained=False,
+    )
+    state = store.get("sid")
+    assert state.active_slots["category_key"] == "panjabi"
+    assert state.active_slots["color_family"] == "black"
+    assert state.active_slots["budget_max"] == 3000
+
+
 def test_budget_observations_capped_to_last_10(store: ConversationStateStore) -> None:
     for i in range(15):
         store.record_turn(

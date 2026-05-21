@@ -68,6 +68,8 @@ const el = {
   catalogEmpty:    document.querySelector("#catalogEmpty"),
   imageExamples:   document.querySelector("#imageExamples"),
   textExamples:    document.querySelector("#textExamples"),
+  catalogExamples: document.querySelector("#catalogExamples"),
+  memoryExamples:  document.querySelector("#memoryExamples"),
 };
 
 init();
@@ -129,9 +131,17 @@ function bindEvents() {
   el.textExamples?.addEventListener("click", e => {
     const card = e.target.closest(".text-example-card");
     if (!card) return;
-    el.input.value = card.dataset.question || "";
-    resizeInput();
-    el.input.focus();
+    setInputQuestion(card.dataset.question || "");
+  });
+  el.catalogExamples?.addEventListener("click", e => {
+    const card = e.target.closest(".catalog-example-card");
+    if (!card) return;
+    setInputQuestion(card.dataset.question || "");
+  });
+  el.memoryExamples?.addEventListener("click", e => {
+    const card = e.target.closest(".memory-example-card");
+    if (!card) return;
+    setInputQuestion(card.dataset.question || "");
   });
   el.clearImageBtn.addEventListener("click", clearImage);
   el.confirmOrderBtn.addEventListener("click", () => void sendMessage("yes"));
@@ -157,6 +167,12 @@ function bindEvents() {
     el.input.focus();
     if (window.innerWidth < 920) setCatalogOpen(false);
   });
+}
+
+function setInputQuestion(question) {
+  el.input.value = question || "";
+  resizeInput();
+  el.input.focus();
 }
 
 function setMessagesVisible(visible) {
@@ -186,6 +202,8 @@ function setCatalogOpen(open) {
 async function loadCatalog(options = {}) {
   if (state.catalogLoaded && !options.force) {
     renderCatalog();
+    renderCatalogExamples();
+    renderMemoryExamples();
     return;
   }
   el.catalogCount.textContent = "Loading catalog...";
@@ -201,6 +219,8 @@ async function loadCatalog(options = {}) {
     state.catalogLoaded = true;
     renderCatalogCategories();
     renderCatalog();
+    renderCatalogExamples();
+    renderMemoryExamples();
   } catch (error) {
     el.catalogCount.textContent = "Catalog unavailable";
     el.catalogItems.innerHTML = "";
@@ -254,6 +274,244 @@ function renderCatalog() {
   }
 
   filtered.forEach(item => el.catalogItems.appendChild(renderCatalogItem(item)));
+}
+
+function renderCatalogExamples() {
+  if (!el.catalogExamples) return;
+  el.catalogExamples.innerHTML = "";
+  const examples = pickCatalogExamples();
+  if (!examples.length) {
+    const empty = document.createElement("div");
+    empty.className = "catalog-example-empty";
+    empty.textContent = "No live catalog examples available yet.";
+    el.catalogExamples.appendChild(empty);
+    return;
+  }
+
+  examples.forEach(({ item, target }) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "catalog-example-card";
+    card.dataset.question = target.question(item);
+
+    const imageUrl = firstCatalogImageUrl(item);
+    if (imageUrl) {
+      const img = document.createElement("img");
+      img.src = resolveCatalogAssetUrl(imageUrl);
+      img.alt = item.name || item.product_id || "Catalog product";
+      img.loading = "lazy";
+      card.appendChild(img);
+    } else {
+      const placeholder = document.createElement("span");
+      placeholder.className = "catalog-example-placeholder";
+      placeholder.textContent = "No image";
+      card.appendChild(placeholder);
+    }
+
+    const body = document.createElement("span");
+    body.className = "catalog-example-body";
+
+    const label = document.createElement("span");
+    label.className = "catalog-example-label";
+    label.textContent = target.label;
+    body.appendChild(label);
+
+    const name = document.createElement("span");
+    name.className = "catalog-example-name";
+    name.textContent = item.name || item.product_id || "Product";
+    body.appendChild(name);
+
+    const facts = document.createElement("span");
+    facts.className = "catalog-example-facts";
+    facts.textContent = compactCatalogFacts(item);
+    body.appendChild(facts);
+
+    const question = document.createElement("span");
+    question.className = "catalog-example-question";
+    question.textContent = card.dataset.question;
+    body.appendChild(question);
+
+    card.appendChild(body);
+    el.catalogExamples.appendChild(card);
+  });
+}
+
+function renderMemoryExamples() {
+  if (!el.memoryExamples) return;
+  el.memoryExamples.innerHTML = "";
+  const anchor = pickMemoryAnchor();
+  const anchorQuestion = anchor
+    ? `do you have ${anchor.name}?`
+    : "Panjabi ache?";
+  const anchorLabel = anchor
+    ? `${anchor.name}`
+    : "Focus any product";
+
+  const flow = [
+    {
+      label: "1. Focus product",
+      question: anchorQuestion,
+      note: anchorLabel,
+    },
+    {
+      label: "2. Price follow-up",
+      question: "etar dam koto?",
+      note: "Should use the focused product.",
+    },
+    {
+      label: "3. Size follow-up",
+      question: "M size ache?",
+      note: "Should keep the same product context.",
+    },
+    {
+      label: "4. Cheaper similar",
+      question: "er cheye kom dam er similar ache?",
+      note: "Should search alternatives around the anchor.",
+    },
+    {
+      label: "5. Second option",
+      question: "second one er details dao",
+      note: "Should resolve list position from last answer.",
+    },
+  ];
+
+  flow.forEach(step => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "memory-example-card";
+    card.dataset.question = step.question;
+
+    const label = document.createElement("span");
+    label.className = "memory-example-label";
+    label.textContent = step.label;
+    card.appendChild(label);
+
+    const question = document.createElement("span");
+    question.className = "memory-example-question";
+    question.textContent = step.question;
+    card.appendChild(question);
+
+    const note = document.createElement("span");
+    note.className = "memory-example-note";
+    note.textContent = step.note;
+    card.appendChild(note);
+
+    el.memoryExamples.appendChild(card);
+  });
+}
+
+function pickCatalogExamples() {
+  const targets = [
+    { keys: ["panjabi"], label: "Panjabi", question: item => `${item.name} size L ache?` },
+    { keys: ["saree"], label: "Saree", question: item => `${item.name} er price koto?` },
+    { keys: ["salwar_kameez", "salwar kameez", "three_piece"], label: "Salwar Kameez", question: item => `${item.name} size M ache?` },
+    { keys: ["shirt"], label: "Shirt", question: item => `${item.name} size M available?` },
+    { keys: ["polo"], label: "Polo", question: item => `${item.name} er kon color ache?` },
+    { keys: ["t_shirt", "t-shirt", "tee"], label: "T-shirt", question: item => `${item.name} size M ache?` },
+    { keys: ["bag", "hand_bag", "hand bag"], label: "Bag", question: item => `do you have ${item.name}?` },
+    { keys: ["sandal", "shoe", "footwear"], label: "Footwear", question: item => `${item.name} size 38 ache?` },
+  ];
+  const used = new Set();
+  const examples = [];
+
+  targets.forEach(target => {
+    const item = bestCatalogItemForTarget(target, used);
+    if (!item) return;
+    used.add(item.product_id || item.sku || item.name);
+    examples.push({ item, target });
+  });
+
+  if (examples.length < 8) {
+    rankedCatalogItems()
+      .filter(item => !used.has(item.product_id || item.sku || item.name))
+      .slice(0, 8 - examples.length)
+      .forEach(item => examples.push({
+        item,
+        target: {
+          label: humanCategory(item),
+          question: productQuestion,
+        },
+      }));
+  }
+
+  return examples.slice(0, 8);
+}
+
+function bestCatalogItemForTarget(target, used = new Set()) {
+  const candidates = rankedCatalogItems()
+    .filter(item => !used.has(item.product_id || item.sku || item.name));
+  const normalizedKeys = target.keys.map(normalizeCategoryKey);
+  return candidates.find(item => normalizedKeys.includes(normalizedCategory(item)))
+    || candidates.find(item => {
+      const category = normalizedCategory(item);
+      return normalizedKeys.some(key => category.includes(key));
+    });
+}
+
+function rankedCatalogItems() {
+  return [...state.catalogItems]
+    .filter(item => item && (item.name || item.product_id))
+    .sort((a, b) => catalogExampleScore(b) - catalogExampleScore(a));
+}
+
+function catalogExampleScore(item) {
+  let score = 0;
+  if (Number(item.stock || 0) > 0) score += 40;
+  if (item.price !== null && item.price !== undefined) score += 20;
+  if (firstCatalogImageUrl(item)) score += 20;
+  if (normalizedCategory(item) && normalizedCategory(item) !== "unknown") score += 8;
+  if (String(item.name || "").length < 70) score += 4;
+  if (isSafeDemoProductName(item)) score += 10;
+  else score -= 20;
+  return score;
+}
+
+function pickMemoryAnchor() {
+  const preferred = ["panjabi", "shirt", "polo", "t_shirt", "salwar_kameez", "saree"];
+  const safeRanked = rankedCatalogItems().filter(isSafeDemoProductName);
+  return safeRanked.find(item => preferred.includes(normalizedCategory(item)))
+    || safeRanked[0]
+    || rankedCatalogItems().find(item => preferred.includes(normalizedCategory(item)))
+    || rankedCatalogItems()[0]
+    || null;
+}
+
+function productQuestion(item) {
+  return `do you have ${item.name || item.product_id}?`;
+}
+
+function compactCatalogFacts(item) {
+  const color = item.attributes?.color || item.color;
+  const stock = Number(item.stock || 0);
+  return [
+    humanCategory(item),
+    color,
+    formatCatalogPrice(item),
+    stock > 0 ? `${stock} stock` : "out of stock",
+  ].filter(Boolean).join(" · ");
+}
+
+function humanCategory(item) {
+  return item.category || item.attributes?.category_key || "Product";
+}
+
+function normalizedCategory(item) {
+  return normalizeCategoryKey(item.attributes?.category_key || item.category || "");
+}
+
+function normalizeCategoryKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function isSafeDemoProductName(item) {
+  const name = String(item?.name || "");
+  if (!name) return false;
+  if (name.length > 72) return false;
+  return !/(&|\bvs\b|\band\b|\bversus\b|\/)/i.test(name);
 }
 
 function renderCatalogItem(item) {

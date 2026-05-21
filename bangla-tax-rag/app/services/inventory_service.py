@@ -100,6 +100,7 @@ from app.inventory.boundary_enrichment import (
     enrich as enrich_boundary_reply,
 )
 from app.inventory.conversation_logger import log_boundary_trigger
+from app.inventory.conversation_context import hydrate_request_from_state
 from app.inventory.natural_answer import generate_ollama_answer
 from app.inventory.polite_boundary import classify_polite_boundary
 from app.inventory.proactive import build_proactive_message
@@ -966,6 +967,7 @@ class InventoryService:
         )
         if image_followup is not None:
             return image_followup
+        request = self._hydrate_request_from_server_state(request)
         if self._should_try_fast_exact_title_lookup(request.question):
             exact_title_response = self._try_fashion_retail_ask(
                 request=request,
@@ -1205,6 +1207,25 @@ class InventoryService:
         )
         return response
 
+    def _hydrate_request_from_server_state(self, request: InventoryAskRequest) -> InventoryAskRequest:
+        session_id = getattr(request, "session_id", None)
+        if not session_id:
+            return request
+        try:
+            from app.inventory.conversation_state import get_state_store
+
+            hydration = hydrate_request_from_state(
+                request=request,
+                state=get_state_store().get(session_id),
+                ontology=self.product_ontology,
+            )
+            if hydration.used_state:
+                logger.debug("Hydrated inventory request from conversation state: %s", hydration.reason)
+                return hydration.request
+        except Exception as exc:  # pragma: no cover - memory must never block a reply
+            logger.debug("Conversation state hydration failed: %s", exc)
+        return request
+
     @staticmethod
     def _should_try_fast_exact_title_lookup(question: str) -> bool:
         normalized = re.sub(r"[^a-z0-9\u0980-\u09ff\s+-]", " ", question.casefold())
@@ -1415,6 +1436,8 @@ class InventoryService:
                     confidence=decision.confidence,
                     abstained=guardrail_abstained,
                     clarification_pending=decision.boundary_type,
+                    memory_source="polite_boundary",
+                    write_reason="polite boundary commerce redirect",
                 )
         except Exception as exc:
             logger.debug("Polite boundary state save failed: %s", exc)
@@ -1642,12 +1665,16 @@ class InventoryService:
             state = get_state_store().get(session_id)
         except Exception:  # pragma: no cover - state store is best-effort
             return None
-        if state.last_intent != "image_search":
-            return None
         primary_id = state.last_primary_product_id
         if not primary_id:
             return None
         if not self._is_image_variant_followup(request.question):
+            return None
+        if state.last_intent != "image_search" and not (
+            state.active_slots.get("variant_group_id")
+            or state.active_slots.get("design_id")
+            or state.last_shown_product_ids
+        ):
             return None
         catalog = self._load_catalog()
         primary_item = catalog.get(primary_id)
@@ -1901,6 +1928,9 @@ class InventoryService:
             primary_product_id=decision.primary_product_id,
             confidence=confidence,
             abstained=decision.decision_label == "no_confident_match",
+            memory_source="image_search",
+            memory_confidence=confidence,
+            write_reason=f"image_search:{decision.decision_label}",
         )
 
     @staticmethod
@@ -2159,6 +2189,8 @@ class InventoryService:
                     confidence=plan.confidence,
                     abstained=False,
                     clarification_pending="planner",
+                    memory_source="clarification",
+                    write_reason="planner clarification",
                 )
         except Exception as exc:
             logger.debug("Planner-clarification state save failed: %s", exc)
@@ -2686,6 +2718,8 @@ class InventoryService:
                     confidence=outcome.confidence,
                     abstained=outcome.abstained,
                     clarification_pending=clarification_pending,
+                    memory_source="text_search",
+                    write_reason=f"fashion_retail:{outcome.intent}",
                 )
                 # Trigger preference learning if a phone is linked
                 try:

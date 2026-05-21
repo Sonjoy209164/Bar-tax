@@ -1395,3 +1395,31 @@ def test_inventory_memory_resolver_uses_reference_but_ignores_new_explicit_reque
     assert explicit_product_name.filters.product_ids == []
     assert explicit_product_name.filters.categories == []
     assert explicit_product_name.resolution.ignored_memory_reason is not None
+
+
+def test_inventory_memory_resolver_handles_banglish_followups() -> None:
+    resolver = InventoryMemoryResolver()
+    last_plan = InventoryAnswerPlan(
+        primary_product_id="saree-red",
+        alternative_product_ids=["saree-blue"],
+    )
+
+    price_followup = resolver.resolve(
+        question="etar dam koto?",
+        filters=InventorySearchFilters(),
+        focused_product_ids=["saree-red", "saree-blue"],
+        active_filters=InventorySearchFilters(categories=["Saree"]),
+        last_answer_plan=last_plan,
+    )
+    assert price_followup.resolution.used_memory is True
+    assert price_followup.filters.product_ids == ["saree-red"]
+
+    size_followup = resolver.resolve(
+        question="M size ache?",
+        filters=InventorySearchFilters(),
+        focused_product_ids=["saree-red", "saree-blue"],
+        active_filters=InventorySearchFilters(categories=["Saree"]),
+        last_answer_plan=last_plan,
+    )
+    assert size_followup.resolution.used_memory is True
+    assert size_followup.filters.product_ids == ["saree-red"]

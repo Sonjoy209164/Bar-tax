@@ -432,7 +432,12 @@ def finalize_image_search(
     )
     same_design_ids = tuple(item.product_id for item in same_design_items if item.product_id != primary.product_id)
     similar_ids = tuple(hit.product_id for hit in merged_hits if hit.product_id not in {primary.product_id, *same_design_ids})
-    follow_up_question = _next_best_question(decision_label, available_colors, size_availability)
+    follow_up_question = _next_best_question(
+        decision_label,
+        available_colors,
+        size_availability,
+        primary_stock=primary.stock,
+    )
     return ImageSearchDecision(
         answer=answer,
         hits=merged_hits[:top_k],
@@ -893,10 +898,31 @@ def _build_decision_answer(
     price = f"BDT {primary.price:,.0f}" if isinstance(primary.price, (int, float)) else "price not set"
     reference_note = _reference_image_reason(primary)
     size_suffix = f" {size_availability}" if size_availability else ""
-    next_q = _next_best_question(decision_label, available_colors, size_availability)
+    next_q = _next_best_question(
+        decision_label,
+        available_colors,
+        size_availability,
+        primary_stock=primary.stock,
+    )
     next_q_suffix = f" {next_q}" if next_q else ""
     if decision_label == "confirmed_exact":
         color_line = _available_color_sentence(available_colors)
+        if primary.stock <= 0:
+            similar = [hit for hit in hits if hit.product_id != primary.product_id and hit.stock > 0][:3]
+            similar_line = ""
+            if similar:
+                names = ", ".join(
+                    f"{hit.name} ({'BDT ' + format(hit.price, ',.0f') if hit.price else 'price N/A'})"
+                    for hit in similar
+                )
+                similar_line = f" In-stock similar options: {names}."
+            return (
+                f"This matches **{primary.name}** ({price}), but it is currently out of stock."
+                + (f" {color_line}" if color_line else "")
+                + similar_line
+                + size_suffix
+                + next_q_suffix
+            )
         return (
             f"Yes, this looks like **{primary.name}** ({price}, {primary.stock} in stock)."
             + (f" {color_line}" if color_line else "")
@@ -951,6 +977,8 @@ def _next_best_question(
     decision_label: str,
     available_colors: tuple[str, ...],
     size_availability: str | None,
+    *,
+    primary_stock: int | None = None,
 ) -> str | None:
     """One natural follow-up question per decision label.
 
@@ -959,8 +987,12 @@ def _next_best_question(
     confident enough to ask about.
     """
     if size_availability:
+        if primary_stock is not None and primary_stock <= 0:
+            return "Similar in-stock option dekhabo?"
         return "Order korte parle bolun, ami size lock kore dichi."
     if decision_label == "confirmed_exact":
+        if primary_stock is not None and primary_stock <= 0:
+            return "Similar in-stock option dekhabo?"
         if available_colors:
             return "Other colors dekhabo?"
         return "Order korbo?"

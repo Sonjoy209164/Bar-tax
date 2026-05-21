@@ -58,6 +58,24 @@ def test_eta_banglish_resolves() -> None:
     assert r.resolved_product_id == "p1"
 
 
+def test_tar_banglish_resolves() -> None:
+    r = resolve_coreference(
+        question="tar dam koto?",
+        last_shown_product_ids=SHOWN,
+        last_primary_product_id="p2",
+    )
+    assert r.resolved_product_id == "p2"
+
+
+def test_eita_banglish_resolves() -> None:
+    r = resolve_coreference(
+        question="eitar size M ache?",
+        last_shown_product_ids=SHOWN,
+        last_primary_product_id="p1",
+    )
+    assert r.resolved_product_id == "p1"
+
+
 # ── "that" / "ওটা" ────────────────────────────────────────────────────────────
 
 def test_that_resolves() -> None:

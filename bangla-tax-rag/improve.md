@@ -35,6 +35,75 @@ Source report:
 | CIF-RAG without risk policy | 35.7% | 56.5% | 7.0% | 93.0% | 38.4% | 57.3% |
 | Full CIF-RAG guarded | 14.0% | 56.5% | 7.0% | 18.7% | 74.9% | 4.7% |
 
+## 20k Follow-Up Pass
+
+Source reports:
+
+- `results/lereve_clip20000_clip_baseline_20260519_190206.md`
+- `results/lereve_clip20000_comparison_20260519_194304.md`
+- `results/lereve_clip20000_clip_baseline_20260519_194652.md`
+- `results/lereve_clip20000_comparison_20260519_202619.md`
+- `results/lereve_clip20000_comparison_20260519_203838.md`
+
+### 20k Primary-Image Index
+
+| Method | Top-1 Exact | Top-5 Recall | Wrong Category Top-1 | Accepted Exact Rate | Accepted Exact Precision | Accepted Wrong Exact / All |
+|---|---:|---:|---:|---:|---:|---:|
+| CLIP only | 18.8% | 27.0% | 43.5% | 100.0% | 18.4% | 81.6% |
+| CLIP + metadata rerank | 28.5% | 42.6% | 0.0% | 100.0% | 28.1% | 71.9% |
+| Full CIF-RAG guarded | 9.8% | 42.6% | 0.0% | 15.9% | 61.8% | 6.1% |
+
+### 20k Naive All-Gallery Index
+
+The all-gallery pass indexed `46,159` product images for `20,000` products.
+
+| Method | Top-1 Exact | Top-5 Recall | Wrong Category Top-1 | Accepted Exact Rate | Accepted Exact Precision | Accepted Wrong Exact / All |
+|---|---:|---:|---:|---:|---:|---:|
+| CLIP only | 17.9% | 24.4% | 34.9% | 100.0% | 17.5% | 82.5% |
+| CLIP + metadata rerank | 23.8% | 33.6% | 0.0% | 100.0% | 23.4% | 76.6% |
+| Full CIF-RAG guarded | 10.0% | 33.6% | 0.0% | 19.4% | 51.4% | 9.4% |
+
+### 20k Gallery Index With Alternate-Image Penalty
+
+The best gallery penalty tested so far is:
+
+```text
+--gallery-penalty 0.15
+```
+
+This means primary images keep their raw CLIP score, while non-primary gallery images are demoted by `0.15` before product-level max aggregation.
+
+| Method | Top-1 Exact | Top-5 Recall | Wrong Category Top-1 | Accepted Exact Rate | Accepted Exact Precision | Accepted Wrong Exact / All |
+|---|---:|---:|---:|---:|---:|---:|
+| CLIP only | 18.9% | 27.3% | 43.3% | 100.0% | 18.6% | 81.4% |
+| CLIP + metadata rerank | 28.7% | 42.9% | 0.0% | 100.0% | 28.3% | 71.7% |
+| Full CIF-RAG guarded | 10.0% | 42.9% | 0.0% | 16.2% | 61.7% | 6.2% |
+
+### 20k Interpretation
+
+- [ ] More indexed images did **not** automatically improve retrieval.
+  - Primary-only metadata top-5: `42.6%`.
+  - Naive all-gallery metadata top-5: `33.6%`.
+  - Meaning: raw gallery max-score aggregation introduces distractor images.
+
+- [ ] Category canonicalization helped safety.
+  - Metadata rerank wrong-category top-1 became `0.0%` in the 20k comparison.
+  - Meaning: the taxonomy guard is now doing real work.
+
+- [ ] CIF-RAG remains safer but still too conservative and underpowered.
+  - Primary-only full CIF accepted exact precision: `61.8%`.
+  - Naive all-gallery full CIF accepted exact precision: `51.4%`.
+  - Meaning: the current CLIP score/margin policy is not enough at 20k scale.
+
+- [ ] Naive all-gallery indexing is **not** the final answer.
+  - Next version must rank gallery images by image role/quality and aggregate more intelligently.
+  - Do not use raw max-score over all gallery images as the production strategy.
+
+- [ ] Penalized gallery indexing is slightly better than primary-only, but not a breakthrough.
+  - Primary-only metadata top-5: `42.6%`.
+  - Penalized-gallery metadata top-5: `42.9%`.
+  - Meaning: gallery helps only when demoted; it does not solve exact identity by itself.
+
 ## What The Result Means
 
 - [ ] CLIP-only is not commerce-safe.
@@ -190,13 +259,40 @@ catalog gallery image
 
 Exact retrieval will stay weak if only one product image is searchable.
 
+### 20k Finding
+
+Naive all-gallery indexing was tested and it hurt retrieval:
+
+```text
+primary-only metadata top-5: 42.6%
+all-gallery metadata top-5: 33.6%
+```
+
+This means the next gallery version must be smarter:
+
+```text
+do not blindly max-pool every gallery image
+```
+
+Role-aware demotion was also tested:
+
+```text
+gallery penalty 0.03 -> metadata top-5 36.4%
+gallery penalty 0.06 -> metadata top-5 38.7%
+gallery penalty 0.10 -> metadata top-5 41.3%
+gallery penalty 0.15 -> metadata top-5 42.9%
+primary-only        -> metadata top-5 42.6%
+```
+
+The best tested setting is `0.15`, but the gain is tiny.
+
 ### Tasks
 
-- [ ] Build multi-image catalog index.
+- [x] Build multi-image catalog index.
   - Each image becomes one searchable vector.
   - Product score is aggregated from image hits.
 
-- [ ] Store image-level metadata:
+- [x] Store image-level metadata:
   - `product_id`
   - `image_id`
   - `image_role`
@@ -206,12 +302,15 @@ Exact retrieval will stay weak if only one product image is searchable.
   - `color`
   - `source_url`
 
-- [ ] Add aggregation strategies.
+- [ ] Replace naive aggregation with role-aware aggregation.
   - `max_score`: product score is best image hit.
   - `top_k_mean`: product score is mean of best 2-3 image hits.
   - `primary_boost`: primary image gets small boost, but gallery can still win.
+  - `query_role_match`: model/detail/query-like image gets more weight when relevant.
+  - `low_quality_demotion`: tiny/cropped/noisy images get lower weight.
+  - Current implemented baseline: `--gallery-penalty`, best tested value `0.15`.
 
-- [ ] Run ablation:
+- [x] Run ablation:
   - primary-only index
   - all-gallery index
   - all-gallery + metadata rerank
@@ -219,9 +318,11 @@ Exact retrieval will stay weak if only one product image is searchable.
 
 ### Expected Impact
 
-- Top-5 recall should increase.
-- Median rank should improve.
-- Accepted exact rate should increase because correct product appears closer.
+- Initial expected impact was wrong for naive max aggregation.
+- Next expected impact applies only after role-aware/quality-aware aggregation:
+  - Top-5 recall should increase.
+  - Median rank should improve.
+  - Accepted exact rate should increase because correct product appears closer.
 
 ## Phase 4: Calibrate Risk Policy Instead Of Hardcoding It
 

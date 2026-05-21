@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Inventory Chat</title>
-    <link rel="stylesheet" href="./chat.css?v=20260518-clean-demos" />
+    <link rel="stylesheet" href="./chat.css?v=20260520-lereve5k-memory-examples" />
     <style>
       /* Image upload */
       .image-upload-area {
@@ -388,11 +388,11 @@
             </div>
             <button id="messagesToggle" type="button" aria-expanded="true">Hide Messages</button>
           </div>
-          <details class="demo-drawer">
+          <details class="demo-drawer" open>
             <summary>
               <span>
-                <strong>Test Examples</strong>
-                <small>Image search, polite boundary, and occasion handling</small>
+                <strong>5k Catalog Test Examples</strong>
+                <small>Live product examples, memory flow, image search, and boundary handling</small>
               </span>
               <span class="demo-drawer-hint">Open demos</span>
             </summary>
@@ -505,6 +505,24 @@
                   </button>
                 </div>
               </section>
+              <section class="catalog-example-panel" aria-label="Live catalog examples">
+                <div class="catalog-example-head">
+                  <strong>Live 5k Catalog Examples</strong>
+                  <span>Built from the loaded catalog, so the names and photos match this server.</span>
+                </div>
+                <div class="catalog-example-grid" id="catalogExamples">
+                  <div class="catalog-example-empty">Loading live examples...</div>
+                </div>
+              </section>
+              <section class="memory-example-panel" aria-label="Memory flow examples">
+                <div class="memory-example-head">
+                  <strong>Memory Flow Test</strong>
+                  <span>Tap these in order. The same session should remember the focused product.</span>
+                </div>
+                <div class="memory-example-grid" id="memoryExamples">
+                  <div class="catalog-example-empty">Loading memory flow...</div>
+                </div>
+              </section>
             </div>
           </details>
           <div class="messages" id="messages" aria-live="polite"></div>
@@ -541,45 +559,27 @@
 
           <!-- Quick chips -->
           <div class="chips" id="chips">
-            <span class="chip-label">Memory test</span>
-            <button type="button" data-question="Lotus Buti Dhakai Jamdani Saree Red ache?">1. Focus red Jamdani</button>
-            <button type="button" data-question="same design blue color e ache?">2. Same design blue?</button>
-            <button type="button" data-question="eta shathe kon bag manabe?">3. Matching bag?</button>
-            <span class="chip-label">Try</span>
-            <button type="button">do you have White Pearl Earrings?</button>
-            <button type="button">white pearl earrings er blue color ache?</button>
-            <button type="button">ei same design ta blue color e ache?</button>
-            <button type="button">Lotus Buti Jamdani red ar royal blue er moddhe konta better?</button>
-            <button type="button">jamdani vs katan — konta nibo?</button>
-            <button type="button">biye te porar moto premium saree ache?</button>
-            <button type="button">eid er jonno 5000 er moddhe elegant saree</button>
-            <button type="button">office er jonno cotton saree dekhan</button>
-            <button type="button">panjabi size XL ache?</button>
-            <button type="button">men's blue shirt size M available?</button>
-            <button type="button">oily skin er jonno sunscreen ache?</button>
-            <button type="button">warm beige foundation stock e ache?</button>
-            <button type="button">gift er jonno 1500 er moddhe jewelry suggest korun</button>
-            <button type="button">black tote bag office er jonno bhalo hobe?</button>
-            <button type="button">নেভি কাতান শাড়ির সাথে কোন ব্যাগ মানাবে?</button>
-            <button type="button">এই শাড়ির সাথে কোন গয়না মানাবে?</button>
+            <span class="chip-label">5k Catalog</span>
+            <button type="button">Panjabi ache?</button>
+            <button type="button">Saree ache?</button>
+            <button type="button">Salwar Kameez er price koto?</button>
+            <button type="button">Long Sleeve Casual Shirt size M available?</button>
+            <button type="button">Hand Bag ache?</button>
+            <button type="button">ladies sandals size 38 ache?</button>
+            <button type="button">biye te porar moto outfit ache?</button>
+            <button type="button">eid er jonno 5000 er moddhe panjabi dekhao</button>
+            <span class="chip-label">Memory</span>
+            <button type="button">etar dam koto?</button>
+            <button type="button">M size ache?</button>
+            <button type="button">same design blue ache?</button>
+            <button type="button">er cheye kom dam er similar ache?</button>
+            <button type="button">second one er details dao</button>
+            <span class="chip-label">Support</span>
             <button type="button">Dhaka delivery charge koto?</button>
             <button type="button">COD payment available?</button>
             <button type="button">refund policy ki?</button>
             <button type="button">eta order korte chai</button>
             <button type="button">amar order track korte chai</button>
-            <button type="button">same design green ache?</button>
-            <button type="button">pink three piece er size L ache?</button>
-            <button type="button">white cotton panjabi size L ache?</button>
-            <button type="button">men er formal pant waist 34 ache?</button>
-            <button type="button">ladies black heel size 38 ache?</button>
-            <button type="button">men's brown loafer size 42 ache?</button>
-            <button type="button">men's oud perfume gift er jonno bhalo?</button>
-            <button type="button">unisex citrus fresh perfume ache?</button>
-            <button type="button">dry skin er jonno sunscreen ache?</button>
-            <button type="button">neem face wash ache?</button>
-            <button type="button">red lipstick ache?</button>
-            <button type="button">same design purple ache?</button>
-            <button type="button">tomader ki gaming laptop ache?</button>
             <span class="chip-label">Boundary</span>
             <button type="button">amar ekta gf lagbe</button>
             <button type="button">amar ekta biyete jaowa dorkar</button>
@@ -635,6 +635,6 @@
         </aside>
       </div>
     </main>
-    <script src="./chat.js?v=20260519-text-product-cards"></script>
+    <script src="./chat.js?v=20260520-lereve5k-memory-examples"></script>
   </body>
 </html>

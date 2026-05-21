@@ -431,6 +431,87 @@ def test_clip_matcher_builds_pattern_and_full_channels(monkeypatch):
     assert results[0].product_id == "test-polo-black"
 
 
+def test_clip_matcher_does_not_demote_visual_identity_when_out_of_stock(monkeypatch):
+    """Visual retrieval must find the same product before stock policy is applied.
+
+    If out-of-stock products are penalized inside CLIP ranking, an exact uploaded
+    product image can lose to a different in-stock item. Stock belongs in the
+    answer/decision layer, not the identity retrieval layer.
+    """
+    from app.inventory import clip_matcher
+
+    monkeypatch.setattr(clip_matcher, "_load_clip", lambda: ("fake-model", "fake-processor"))
+
+    def fake_encode_source(source, *, grayscale=False):
+        if grayscale:
+            return None
+        return [1.0, 0.0] if "black" in source else [0.0, 1.0]
+
+    monkeypatch.setattr(clip_matcher, "_encode_image_source", fake_encode_source)
+    monkeypatch.setattr(clip_matcher, "_encode_image_b64", lambda _b64: [1.0, 0.0])
+    monkeypatch.setattr(clip_matcher, "_encode_image_b64_grayscale", lambda _b64: None)
+    monkeypatch.setattr(clip_matcher, "_catalog_embeddings", {})
+    monkeypatch.setattr(clip_matcher, "_catalog_embedding_signature", ())
+
+    catalog = _two_item_image_catalog()
+    catalog["test-polo-black"] = catalog["test-polo-black"].model_copy(update={"stock": 0})
+
+    clip_matcher.precompute_catalog_embeddings(catalog, force=True)
+    results = clip_matcher.CLIPImageMatcher().search(image_b64="fake-b64", catalog=catalog, top_k=2)
+
+    assert results[0].product_id == "test-polo-black"
+    assert results[0].stock == 0
+
+
+def test_clip_cache_paths_include_active_catalog_vector_cache(monkeypatch):
+    from app.inventory import clip_matcher
+
+    monkeypatch.setenv("INVENTORY_CATALOG_PATH", "data/inventory/lereve_clip5000_catalog.jsonl")
+
+    paths = [str(path) for path in clip_matcher._candidate_cache_paths()]
+
+    assert "data/inventory/lereve_clip5000_clip_vectors.json" in paths
+
+
+def test_out_of_stock_exact_image_answer_does_not_offer_order():
+    catalog = _two_item_image_catalog()
+    catalog["test-polo-black"] = catalog["test-polo-black"].model_copy(update={"stock": 0})
+    raw_hits = [
+        ImageMatchResult(
+            product_id="test-polo-black",
+            name="Test Polo black",
+            score=0.99,
+            match_type="visual_similar",
+            reasons=("same uploaded image",),
+            price=1500,
+            stock=0,
+            image_kind="product_photo",
+            is_reference=False,
+            score_breakdown={"matched_channels": ["full_visual"]},
+        ),
+        ImageMatchResult(
+            product_id="test-polo-white",
+            name="Test Polo white",
+            score=0.86,
+            match_type="visual_similar",
+            reasons=("similar design",),
+            price=1500,
+            stock=4,
+            image_kind="product_photo",
+            is_reference=False,
+            score_breakdown={"matched_channels": ["full_visual"]},
+        ),
+    ]
+
+    decision = finalize_image_search(catalog=catalog, results=raw_hits, query_text="eta ache?", top_k=5)
+
+    assert decision.primary_product_id == "test-polo-black"
+    assert decision.decision_label == "confirmed_exact"
+    assert "currently out of stock" in decision.answer
+    assert "Order korbo?" not in decision.answer
+    assert "Similar in-stock option" in decision.answer
+
+
 def test_clip_embedding_metadata_is_versioned():
     """Every embedding must carry model + preprocess version stamps (Phase 5)."""
     from app.inventory.clip_matcher import embedding_metadata

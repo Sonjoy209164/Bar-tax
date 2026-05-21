@@ -60,6 +60,44 @@ _catalog_embedding_mtime: float = 0.0
 _catalog_embedding_signature: tuple[tuple[str, str], ...] = ()
 
 
+def _candidate_cache_paths() -> list[Path]:
+    """Return CLIP cache paths that fit the active catalog.
+
+    The production chat server is often started with only
+    INVENTORY_CATALOG_PATH, while research scripts save vectors beside that
+    catalog as `{catalog_prefix}_clip_vectors.json`. If the server only checks
+    the default `clip_embeddings_cache.json`, a 5k/10k Le Reve catalog silently
+    falls back to metadata image search. This helper makes the cache lookup
+    deterministic from the active catalog path.
+    """
+
+    paths: list[Path] = []
+
+    def add(path: str | Path | None) -> None:
+        if not path:
+            return
+        candidate = Path(path)
+        if candidate not in paths:
+            paths.append(candidate)
+
+    add(_CACHE_PATH)
+
+    catalog_path = os.environ.get("INVENTORY_CATALOG_PATH")
+    if catalog_path:
+        path = Path(catalog_path)
+        stem = path.stem
+        derived_stems = []
+        if stem.endswith("_catalog"):
+            derived_stems.append(f"{stem[:-len('_catalog')]}_clip_vectors")
+        if "_catalog" in stem:
+            derived_stems.append(stem.replace("_catalog", "_clip_vectors"))
+        derived_stems.append(f"{stem}_clip_vectors")
+        for derived in derived_stems:
+            add(path.with_name(f"{derived}.json"))
+
+    return paths
+
+
 def embedding_metadata() -> dict[str, str]:
     """Version stamp every embedding so a model/preprocess change forces a rebuild."""
     try:
@@ -408,15 +446,19 @@ def precompute_catalog_embeddings(
     signature = _catalog_signature(catalog)
     if not force and _catalog_embeddings and _catalog_embedding_signature == signature:
         return len(_catalog_embeddings)
-    if not force and _try_load_persisted_cache(signature):
-        return len(_catalog_embeddings)
-    if not force and _try_load_source_vector_cache(catalog, signature):
-        return len(_catalog_embeddings)
+    if not force:
+        for cache_path in _candidate_cache_paths():
+            if _try_load_persisted_cache(signature, cache_path=cache_path):
+                return len(_catalog_embeddings)
+        for cache_path in _candidate_cache_paths():
+            if _try_load_source_vector_cache(catalog, signature, cache_path=cache_path):
+                return len(_catalog_embeddings)
     if not force and not _ALLOW_SYNC_PRECOMPUTE and len(catalog) > _MAX_SYNC_PRECOMPUTE_ITEMS:
         logger.warning(
             "Skipping synchronous CLIP catalog precompute for %d items. "
-            "Build a cache first or set IMAGE_SEARCH_ALLOW_SYNC_PRECOMPUTE=1.",
+            "Checked caches: %s. Build a cache first or set IMAGE_SEARCH_ALLOW_SYNC_PRECOMPUTE=1.",
             len(catalog),
+            ", ".join(str(path) for path in _candidate_cache_paths()),
         )
         _catalog_embeddings = {}
         _catalog_image_urls = {}
@@ -602,8 +644,6 @@ class CLIPImageMatcher:
                 item = catalog[pid]
                 if budget_max and item.price and item.price > budget_max:
                     continue
-                if item.stock == 0:
-                    score *= 0.3
                 result = ImageMatchResult(
                     product_id=pid,
                     name=item.name,
@@ -619,6 +659,7 @@ class CLIPImageMatcher:
                         "embedding_type": embedding_type,
                         "embedding_version": EMBEDDING_VERSION,
                         "model_name": _MODEL_NAME,
+                        "stock": item.stock,
                     },
                 )
             else:

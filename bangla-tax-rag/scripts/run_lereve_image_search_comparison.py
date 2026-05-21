@@ -81,6 +81,12 @@ def main() -> int:
     parser.add_argument("--cache-path", default=str(DEFAULT_CACHE))
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
     parser.add_argument("--limit", type=int, default=0, help="Optional cap for quick debugging. 0 = all cases.")
+    parser.add_argument(
+        "--gallery-penalty",
+        type=float,
+        default=0.0,
+        help="Subtract this score from non-primary gallery images before product-level max aggregation.",
+    )
     parser.add_argument("--force-cache", action="store_true")
     parser.add_argument(
         "--allow-encode",
@@ -110,6 +116,7 @@ def main() -> int:
         cases=cases,
         cache=cache,
         allow_encode=args.allow_encode,
+        gallery_penalty=args.gallery_penalty,
     )
     save_cache(cache_path, cache)
     latency_ms = (perf_counter() - started) * 1000
@@ -144,7 +151,9 @@ def main() -> int:
         },
         "selection": {
             "products": len(catalog),
+            "indexed_images": sum(len(item.images) for item in catalog.values()),
             "query_images": len(cases),
+            "gallery_penalty": args.gallery_penalty,
             "policy": "same eval set as CLIP-only baseline; held-out gallery query image per product",
         },
         "methods": methods,
@@ -195,17 +204,19 @@ def encode_catalog(
     cache: dict[str, Any],
     *,
     allow_encode: bool,
-) -> dict[str, list[float]]:
-    vectors: dict[str, list[float]] = {}
+) -> dict[str, list[list[float]]]:
+    vectors: dict[str, list[list[float]]] = {}
     for product_id, item in catalog.items():
-        if not item.images:
-            continue
-        image_path = item.images[0].local_path
-        if not image_path:
-            continue
-        vector = cache_or_encode(image_path, cache, allow_encode=allow_encode)
-        if vector:
-            vectors[product_id] = vector
+        item_vectors = []
+        for image in item.images:
+            image_path = image.local_path
+            if not image_path:
+                continue
+            vector = cache_or_encode(image_path, cache, allow_encode=allow_encode)
+            if vector:
+                item_vectors.append(vector)
+        if item_vectors:
+            vectors[product_id] = item_vectors
     missing = sorted(set(catalog) - set(vectors))
     if missing:
         raise SystemExit(
@@ -218,10 +229,11 @@ def encode_catalog(
 def run_methods(
     *,
     catalog: dict[str, InventoryItemRecord],
-    catalog_vectors: dict[str, list[float]],
+    catalog_vectors: dict[str, list[list[float]]],
     cases: list[dict[str, Any]],
     cache: dict[str, Any],
     allow_encode: bool,
+    gallery_penalty: float = 0.0,
 ) -> dict[str, Any]:
     clip_rows: list[dict[str, Any]] = []
     metadata_rows: list[dict[str, Any]] = []
@@ -231,7 +243,11 @@ def run_methods(
 
     product_ids = list(catalog_vectors)
     product_index = {product_id: index for index, product_id in enumerate(product_ids)}
-    vector_matrix = normalized_matrix([catalog_vectors[product_id] for product_id in product_ids])
+    vector_matrix, image_product_indices, image_penalties = build_image_matrix(
+        catalog_vectors,
+        product_ids,
+        gallery_penalty=gallery_penalty,
+    )
     catalog_factors = build_catalog_factor_cache(product_ids, catalog)
     empty_mask = np.zeros(len(product_ids), dtype=bool)
 
@@ -248,7 +264,9 @@ def run_methods(
 
         expected_index = product_index.get(case["expected_primary_product_id"])
         query_array = normalized_vector(query_vector)
-        clip_scores = vector_matrix @ query_array
+        image_scores = vector_matrix @ query_array
+        image_scores = image_scores - image_penalties
+        clip_scores = aggregate_product_scores(image_scores, image_product_indices, len(product_ids))
         metadata_scores, category_matches, color_matches = metadata_factor_score_arrays(
             case,
             catalog_factors,
@@ -415,6 +433,37 @@ def normalized_vector(vector: list[float]) -> np.ndarray:
     if norm == 0.0:
         return array
     return array / norm
+
+
+def build_image_matrix(
+    catalog_vectors: dict[str, list[list[float]]],
+    product_ids: list[str],
+    *,
+    gallery_penalty: float = 0.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    vectors: list[list[float]] = []
+    product_indices: list[int] = []
+    penalties: list[float] = []
+    for product_index, product_id in enumerate(product_ids):
+        for image_index, vector in enumerate(catalog_vectors[product_id]):
+            vectors.append(vector)
+            product_indices.append(product_index)
+            penalties.append(gallery_penalty if image_index > 0 else 0.0)
+    return (
+        normalized_matrix(vectors),
+        np.asarray(product_indices, dtype=np.int32),
+        np.asarray(penalties, dtype=np.float32),
+    )
+
+
+def aggregate_product_scores(
+    image_scores: np.ndarray,
+    image_product_indices: np.ndarray,
+    product_count: int,
+) -> np.ndarray:
+    product_scores = np.full(product_count, -np.inf, dtype=np.float32)
+    np.maximum.at(product_scores, image_product_indices, image_scores)
+    return product_scores
 
 
 def build_catalog_factor_cache(
@@ -855,7 +904,9 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Eval: `{payload['eval']}`",
         f"- Cache: `{payload['cache_path']}`",
         f"- Products indexed: **{payload['selection']['products']}**",
+        f"- Image vectors indexed: **{payload['selection'].get('indexed_images', payload['selection']['products'])}**",
         f"- Held-out query images: **{payload['selection']['query_images']}**",
+        f"- Gallery penalty: **{payload['selection'].get('gallery_penalty', 0.0)}**",
         f"- Latency: **{payload['latency_ms']:.0f} ms**",
         "",
         "## Method Notes",

@@ -10,15 +10,17 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.core.schemas import InventoryImageAsset, InventoryItemRecord  # noqa: E402
+from app.inventory.catalog_taxonomy import compatible_for_exact  # noqa: E402
 from app.inventory.clip_matcher import (  # noqa: E402
     EMBEDDING_VERSION,
     CLIPImageMatcher,
-    _cosine,
     _encode_image_source,
     embedding_metadata,
 )
@@ -45,6 +47,17 @@ def main() -> int:
     parser.add_argument("--cache-path", default=str(DEFAULT_CACHE_PATH))
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
     parser.add_argument("--force-cache", action="store_true")
+    parser.add_argument(
+        "--include-gallery-index",
+        action="store_true",
+        help="Index every non-query gallery image per product instead of only the primary image.",
+    )
+    parser.add_argument(
+        "--gallery-penalty",
+        type=float,
+        default=0.0,
+        help="Subtract this score from non-primary gallery images before product-level max aggregation.",
+    )
     args = parser.parse_args()
 
     dataset_root = Path(args.dataset_root)
@@ -56,7 +69,7 @@ def main() -> int:
     if len(selected) < args.limit:
         raise SystemExit(f"Only found {len(selected)} usable products with 2+ local images; wanted {args.limit}.")
 
-    catalog = build_bot_catalog(selected)
+    catalog = build_bot_catalog(selected, include_gallery_index=args.include_gallery_index)
     cases = build_eval_cases(selected)
     write_jsonl(Path(args.catalog_out), [item.model_dump() for item in catalog.values()])
     write_jsonl(Path(args.eval_out), cases)
@@ -68,6 +81,7 @@ def main() -> int:
         cases=cases,
         cache_path=Path(args.cache_path),
         force_cache=args.force_cache,
+        gallery_penalty=args.gallery_penalty,
     )
     latency_ms = (perf_counter() - started) * 1000
 
@@ -83,7 +97,13 @@ def main() -> int:
         "selection": {
             "products": len(catalog),
             "query_images": len(cases),
-            "policy": "round-robin by garment_type; catalog image != query image",
+            "indexed_images": sum(len(item.images) for item in catalog.values()),
+            "gallery_penalty": args.gallery_penalty,
+            "policy": (
+                "round-robin by garment_type; catalog image != query image; all non-query gallery images indexed"
+                if args.include_gallery_index
+                else "round-robin by garment_type; catalog image != query image"
+            ),
         },
         "latency_ms": round(latency_ms, 2),
         **baseline,
@@ -177,13 +197,20 @@ def choose_query_image(images: list[dict[str, Any]], catalog_image: dict[str, An
     return None
 
 
-def build_bot_catalog(rows: list[dict[str, Any]]) -> dict[str, InventoryItemRecord]:
+def build_bot_catalog(rows: list[dict[str, Any]], *, include_gallery_index: bool = False) -> dict[str, InventoryItemRecord]:
     catalog: dict[str, InventoryItemRecord] = {}
     for row in rows:
         labels = row.get("labels") or {}
         attrs = row.get("attributes") or {}
         category = primary_category(row)
         catalog_image = row["_catalog_image"]
+        query_path = row["_query_image"].get("local_path")
+        catalog_images = [catalog_image]
+        if include_gallery_index:
+            catalog_images = [
+                image for image in usable_images(row)
+                if image.get("local_path") and image.get("local_path") != query_path
+            ] or [catalog_image]
         sizes = labels.get("size_values") or as_list(attrs.get("size"))
         size_stock = {}
         for size, status in (row.get("size_stock") or {}).items():
@@ -229,18 +256,19 @@ def build_bot_catalog(rows: list[dict[str, Any]]) -> dict[str, InventoryItemReco
             size_stock=size_stock,
             images=[
                 InventoryImageAsset(
-                    image_id=str(catalog_image.get("image_id") or f"{row['dataset_product_id']}_primary"),
-                    local_path=str(catalog_image["local_path"]),
+                    image_id=str(image.get("image_id") or f"{row['dataset_product_id']}_{idx}"),
+                    local_path=str(image["local_path"]),
                     source_url=str(row.get("source_product_url") or ""),
                     source_name="lerevecraze.com",
                     license="internal-company-research",
-                    role="primary",
+                    role=inventory_image_role(image.get("role"), fallback="primary" if idx == 0 else "alternate"),
                     kind="product_photo",
                     is_reference=False,
                     visual_tags=visual_tags,
-                    width=maybe_int(catalog_image.get("width")),
-                    height=maybe_int(catalog_image.get("height")),
+                    width=maybe_int(image.get("width")),
+                    height=maybe_int(image.get("height")),
                 )
+                for idx, image in enumerate(catalog_images, start=1)
             ],
             metadata={
                 "wordpress_id": row.get("wordpress_id"),
@@ -292,24 +320,36 @@ def run_clip_baseline(
     cases: list[dict[str, Any]],
     cache_path: Path,
     force_cache: bool,
+    gallery_penalty: float = 0.0,
 ) -> dict[str, Any]:
     if not CLIPImageMatcher.is_available():
         raise SystemExit("CLIP is unavailable. Install transformers, torch, and Pillow, then rerun.")
 
     cache = {} if force_cache else load_cache(cache_path)
-    catalog_vectors: dict[str, list[float]] = {}
+    catalog_vectors: dict[str, list[list[float]]] = {}
     for product_id, item in catalog.items():
-        image_path = item.images[0].local_path if item.images else None
-        if not image_path:
-            continue
-        vector = cached_encode(image_path, cache)
-        if vector:
-            catalog_vectors[product_id] = vector
+        vectors = []
+        for image in item.images:
+            image_path = image.local_path
+            if not image_path:
+                continue
+            vector = cached_encode(image_path, cache)
+            if vector:
+                vectors.append(vector)
+        if vectors:
+            catalog_vectors[product_id] = vectors
 
     if len(catalog_vectors) != len(catalog):
         missing = sorted(set(catalog) - set(catalog_vectors))
         raise SystemExit(f"CLIP failed to encode {len(missing)} catalog images; first missing: {missing[:5]}")
 
+    product_ids = list(catalog_vectors)
+    product_index = {product_id: index for index, product_id in enumerate(product_ids)}
+    vector_matrix, image_product_indices, image_penalties = build_image_matrix(
+        catalog_vectors,
+        product_ids,
+        gallery_penalty=gallery_penalty,
+    )
     rows: list[dict[str, Any]] = []
     for case in cases:
         expected = case["expected_primary_product_id"]
@@ -317,23 +357,17 @@ def run_clip_baseline(
         if not query_vector:
             rows.append({"case": case, "error": "query_encode_failed", "rank": None, "hits": []})
             continue
-        hits = []
-        for product_id, vector in catalog_vectors.items():
-            item = catalog[product_id]
-            score = _cosine(query_vector, vector)
-            hits.append(
-                {
-                    "product_id": product_id,
-                    "score": round(score, 6),
-                    "sku": item.sku,
-                    "name": item.name,
-                    "category": item.category,
-                    "price": item.price,
-                    "source_product_url": item.metadata.get("source_product_url"),
-                }
-            )
-        hits.sort(key=lambda hit: -float(hit["score"]))
+        image_scores = vector_matrix @ normalized_vector(query_vector)
+        scores = aggregate_product_scores(image_scores - image_penalties, image_product_indices, len(product_ids))
+        top = top_indices(scores, 10)
+        hits = [
+            hit_from_index(index=int(index), product_ids=product_ids, catalog=catalog, scores=scores)
+            for index in top
+        ]
+        expected_index = product_index.get(expected)
         rank = next((i for i, hit in enumerate(hits, start=1) if hit["product_id"] == expected), None)
+        if expected_index is not None and rank is None:
+            rank = rank_single_score(scores, expected_index)
         top1 = hits[0] if hits else None
         rows.append(
             {
@@ -351,6 +385,87 @@ def run_clip_baseline(
     return {
         "metrics": compute_clip_metrics(rows),
         "rows": rows,
+    }
+
+
+def normalized_matrix(vectors: list[list[float]]) -> np.ndarray:
+    matrix = np.asarray(vectors, dtype=np.float32)
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms[norms == 0.0] = 1.0
+    return matrix / norms
+
+
+def normalized_vector(vector: list[float]) -> np.ndarray:
+    array = np.asarray(vector, dtype=np.float32)
+    norm = float(np.linalg.norm(array))
+    if norm == 0.0:
+        return array
+    return array / norm
+
+
+def build_image_matrix(
+    catalog_vectors: dict[str, list[list[float]]],
+    product_ids: list[str],
+    *,
+    gallery_penalty: float = 0.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    vectors: list[list[float]] = []
+    product_indices: list[int] = []
+    penalties: list[float] = []
+    for product_index, product_id in enumerate(product_ids):
+        for image_index, vector in enumerate(catalog_vectors[product_id]):
+            vectors.append(vector)
+            product_indices.append(product_index)
+            penalties.append(gallery_penalty if image_index > 0 else 0.0)
+    return (
+        normalized_matrix(vectors),
+        np.asarray(product_indices, dtype=np.int32),
+        np.asarray(penalties, dtype=np.float32),
+    )
+
+
+def aggregate_product_scores(
+    image_scores: np.ndarray,
+    image_product_indices: np.ndarray,
+    product_count: int,
+) -> np.ndarray:
+    product_scores = np.full(product_count, -np.inf, dtype=np.float32)
+    np.maximum.at(product_scores, image_product_indices, image_scores)
+    return product_scores
+
+
+def top_indices(scores: np.ndarray, k: int) -> np.ndarray:
+    if len(scores) <= k:
+        indices = np.arange(len(scores))
+    else:
+        indices = np.argpartition(-scores, k - 1)[:k]
+    return indices[np.argsort(-scores[indices], kind="stable")]
+
+
+def rank_single_score(scores: np.ndarray, expected_index: int | None) -> int | None:
+    if expected_index is None:
+        return None
+    expected_score = scores[expected_index]
+    return int(np.count_nonzero(scores > expected_score) + 1)
+
+
+def hit_from_index(
+    *,
+    index: int,
+    product_ids: list[str],
+    catalog: dict[str, InventoryItemRecord],
+    scores: np.ndarray,
+) -> dict[str, Any]:
+    product_id = product_ids[index]
+    item = catalog[product_id]
+    return {
+        "product_id": product_id,
+        "score": round(float(scores[index]), 6),
+        "sku": item.sku,
+        "name": item.name,
+        "category": item.category,
+        "price": item.price,
+        "source_product_url": item.metadata.get("source_product_url"),
     }
 
 
@@ -425,7 +540,9 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Eval: `{payload['eval_out']}`",
         f"- Method: `{payload['method']}`",
         f"- Products indexed: **{payload['selection']['products']}**",
+        f"- Image vectors indexed: **{payload['selection'].get('indexed_images', payload['selection']['products'])}**",
         f"- Held-out query images: **{payload['selection']['query_images']}**",
+        f"- Gallery penalty: **{payload['selection'].get('gallery_penalty', 0.0)}**",
         f"- Latency: **{payload['latency_ms']:.0f} ms**",
         "",
         "## Why This Baseline Is Honest",
@@ -545,10 +662,19 @@ def maybe_int(value: Any) -> int | None:
         return None
 
 
+def inventory_image_role(raw: Any, *, fallback: str = "alternate") -> str:
+    role = str(raw or fallback).casefold()
+    if role in {"primary", "alternate", "detail", "reference"}:
+        return role
+    if role.startswith("gallery") or role.startswith("image"):
+        return "alternate"
+    return fallback if fallback in {"primary", "alternate", "detail", "reference"} else "alternate"
+
+
 def same_category(expected: Any, actual: Any) -> bool:
     if not expected or not actual:
         return False
-    return str(expected).casefold() == str(actual).casefold()
+    return compatible_for_exact(str(expected), str(actual))
 
 
 def ratio(num: int, denom: int) -> float:

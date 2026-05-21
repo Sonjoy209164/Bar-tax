@@ -20,6 +20,21 @@ class InventoryMemoryResolver:
         "it",
         "this",
         "that",
+        "eta",
+        "etar",
+        "eita",
+        "eitar",
+        "ota",
+        "otar",
+        "oita",
+        "seta",
+        "shetar",
+        "tar",
+        "er dam",
+        "price",
+        "dam",
+        "size",
+        "stock",
         "that one",
         "this one",
         "same one",
@@ -35,11 +50,24 @@ class InventoryMemoryResolver:
         "alternative",
         "that product",
         "this product",
+        "eta product",
+        "oi product",
         "compare it",
         "compare that",
         "tell me more",
         "more about it",
         "more about that",
+        "এটা",
+        "এটার",
+        "ওটা",
+        "ওটার",
+        "সেটা",
+        "সেটার",
+        "তার",
+        "এর দাম",
+        "দাম",
+        "সাইজ",
+        "স্টক",
     )
     NEW_REQUEST_TERMS = (
         "show me",
@@ -51,12 +79,23 @@ class InventoryMemoryResolver:
         "suggest",
         "do you have",
         "have any",
+        "ache",
+        "ase",
+        "dekhao",
+        "dekhaw",
+        "dekhate",
+        "lagbe",
+        "chai",
+        "চাই",
+        "লাগবে",
+        "দেখাও",
+        "আছে",
     )
-    ALTERNATIVE_TERMS = ("cheaper", "fallback", "alternative", "lower price", "less expensive")
-    CROSS_SELL_TERMS = ("add on", "add-on", "accessory", "bundle", "go with", "pair with", "cross sell", "cross-sell")
-    FIRST_TERMS = ("first", "top", "primary")
-    SECOND_TERMS = ("second", "next")
-    THIRD_TERMS = ("third",)
+    ALTERNATIVE_TERMS = ("cheaper", "fallback", "alternative", "lower price", "less expensive", "kom dam", "similar", "aro")
+    CROSS_SELL_TERMS = ("add on", "add-on", "accessory", "bundle", "go with", "pair with", "cross sell", "cross-sell", "matching", "manabe")
+    FIRST_TERMS = ("first", "top", "primary", "prothom", "প্রথম")
+    SECOND_TERMS = ("second", "next", "ditiyo", "dwitiyo", "দ্বিতীয়")
+    THIRD_TERMS = ("third", "tritiyo", "তৃতীয়")
 
     def __init__(self, ontology: ProductOntology | None = None) -> None:
         self.ontology = ontology or ProductOntology()
@@ -81,6 +120,7 @@ class InventoryMemoryResolver:
                 filters=filters,
                 resolution=InventoryMemoryResolution(
                     ignored_memory_reason="Current request already includes explicit product_ids.",
+                    memory_policy_reason="explicit product filter beats conversation memory",
                 ),
             )
 
@@ -89,6 +129,7 @@ class InventoryMemoryResolver:
                 filters=filters,
                 resolution=InventoryMemoryResolution(
                     ignored_memory_reason="Current question contains a new explicit product/category request.",
+                    memory_policy_reason="new explicit request blocks old product focus",
                 ),
             )
 
@@ -128,6 +169,21 @@ class InventoryMemoryResolver:
                 resolved_product_ids=resolved_product_ids,
                 applied_context_filters=applied_context_filters,
                 ignored_memory_reason=None if used_memory else "Memory was provided but no safe reference was detected.",
+                memory_source=(
+                    "focused_product_ids"
+                    if resolved_product_ids
+                    else "active_filters"
+                    if applied_context_filters
+                    else None
+                ),
+                memory_confidence=1.0 if used_memory else None,
+                memory_policy_reason=(
+                    "clear reference resolved against focused product context"
+                    if resolved_product_ids
+                    else "active context filters applied to a follow-up"
+                    if applied_context_filters
+                    else "no clear follow-up reference detected"
+                ),
             ),
         )
 

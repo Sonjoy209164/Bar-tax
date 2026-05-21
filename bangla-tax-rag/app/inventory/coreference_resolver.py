@@ -17,12 +17,13 @@ from dataclasses import dataclass
 # Pronouns and demonstratives that mean "the thing we just talked about".
 _THIS_PHRASES = (
     "এটা", "এটি", "এটির", "এটার", "এই টা", "এই", "ইহা",
-    "eta", "etar", "etir", "eti", "ei ta", "this", "this one", "it",
+    "eta", "etar", "etir", "eti", "eita", "eitar", "ei ta", "this", "this one", "it",
 )
 
 _THAT_PHRASES = (
     "ওটা", "ওটি", "ওটির", "ওটার", "ওই", "সেটা", "সেটার", "সেটি",
-    "ota", "otar", "oti", "oi", "seta", "shetar", "that", "that one",
+    "তার", "এর",
+    "ota", "otar", "oti", "oita", "oitar", "oi", "seta", "shetar", "tar", "er", "that", "that one",
 )
 
 # Ordinal references — "first one", "second", "প্রথম টা"
@@ -30,10 +31,10 @@ _FIRST_PHRASES = (
     "first", "first one", "1st", "প্রথম", "প্রথমটা", "prothom", "prothom ta",
 )
 _SECOND_PHRASES = (
-    "second", "second one", "2nd", "দ্বিতীয়", "দ্বিতীয়টা", "ditiyo", "dwitiyo",
+    "second", "second one", "2nd", "দ্বিতীয়", "দ্বিতীয়টা", "ditiyo", "dwitiyo", "ditiyo ta",
 )
 _THIRD_PHRASES = (
-    "third", "third one", "3rd", "তৃতীয়", "তৃতীয়টা", "tritiyo",
+    "third", "third one", "3rd", "তৃতীয়", "তৃতীয়টা", "tritiyo", "tritiyo ta",
 )
 _LAST_PHRASES = (
     "last", "last one", "শেষ", "শেষেরটা", "shesh", "shesh ta",
@@ -42,7 +43,7 @@ _LAST_PHRASES = (
 # Reference to the same design without the demonstrative
 _SAME_DESIGN_PHRASES = (
     "same design", "same one", "same ta", "same er", "ei design",
-    "একই ডিজাইন", "একই", "এই ডিজাইন",
+    "same design e", "same design er", "একই ডিজাইন", "একই", "এই ডিজাইন",
 )
 
 

@@ -4196,3 +4196,137 @@ async def test_inventory_ask_ignores_memory_for_new_explicit_request(
     assert payload["memory_resolution"]["used_memory"] is False
     assert payload["applied_filters"]["product_ids"] == []
     assert payload["hits"][0]["product_id"] == "prod-laptop"
+
+
+def test_inventory_ask_continues_category_flow_for_slot_only_refinement(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from app.inventory.conversation_state import get_state_store
+
+    session_id = "memory-flow-salwar-kameez"
+    get_state_store().clear(session_id)
+    service = _build_inventory_service(tmp_path)
+    service.upsert_items(
+        [
+            InventoryItemRecord(
+                product_id="salwar-red-wedding",
+                sku="SK-RED-001",
+                name="Red Embroidered Salwar Kameez",
+                category="Salwar Kameez",
+                price=4200,
+                currency="BDT",
+                stock=4,
+                status="active",
+                attributes={
+                    "category_key": "salwar_kameez",
+                    "color": "Red",
+                    "color_family": "red",
+                    "occasion": "wedding",
+                },
+                tags=["Salwar Kameez", "Red", "Wedding"],
+            ),
+            InventoryItemRecord(
+                product_id="shoe-formal",
+                sku="SHOE-001",
+                name="Formal Shoe",
+                category="Shoes",
+                price=2662,
+                currency="BDT",
+                stock=1,
+                status="active",
+                attributes={
+                    "category_key": "shoes",
+                    "color": "Black",
+                    "color_family": "black",
+                    "occasion": "wedding",
+                },
+                tags=["Shoe", "Formal", "Wedding"],
+            ),
+            InventoryItemRecord(
+                product_id="bag-jute",
+                sku="BAG-001",
+                name="Jute Bag",
+                category="Bag",
+                price=376,
+                currency="BDT",
+                stock=1,
+                status="active",
+                attributes={
+                    "category_key": "bag",
+                    "color": "Natural",
+                    "occasion": "wedding",
+                },
+                tags=["Bag", "Wedding"],
+            ),
+        ]
+    )
+
+    first = service.ask(
+        InventoryAskRequest(
+            question="do you have Salwar Kameez?",
+            session_id=session_id,
+            top_k=5,
+            answer_engine="deterministic",
+        )
+    )
+    assert first.answer_plan.intent == "fashion_search"
+    assert first.answer_plan.preferences["category_key"] == "salwar_kameez"
+    assert first.recommended_product_ids[0] == "salwar-red-wedding"
+    assert first.follow_up_question is None
+
+    second = service.ask(
+        InventoryAskRequest(
+            question="wedding, red",
+            session_id=session_id,
+            top_k=5,
+            answer_engine="deterministic",
+        )
+    )
+
+    assert second.answer_plan.intent == "fashion_search"
+    assert second.answer_plan.preferences["category_key"] == "salwar_kameez"
+    assert second.answer_plan.preferences["color_family"] == "red"
+    assert second.answer_plan.preferences["occasion"] == "wedding"
+    assert second.applied_filters.categories == ["Salwar Kameez"]
+    assert second.applied_filters.product_ids == []
+    assert second.memory_resolution.flow_action == "UPDATE_FLOW_SLOTS"
+    assert second.memory_resolution.retrieval_scope == "active_category_plus_slots"
+    assert second.recommended_product_ids == ["salwar-red-wedding"]
+    assert [hit.product_id for hit in second.hits] == ["salwar-red-wedding"]
+    assert "shoe-formal" not in second.recommended_product_ids
+    assert "bag-jute" not in second.recommended_product_ids
+
+    third = service.ask(
+        InventoryAskRequest(
+            question="price koto?",
+            session_id=session_id,
+            top_k=5,
+            answer_engine="deterministic",
+        )
+    )
+
+    assert third.answer_plan.intent == "fashion_product_detail"
+    assert third.memory_resolution.flow_action == "CONTINUE_PRODUCT_FOCUS"
+    assert third.memory_resolution.retrieval_scope == "focused_product_or_list"
+    assert third.recommended_product_ids == ["salwar-red-wedding"]
+    assert "BDT 4,200" in third.answer
+    assert "shoe-formal" not in third.recommended_product_ids
+    assert "bag-jute" not in third.recommended_product_ids
+
+    state_after_price = get_state_store().get(session_id)
+    assert state_after_price.product_focus_use_count >= 1
+    assert state_after_price.product_focus_last_used_at is not None
+
+    fourth = service.ask(
+        InventoryAskRequest(
+            question="black shoe ache?",
+            session_id=session_id,
+            focused_product_ids=["salwar-red-wedding"],
+            last_answer_plan=third.answer_plan,
+            top_k=5,
+            answer_engine="deterministic",
+        )
+    )
+
+    assert fourth.answer_plan.intent == "fashion_search"
+    assert fourth.memory_resolution.flow_action == "START_NEW_FLOW"
+    assert fourth.recommended_product_ids == ["shoe-formal"]
+    assert "salwar-red-wedding" not in fourth.recommended_product_ids

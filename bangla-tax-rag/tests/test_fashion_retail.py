@@ -139,6 +139,203 @@ def test_fashion_retail_treats_dress_as_dress_not_salwar_kameez() -> None:
     assert outcome.product_ids[0] == "dress-black-maxi"
 
 
+def test_fashion_retail_answers_clear_salwar_kameez_category_without_clarification() -> None:
+    assistant = FashionRetailAssistant()
+    catalog = {
+        "salwar-red-wedding": InventoryItemRecord(
+            product_id="salwar-red-wedding",
+            sku="SK-RED-001",
+            name="Red Embroidered Salwar Kameez",
+            category="Salwar Kameez",
+            price=4200,
+            currency="BDT",
+            stock=4,
+            status="active",
+            attributes={
+                "category_key": "salwar_kameez",
+                "color": "Red",
+                "color_family": "red",
+                "occasion": "wedding",
+            },
+            tags=["Salwar Kameez", "Red", "Wedding"],
+        ),
+        "shoe-formal": InventoryItemRecord(
+            product_id="shoe-formal",
+            sku="SHOE-001",
+            name="Formal Shoe",
+            category="Shoes",
+            price=2662,
+            currency="BDT",
+            stock=1,
+            status="active",
+            attributes={"category_key": "shoes", "color": "Black"},
+            tags=["Shoe", "Formal"],
+        ),
+    }
+
+    outcome = assistant.answer(
+        question="do you have Salwar Kameez?",
+        catalog=catalog,
+        filters=InventorySearchFilters(),
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_search"
+    assert outcome.slots.category_key == "salwar_kameez"
+    assert outcome.product_ids[0] == "salwar-red-wedding"
+    assert outcome.intent != "fashion_clarification"
+
+
+def test_fashion_retail_slot_update_with_filter_keeps_salwar_kameez_category() -> None:
+    assistant = FashionRetailAssistant()
+    catalog = {
+        "salwar-red-wedding": InventoryItemRecord(
+            product_id="salwar-red-wedding",
+            sku="SK-RED-001",
+            name="Red Embroidered Salwar Kameez",
+            category="Salwar Kameez",
+            price=4200,
+            currency="BDT",
+            stock=4,
+            status="active",
+            attributes={
+                "category_key": "salwar_kameez",
+                "color": "Red",
+                "color_family": "red",
+                "occasion": "wedding",
+            },
+            tags=["Salwar Kameez", "Red", "Wedding"],
+        ),
+        "shoe-formal": InventoryItemRecord(
+            product_id="shoe-formal",
+            sku="SHOE-001",
+            name="Formal Shoe",
+            category="Shoes",
+            price=2662,
+            currency="BDT",
+            stock=1,
+            status="active",
+            attributes={"category_key": "shoes", "color": "Black"},
+            tags=["Shoe", "Formal", "Wedding"],
+        ),
+    }
+
+    outcome = assistant.answer(
+        question="wedding, red",
+        catalog=catalog,
+        filters=InventorySearchFilters(categories=["Salwar Kameez"]),
+    )
+
+    assert outcome is not None
+    assert outcome.slots.category_key == "salwar_kameez"
+    assert outcome.slots.color_family == "red"
+    assert outcome.slots.occasion == "wedding"
+    assert outcome.product_ids == ("salwar-red-wedding",)
+    assert "shoe-formal" not in outcome.product_ids
+
+
+def test_fashion_retail_relaxed_search_prefers_sellable_items_over_out_of_stock_exactish_matches() -> None:
+    assistant = FashionRetailAssistant()
+    catalog = {
+        "salwar-red-wedding-oos": InventoryItemRecord(
+            product_id="salwar-red-wedding-oos",
+            sku="SK-RED-OOS",
+            name="Classic Salwar Kameez",
+            category="Salwar Kameez",
+            price=4500,
+            currency="BDT",
+            stock=0,
+            status="outofstock",
+            attributes={
+                "category_key": "salwar_kameez",
+                "color": "Red",
+                "color_family": "red",
+                "occasion": "wedding",
+            },
+            tags=["Salwar Kameez", "Red", "Wedding"],
+        ),
+        "salwar-blue-stock": InventoryItemRecord(
+            product_id="salwar-blue-stock",
+            sku="SK-BLUE-001",
+            name="Blue Embroidered Salwar Kameez",
+            category="Salwar Kameez",
+            price=3900,
+            currency="BDT",
+            stock=3,
+            status="active",
+            attributes={
+                "category_key": "salwar_kameez",
+                "color": "Blue",
+                "color_family": "blue",
+            },
+            tags=["Salwar Kameez", "Blue"],
+        ),
+    }
+
+    outcome = assistant.answer(
+        question="red wedding Salwar Kameez ache?",
+        catalog=catalog,
+        filters=InventorySearchFilters(),
+        allow_llm_slots=False,
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_search"
+    assert outcome.product_ids == ("salwar-blue-stock",)
+    assert "salwar-red-wedding-oos" not in outcome.product_ids
+    assert "out of stock" not in outcome.answer.casefold()
+
+
+def test_fashion_retail_price_followup_uses_focused_product_instead_of_broad_search() -> None:
+    assistant = FashionRetailAssistant()
+    catalog = {
+        "salwar-red-wedding": InventoryItemRecord(
+            product_id="salwar-red-wedding",
+            sku="SK-RED-001",
+            name="Red Embroidered Salwar Kameez",
+            category="Salwar Kameez",
+            price=4200,
+            currency="BDT",
+            stock=4,
+            status="active",
+            attributes={
+                "category_key": "salwar_kameez",
+                "color": "Red",
+                "color_family": "red",
+                "occasion": "wedding",
+            },
+            tags=["Salwar Kameez", "Red", "Wedding"],
+        ),
+        "salwar-blue": InventoryItemRecord(
+            product_id="salwar-blue",
+            sku="SK-BLUE-001",
+            name="Blue Salwar Kameez",
+            category="Salwar Kameez",
+            price=3900,
+            currency="BDT",
+            stock=3,
+            status="active",
+            attributes={"category_key": "salwar_kameez", "color": "Blue"},
+            tags=["Salwar Kameez", "Blue"],
+        ),
+    }
+
+    outcome = assistant.answer(
+        question="price koto?",
+        catalog=catalog,
+        filters=InventorySearchFilters(),
+        focused_product_ids=("salwar-red-wedding", "salwar-blue"),
+        last_primary_product_id="salwar-red-wedding",
+        allow_llm_slots=False,
+    )
+
+    assert outcome is not None
+    assert outcome.intent == "fashion_product_detail"
+    assert outcome.product_ids == ("salwar-red-wedding",)
+    assert "BDT 4,200" in outcome.answer
+    assert "4 in stock" in outcome.answer
+
+
 def test_fashion_retail_exact_product_title_bypasses_clarification() -> None:
     assistant = FashionRetailAssistant()
     catalog = {

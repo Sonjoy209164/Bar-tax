@@ -647,6 +647,16 @@ class FashionRetailAssistant:
             last_primary_product_id=effective_last_primary_product_id,
             allow_llm=allow_llm_slots,
         )
+        focused_fact = self._answer_focused_product_fact(
+            question=question,
+            items=fashion_items,
+            slots=slots,
+            focused_product_ids=effective_focused_product_ids,
+            last_primary_product_id=effective_last_primary_product_id,
+        )
+        if focused_fact is not None:
+            return focused_fact
+
         if not self.should_handle(question=question, slots=slots, fashion_items=fashion_items):
             return None
 
@@ -1062,6 +1072,9 @@ class FashionRetailAssistant:
 
         # Estimate match count cheaply using category + color filter
         match_count = self._estimate_match_count(slots=slots, items=items)
+        if slots.category_key and slots.confidence >= 0.65:
+            return None
+
         decision = decide_clarification(slots=slots, total_matches=match_count)
         if not decision.should_clarify:
             return None
@@ -1586,6 +1599,14 @@ class FashionRetailAssistant:
                         item = item_by_id.get(sm.product_id)
                         if item is None:
                             continue
+                        if slots.category_key and not self._item_category_matches(item, slots.category_key):
+                            continue
+                        if slots.wants_in_stock and item.stock <= 0:
+                            continue
+                        if slots.budget_min is not None and (item.price is None or item.price < slots.budget_min):
+                            continue
+                        if slots.budget_max is not None and (item.price is None or item.price > slots.budget_max):
+                            continue
                         scored.append(_ScoredItem(
                             item=item,
                             score=sm.score,
@@ -1642,7 +1663,11 @@ class FashionRetailAssistant:
             total_matches=len(scored),
             confidence=(0.74 if semantic_used else 0.86) if selected[0].stock > 0 else (0.62 if semantic_used else 0.76),
             slots=slots,
-            follow_up_question="Should I narrow this by color, size, fabric, budget, or occasion?",
+            follow_up_question=(
+                "Tell me the category, color, size, budget, or occasion and I can narrow it down."
+                if not slots.category_key
+                else None
+            ),
             reasoning_steps=(reasoning_step,),
         )
 
@@ -1712,7 +1737,16 @@ class FashionRetailAssistant:
             score, reasons = self._score_search_item(question=question, item=item, slots=slots)
             if score > 0:
                 scored.append(_ScoredItem(item=item, score=score, reasons=tuple(reasons)))
-        return sorted(scored, key=lambda match: (-match.score, -match.item.stock, self._item_price_value(match.item), match.item.name.casefold()))[:top_k]
+        return sorted(
+            scored,
+            key=lambda match: (
+                match.item.stock <= 0,
+                -match.score,
+                -match.item.stock,
+                self._item_price_value(match.item),
+                match.item.name.casefold(),
+            ),
+        )[:top_k]
 
     def _item_matches_search_slots(
         self,
@@ -2005,6 +2039,107 @@ class FashionRetailAssistant:
                 best_design_id = design_id
         if best_score >= 1.5:
             return best_design_id
+        return None
+
+    def _answer_focused_product_fact(
+        self,
+        *,
+        question: str,
+        items: list[InventoryItemRecord],
+        slots: FashionRetailSlots,
+        focused_product_ids: tuple[str, ...],
+        last_primary_product_id: str | None,
+    ) -> FashionRetailOutcome | None:
+        fact_type = self._focused_fact_type(question)
+        if fact_type is None:
+            return None
+
+        item_by_id = {item.product_id: item for item in items}
+        candidates = [last_primary_product_id, *focused_product_ids]
+        anchor = next((item_by_id[pid] for pid in candidates if pid and pid in item_by_id), None)
+        if anchor is None:
+            return None
+
+        category_key = (
+            self._canonical_category_key(anchor.attributes.get("category_key"))
+            or self._canonical_category_key(anchor.category)
+            or slots.category_key
+        )
+        category_label = self.CATEGORY_LABELS.get(category_key or "", anchor.category or slots.category_label)
+        focused_slots = replace(
+            slots,
+            category_key=category_key,
+            category_label=category_label,
+            intent="fashion_product_detail",
+            evidence=tuple([*slots.evidence, "focused_product_fact"]),
+            confidence=max(slots.confidence, 0.92),
+        )
+        price = self._format_price(anchor)
+        stock_text = f"{anchor.stock} in stock" if anchor.stock > 0 else "currently out of stock"
+
+        if fact_type == "price":
+            answer = f"{anchor.name} price is {price}; {stock_text}."
+        elif fact_type == "stock":
+            answer = f"{anchor.name} is {stock_text}; price {price}."
+        elif fact_type == "size":
+            if slots.size:
+                if self._item_size_matches(anchor, slots.size):
+                    if anchor.stock > 0:
+                        answer = f"Yes, {anchor.name} has size {slots.size}; price {price}, {anchor.stock} in stock."
+                    else:
+                        answer = f"{anchor.name} has size {slots.size}, but it is currently out of stock."
+                else:
+                    available_sizes = self._available_size_list([anchor])
+                    answer = f"I do not see size {slots.size} for {anchor.name}."
+                    if available_sizes:
+                        answer += f" Available sizes I can see: {available_sizes}."
+            else:
+                available_sizes = self._available_size_list([anchor])
+                answer = f"{anchor.name} size data: {available_sizes or 'not clearly listed'}."
+        else:
+            return None
+
+        return self._outcome(
+            answer=answer,
+            intent="fashion_product_detail",
+            product_ids=(anchor.product_id,),
+            total_matches=1,
+            confidence=0.94,
+            slots=focused_slots,
+            reasoning_steps=("Answered a clear follow-up from the current focused product instead of rerunning broad category search.",),
+        )
+
+    def _focused_fact_type(self, question: str) -> str | None:
+        text = normalize_fashion_text(question)
+        raw = question.casefold()
+        if any(
+            self._contains_phrase(text, phrase)
+            for phrase in (
+                "same design",
+                "ei design",
+                "this design",
+                "design",
+                "color",
+                "colour",
+                "rong",
+                "rang",
+                "onno color",
+                "another color",
+            )
+        ) or any(token in raw for token in ("ডিজাইন", "রং", "রঙ", "কালার")):
+            return None
+        if self._contains_phrase(text, "price") or self._contains_phrase(text, "dam") or "দাম" in raw or "৳" in raw:
+            return "price"
+        if self._contains_phrase(text, "koto") or "কত" in raw:
+            return "price"
+        if any(self._contains_phrase(text, phrase) for phrase in ("stock", "available", "ache", "ase")):
+            return "stock"
+        if "স্টক" in raw or "আছে" in raw:
+            return "stock"
+        if any(self._contains_phrase(text, phrase) for phrase in ("size", "maap", "m", "l", "xl", "xxl", "free size")):
+            return "size"
+        if "সাইজ" in raw or "মাপ" in raw:
+            return "size"
         return None
 
     def _resolve_anchor_item(

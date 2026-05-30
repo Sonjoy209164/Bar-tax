@@ -910,6 +910,11 @@ class InventoryMemoryResolution(BaseModel):
     resolved_product_ids: list[str] = Field(default_factory=list)
     applied_context_filters: bool = False
     ignored_memory_reason: str | None = None
+    flow_action: str | None = None
+    flow_reason: str | None = None
+    flow_confidence: float | None = None
+    active_category_key: str | None = None
+    retrieval_scope: str | None = None
     memory_source: str | None = None
     memory_age_seconds: int | None = None
     memory_confidence: float | None = None

@@ -156,6 +156,27 @@ def test_record_turn_persists_last_shown_products(store: ConversationStateStore)
     assert state.last_primary_product_id == "p1"
 
 
+def test_mark_product_focus_used_updates_usage_metadata(store: ConversationStateStore) -> None:
+    store.record_turn(
+        session_id="sid",
+        question="red saree",
+        intent="fashion_search",
+        slots={},
+        product_ids=["p1", "p2", "p3"],
+        primary_product_id="p1",
+        confidence=0.9,
+        abstained=False,
+    )
+
+    first = store.mark_product_focus_used("sid")
+    second = store.mark_product_focus_used("sid")
+
+    assert first.product_focus_use_count == 1
+    assert first.product_focus_last_used_at is not None
+    assert second.product_focus_use_count == 2
+    assert second.product_focus_last_used_at is not None
+
+
 def test_record_turn_preserves_last_products_when_no_new_products(store: ConversationStateStore) -> None:
     store.record_turn(
         session_id="sid",

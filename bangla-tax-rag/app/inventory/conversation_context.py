@@ -11,6 +11,10 @@ from app.core.schemas import (
     InventorySearchFilters,
 )
 from app.inventory.conversation_state import ConversationState
+from app.inventory.conversation_flow import (
+    decide_flow,
+    filters_for_flow_continuation,
+)
 from app.inventory.coreference_resolver import resolve_coreference
 from app.inventory.memory_policy import (
     product_focus_expired,
@@ -161,6 +165,11 @@ def hydrate_request_from_state(
         state=state,
         ontology=ontology,
     )
+    flow_decision = decide_flow(
+        question=request.question,
+        state=state,
+        ontology=ontology,
+    )
     updates: dict[str, Any] = {}
     reasons: list[str] = []
 
@@ -180,6 +189,21 @@ def hydrate_request_from_state(
         if request.last_answer_plan is not None:
             updates["last_answer_plan"] = None
         reasons.append("ignored_expired_product_focus")
+
+    if flow_decision.action == "UPDATE_FLOW_SLOTS":
+        flow_filters = filters_for_flow_continuation(
+            base_filters=request.filters,
+            state=state,
+            ontology=ontology,
+        )
+        if flow_filters != request.filters:
+            updates["filters"] = flow_filters
+            reasons.append("continued_active_shopping_flow")
+        if request.last_answer_plan is None and (
+            state.last_primary_product_id or state.last_shown_product_ids
+        ):
+            updates["last_answer_plan"] = build_answer_plan_from_state(state)
+            reasons.append("restored_flow_answer_plan")
 
     if is_followup and not is_new_request and focus_policy.allowed:
         if not request.focused_product_ids and state.last_shown_product_ids:

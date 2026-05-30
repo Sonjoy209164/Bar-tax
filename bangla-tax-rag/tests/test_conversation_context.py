@@ -59,3 +59,25 @@ def test_build_active_filters_from_state_uses_category_and_budget() -> None:
     assert filters is not None
     assert filters.categories == ["Saree"]
     assert filters.max_price == 3000
+
+
+def test_hydrate_slot_update_continues_active_category_flow() -> None:
+    state = ConversationState(
+        session_id="flow-2",
+        last_shown_product_ids=["salwar-red-1", "salwar-red-2"],
+        last_primary_product_id="salwar-red-1",
+        last_intent="fashion_search",
+        last_question="do you have Salwar Kameez?",
+        active_slots={"category_key": "salwar_kameez"},
+        turn_count=1,
+    )
+    request = InventoryAskRequest(question="wedding, red", session_id="flow-2")
+
+    hydrated = hydrate_request_from_state(request=request, state=state)
+
+    assert hydrated.used_state
+    assert hydrated.request.filters.categories == ["Salwar Kameez"]
+    assert hydrated.request.filters.min_stock == 1
+    assert hydrated.request.last_answer_plan is not None
+    assert hydrated.request.last_answer_plan.preferences["category_key"] == "salwar_kameez"
+    assert "continued_active_shopping_flow" in (hydrated.reason or "")

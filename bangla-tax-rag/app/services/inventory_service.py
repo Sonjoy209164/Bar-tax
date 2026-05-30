@@ -101,6 +101,8 @@ from app.inventory.boundary_enrichment import (
 )
 from app.inventory.conversation_logger import log_boundary_trigger
 from app.inventory.conversation_context import hydrate_request_from_state
+from app.inventory.conversation_flow import decide_flow, is_slot_update
+from app.inventory.memory_policy import should_use_product_focus
 from app.inventory.natural_answer import generate_ollama_answer
 from app.inventory.polite_boundary import classify_polite_boundary
 from app.inventory.proactive import build_proactive_message
@@ -968,6 +970,10 @@ class InventoryService:
         if image_followup is not None:
             return image_followup
         request = self._hydrate_request_from_server_state(request)
+        memory_resolution = self._decorate_memory_resolution_with_flow(
+            request=request,
+            memory_resolution=memory_resolution,
+        )
         if self._should_try_fast_exact_title_lookup(request.question):
             exact_title_response = self._try_fashion_retail_ask(
                 request=request,
@@ -1064,14 +1070,18 @@ class InventoryService:
             )
             return response
 
+        slot_update_flow = memory_resolution.flow_action == "UPDATE_FLOW_SLOTS"
         resolved_memory = self.memory_resolver.resolve(
             question=request.question,
             filters=request.filters.model_copy(deep=True),
-            focused_product_ids=request.focused_product_ids,
+            focused_product_ids=[] if slot_update_flow else request.focused_product_ids,
             active_filters=request.active_filters,
-            last_answer_plan=request.last_answer_plan,
+            last_answer_plan=None if slot_update_flow else request.last_answer_plan,
         )
-        memory_resolution = resolved_memory.resolution
+        memory_resolution = self._decorate_memory_resolution_with_flow(
+            request=request,
+            memory_resolution=resolved_memory.resolution,
+        )
         effective_filters = self._merge_question_filters(
             question=request.question,
             filters=resolved_memory.filters,
@@ -1226,6 +1236,49 @@ class InventoryService:
             logger.debug("Conversation state hydration failed: %s", exc)
         return request
 
+    def _decorate_memory_resolution_with_flow(
+        self,
+        *,
+        request: InventoryAskRequest,
+        memory_resolution: InventoryMemoryResolution,
+    ) -> InventoryMemoryResolution:
+        session_id = getattr(request, "session_id", None)
+        if not session_id:
+            return memory_resolution
+        try:
+            from app.inventory.conversation_state import get_state_store
+
+            state = get_state_store().get(session_id)
+            decision = decide_flow(
+                question=request.question,
+                state=state,
+                ontology=self.product_ontology,
+            )
+            return memory_resolution.model_copy(
+                update={
+                    "flow_action": decision.action,
+                    "flow_reason": decision.reason,
+                    "flow_confidence": decision.confidence,
+                    "active_category_key": decision.active_category_key,
+                    "retrieval_scope": self._retrieval_scope_for_flow(decision.action),
+                }
+            )
+        except Exception as exc:  # pragma: no cover - trace must never block a reply
+            logger.debug("Flow trace decoration failed: %s", exc)
+            return memory_resolution
+
+    @staticmethod
+    def _retrieval_scope_for_flow(flow_action: str | None) -> str | None:
+        return {
+            "START_NEW_FLOW": "fresh_product_or_category",
+            "UPDATE_FLOW_SLOTS": "active_category_plus_slots",
+            "CONTINUE_PRODUCT_FOCUS": "focused_product_or_list",
+            "COMPARE_OR_SIMILAR": "current_anchor_alternatives",
+            "SUPPORT_ROUTE": "support_policy_no_product_memory",
+            "SAFETY_ROUTE": "safety_boundary_no_product_memory",
+            "NO_FLOW": "normal_routing",
+        }.get(flow_action or "")
+
     @staticmethod
     def _should_try_fast_exact_title_lookup(question: str) -> bool:
         normalized = re.sub(r"[^a-z0-9\u0980-\u09ff\s+-]", " ", question.casefold())
@@ -1282,6 +1335,12 @@ class InventoryService:
         started_at: float,
         memory_resolution: InventoryMemoryResolution,
     ) -> InventoryAskResponse | None:
+        if request.filters.categories and is_slot_update(
+            request.question,
+            ontology=self.product_ontology,
+        ):
+            return None
+
         decision = classify_polite_boundary(
             request.question,
             assistant_mode=request.assistant_mode,
@@ -1670,11 +1729,7 @@ class InventoryService:
             return None
         if not self._is_image_variant_followup(request.question):
             return None
-        if state.last_intent != "image_search" and not (
-            state.active_slots.get("variant_group_id")
-            or state.active_slots.get("design_id")
-            or state.last_shown_product_ids
-        ):
+        if state.last_intent != "image_search":
             return None
         catalog = self._load_catalog()
         primary_item = catalog.get(primary_id)
@@ -2232,12 +2287,22 @@ class InventoryService:
         # ("এটা", "first one", "same design") against products we showed earlier.
         conv_state = None
         focused_product_ids = tuple(request.focused_product_ids)
+        used_server_product_focus = False
         if session_id:
             try:
                 from app.inventory.conversation_state import get_state_store
                 from app.inventory.coreference_resolver import resolve_coreference
-                conv_state = get_state_store().get(session_id)
-                if conv_state.last_shown_product_ids and not focused_product_ids:
+                state_store = get_state_store()
+                conv_state = state_store.get(session_id)
+                focus_policy = should_use_product_focus(
+                    question=request.question,
+                    state=conv_state,
+                    ontology=self.product_ontology,
+                )
+                if not focus_policy.allowed:
+                    focused_product_ids = ()
+                    last_primary_product_id = None
+                elif conv_state.last_shown_product_ids and not focused_product_ids:
                     coref = resolve_coreference(
                         question=request.question,
                         last_shown_product_ids=conv_state.last_shown_product_ids,
@@ -2246,6 +2311,8 @@ class InventoryService:
                     if coref.resolved_product_id:
                         last_primary_product_id = coref.resolved_product_id
                         focused_product_ids = (coref.resolved_product_id,)
+                if focus_policy.allowed and focused_product_ids:
+                    used_server_product_focus = True
             except Exception as exc:
                 logger.debug("Conversation state load failed: %s", exc)
 
@@ -2586,7 +2653,11 @@ class InventoryService:
                     logger.debug("Answer critic step failed: %s", exc)
         base_answer = natural if natural else outcome.answer
 
-        if outcome.abstained or not recommended_ids:
+        proactive_allowed = outcome.intent in {
+            "fashion_search",
+            "fashion_styling_advice",
+        }
+        if outcome.abstained or not recommended_ids or not proactive_allowed:
             enriched_answer = base_answer
         else:
             enriched_answer = build_proactive_message(
@@ -2721,6 +2792,8 @@ class InventoryService:
                     memory_source="text_search",
                     write_reason=f"fashion_retail:{outcome.intent}",
                 )
+                if used_server_product_focus:
+                    new_state = get_state_store().mark_product_focus_used(session_id)
                 # Trigger preference learning if a phone is linked
                 try:
                     from app.inventory.identity_store import IdentityStore

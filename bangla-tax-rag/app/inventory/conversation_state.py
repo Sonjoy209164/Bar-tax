@@ -181,6 +181,16 @@ class ConversationStateStore:
             except Exception:
                 pass
 
+    def mark_product_focus_used(self, session_id: str) -> ConversationState:
+        """Record that product-focus memory was consumed by a follow-up turn."""
+        state = self.get(session_id)
+        if not state.session_id:
+            return state
+        state.product_focus_last_used_at = to_iso()
+        state.product_focus_use_count = int(state.product_focus_use_count or 0) + 1
+        self.save(state)
+        return state
+
     # Update helpers — applied after every turn
 
     def record_turn(

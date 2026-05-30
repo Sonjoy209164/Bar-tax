@@ -8,7 +8,7 @@ from typing import Any
 def normalize_inventory_text(text: str | None) -> str:
     if not text:
         return ""
-    normalized = re.sub(r"[^a-z0-9\s+-]", " ", text.casefold())
+    normalized = re.sub(r"[^a-z0-9\u0980-\u09ff\s+-]", " ", text.casefold())
     return " ".join(normalized.split())
 
 
@@ -16,23 +16,24 @@ class ProductOntology:
     """Small deterministic ecommerce ontology used before ranking and generation."""
 
     PRODUCT_SYNONYMS: dict[str, tuple[str, ...]] = {
-        "saree": ("saree", "sarees", "sari", "saris", "sharee", "jamdani", "katan saree", "muslin saree"),
-        "blouse": ("blouse", "blouses", "ready blouse", "stitched blouse"),
-        "panjabi": ("panjabi", "punjabi", "kurta", "kurta pajama"),
-        "kurti": ("kurti", "kameez", "top"),
-        "dress": ("dress", "dresses", "maxi", "frock", "gown", "kaftan"),
+        "saree": ("saree", "sarees", "sari", "saris", "sharee", "jamdani", "katan saree", "muslin saree", "শাড়ি", "শাড়ি", "সারি"),
+        "blouse": ("blouse", "blouses", "ready blouse", "stitched blouse", "ব্লাউজ"),
+        "panjabi": ("panjabi", "punjabi", "kurta", "kurta pajama", "পাঞ্জাবি", "পাঞ্জাবী", "কুর্তা"),
+        "kurti": ("kurti", "kameez", "top", "কুর্তি", "কামিজ", "টপ"),
+        "dress": ("dress", "dresses", "maxi", "frock", "gown", "kaftan", "ড্রেস", "ম্যাক্সি", "ফ্রক", "গাউন"),
         "tunic": ("tunic", "tunics"),
-        "salwar_kameez": ("salwar kameez", "three piece", "three-piece", "3 piece", "salwar"),
-        "dupatta": ("dupatta", "orna", "scarf"),
+        "salwar_kameez": ("salwar kameez", "three piece", "three-piece", "3 piece", "salwar", "সালোয়ার কামিজ", "সালওয়ার কামিজ", "থ্রি পিস", "৩ পিস"),
+        "dupatta": ("dupatta", "orna", "scarf", "দুপাট্টা", "ওড়না", "ওড়না", "স্কার্ফ"),
         "shawl": ("shawl", "stole"),
         "jewelry": ("jewelry", "jewellery", "ornament", "necklace", "bangle", "bangles", "earring", "earrings", "jhumka"),
         "clutch": ("clutch", "party clutch", "purse", "handbag"),
-        "bag": ("bag", "bags", "backpack", "backpacks", "handbag", "tote", "potli", "wallet"),
-        "shoes": ("shoe", "shoes", "sandal", "sandals", "heel", "heels", "flat", "loafer", "loafers", "sneaker", "sneakers"),
-        "shirt": ("shirt", "shirts", "formal shirt", "casual shirt", "oxford shirt"),
-        "pant": ("pant", "pants", "trouser", "trousers", "chino", "chinos", "formal pant"),
-        "perfume": ("perfume", "perfumes", "attar", "fragrance", "body spray", "oud perfume", "floral perfume"),
-        "watch": ("watch", "watches", "smart watch", "smartwatch", "smartwatches", "analog watch", "bracelet watch", "leather watch"),
+        "bag": ("bag", "bags", "backpack", "backpacks", "handbag", "tote", "potli", "wallet", "ব্যাগ", "হ্যান্ডব্যাগ"),
+        "belt": ("belt", "belts"),
+        "shoes": ("shoe", "shoes", "sandal", "sandals", "heel", "heels", "flat", "loafer", "loafers", "sneaker", "sneakers", "জুতা", "জুতো", "স্যান্ডেল", "হিল"),
+        "shirt": ("shirt", "shirts", "formal shirt", "casual shirt", "oxford shirt", "শার্ট"),
+        "pant": ("pant", "pants", "trouser", "trousers", "chino", "chinos", "formal pant", "প্যান্ট", "ট্রাউজার"),
+        "perfume": ("perfume", "perfumes", "attar", "fragrance", "body spray", "oud perfume", "floral perfume", "পারফিউম", "আতর", "সুগন্ধি"),
+        "watch": ("watch", "watches", "smart watch", "smartwatch", "smartwatches", "analog watch", "bracelet watch", "leather watch", "ঘড়ি", "ঘড়ি", "ওয়াচ", "ওয়াচ"),
         "lipstick": ("lipstick", "lipsticks", "matte lipstick", "nude lipstick"),
         "kajal": ("kajal", "eyeliner", "eye pencil"),
         "sunscreen": ("sunscreen", "sun screen", "spf"),
@@ -101,6 +102,7 @@ class ProductOntology:
         "jewelry": "fashion_accessory",
         "clutch": "fashion_accessory",
         "bag": "carry_accessory",
+        "belt": "fashion_accessory",
         "shoes": "fashion_footwear",
         "shirt": "fashion_menswear",
         "pant": "fashion_menswear",
@@ -174,6 +176,7 @@ class ProductOntology:
         "jewelry": "Accessories",
         "clutch": "Accessories",
         "bag": "Accessories",
+        "belt": "Accessories",
         "shoes": "Shoes",
         "shirt": "Shirt",
         "pant": "Pant",
@@ -245,6 +248,7 @@ class ProductOntology:
         "jewelry": {"saree", "blouse", "kurti", "salwar_kameez"},
         "clutch": {"saree", "jewelry"},
         "bag": {"saree", "kurti", "salwar_kameez", "shoes"},
+        "belt": {"pant", "shirt", "panjabi"},
         "shoes": {"saree", "panjabi", "shirt", "pant", "bag"},
         "shirt": {"pant", "shoes", "perfume", "watch"},
         "pant": {"shirt", "shoes", "belt", "watch"},
@@ -467,6 +471,8 @@ class ProductOntology:
 
     @staticmethod
     def _contains_phrase(text: str, phrase: str) -> bool:
+        if any("\u0980" <= char <= "\u09ff" for char in phrase):
+            return phrase in text
         if " " in phrase:
             return phrase in text
         return bool(re.search(rf"\b{re.escape(phrase)}\b", text))

@@ -1,61 +1,18 @@
-INFO:     Started server process [1856013]
+INFO:     Started server process [577769]
 INFO:     Waiting for application startup.
-2026-05-19 18:50:30,304 | INFO | app.main | FastAPI app started
-2026-05-19 18:50:34,717 | INFO | app.inventory.clip_matcher | CLIP source-vector cache hit: loaded 5000 embeddings from data/inventory/lereve_clip5000_clip_vectors.json; missing_products=0
-2026-05-19 18:50:35,245 | INFO | app.inventory.clip_matcher | Loading CLIP model: openai/clip-vit-base-patch32 local_files_only=True
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights: 100%|██████████| 398/398 [00:00<00:00, 30802.34it/s]
-[1mCLIPModel LOAD REPORT[0m from: openai/clip-vit-base-patch32
-Key                                  | Status     |  | 
--------------------------------------+------------+--+-
-text_model.embeddings.position_ids   | UNEXPECTED |  | 
-vision_model.embeddings.position_ids | UNEXPECTED |  | 
-
-Notes:
-- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
-2026-05-19 18:50:35,589 | INFO | app.inventory.clip_matcher | CLIP model loaded successfully
-2026-05-19 18:50:35,589 | INFO | app.main | Image search warmup finished
+2026-05-30 00:36:49,062 | INFO | app.main | FastAPI app started
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:4837 (Press CTRL+C to quit)
-INFO:     127.0.0.1:41846 - "GET /health HTTP/1.1" 200 OK
-INFO:     27.147.168.232:33364 - "GET /frontend/chat.html HTTP/1.1" 200 OK
-INFO:     27.147.168.232:33364 - "GET /frontend/chat.css?v=20260518-clean-demos HTTP/1.1" 200 OK
-INFO:     27.147.168.232:58403 - "GET /frontend/chat.js?v=20260519-fast-image-search HTTP/1.1" 200 OK
-INFO:     27.147.168.232:58403 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
-INFO:     27.147.168.232:58403 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
-INFO:     27.147.168.232:58403 - "GET /health HTTP/1.1" 200 OK
-INFO:     27.147.168.232:33364 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     27.147.168.232:58403 - "GET /inventory/items HTTP/1.1" 200 OK
-INFO:     27.147.168.232:49824 - "GET /frontend/assets/demo_catalog/shirt-ribbed-polo-black/primary.jpg HTTP/1.1" 200 OK
-INFO:     27.147.168.232:49829 - "GET /frontend/assets/demo_catalog/shirt-ribbed-polo-white/primary.jpg HTTP/1.1" 200 OK
-INFO:     27.147.168.232:51940 - "GET /frontend/assets/demo_catalog/saree-jmd-lotus-red/primary.jpg HTTP/1.1" 200 OK
-INFO:     27.147.168.232:8304 - "GET /frontend/assets/demo_catalog/jewelry-pearl-earring-white/primary.jpg HTTP/1.1" 200 OK
-2026-05-19 19:09:19,122 | WARNING | app.retrieval.multilingual_provider | sentence-transformers not installed. Run: pip install sentence-transformers  Falling back to deterministic embeddings.
-2026-05-19 19:09:19,304 | WARNING | app.retrieval.multilingual_provider | sentence-transformers not installed. Run: pip install sentence-transformers  Falling back to deterministic embeddings.
-2026-05-19 19:09:19,320 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=d771a758-f669-4349-ad3b-a854ede0925d execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=2 latency_ms=11691.061 fallback_reason=None
-INFO:     27.147.168.232:26091 - "POST /inventory/ask HTTP/1.1" 200 OK
-INFO:     203.95.220.29:49780 - "GET /frontend/chat.html HTTP/1.1" 200 OK
-INFO:     203.95.220.29:49780 - "GET /frontend/chat.css?v=20260518-clean-demos HTTP/1.1" 200 OK
-INFO:     203.95.220.29:49782 - "GET /frontend/chat.js?v=20260519-fast-image-search HTTP/1.1" 200 OK
-INFO:     203.95.220.29:49782 - "GET /frontend/config.local.json HTTP/1.1" 404 Not Found
-INFO:     203.95.220.29:49782 - "GET /frontend/runtime-config.json HTTP/1.1" 200 OK
-INFO:     203.95.220.29:49782 - "GET /health HTTP/1.1" 200 OK
-INFO:     203.95.220.29:49782 - "GET /inventory/items HTTP/1.1" 200 OK
-Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 24623.85it/s]
-2026-05-19 19:10:38,444 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.019s]
-2026-05-19 19:10:38,763 | INFO | elastic_transport.transport | HEAD http://localhost:9200/inventory-rag [status:200 duration:0.002s]
-2026-05-19 19:10:38,782 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.019s]
-2026-05-19 19:10:39,006 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=56b1cb52-b770-4619-b31e-2d57ac46e184 execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=6382.162 fallback_reason=That is outside what I can answer from the current catalog. I can still help with products, prices, orders, delivery, returns, gifts, or shopping suggestions.
-INFO:     203.95.220.29:57984 - "POST /inventory/ask HTTP/1.1" 200 OK
-2026-05-19 19:11:02,573 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=ed08a49c-7201-4cc6-8ae8-c223e05394e2 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=4063.607 fallback_reason=None
-INFO:     203.95.220.29:41720 - "POST /inventory/ask HTTP/1.1" 200 OK
-2026-05-19 19:11:37,360 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.017s]
-2026-05-19 19:11:37,673 | INFO | elastic_transport.transport | HEAD http://localhost:9200/inventory-rag [status:200 duration:0.001s]
-2026-05-19 19:11:37,690 | INFO | elastic_transport.transport | POST http://localhost:9200/inventory-rag/_search?_source_excludes=vector [status:200 duration:0.017s]
-2026-05-19 19:11:37,902 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=3178d140-7330-4f8a-9d3a-18fdec42bbfc execution_path=inventory_ask intent=unknown answer_engine=deterministic total_hits=0 latency_ms=3065.19 fallback_reason=That is outside what I can answer from the current catalog. I can still help with products, prices, orders, delivery, returns, gifts, or shopping suggestions.
-INFO:     203.95.220.29:33538 - "POST /inventory/ask HTTP/1.1" 200 OK
-INFO:     27.147.168.232:60154 - "GET /inventory/assets/lereve_109880_mlhts14057/lereve_109880_mlhts14057_primary_7ec956a5d2 HTTP/1.1" 200 OK
-INFO:     27.147.168.232:55628 - "GET /inventory/assets/lereve_534052_kgws14375/lereve_534052_kgws14375_primary_f60437f46e HTTP/1.1" 200 OK
-INFO:     27.147.168.232:60154 - "GET /inventory/assets/lereve_541826_nbgbt14084/lereve_541826_nbgbt14084_primary_b7552ec10b HTTP/1.1" 200 OK
-INFO:     27.147.168.232:55628 - "GET /inventory/assets/lereve_536827_lahg14124/lereve_536827_lahg14124_primary_df9781ce76 HTTP/1.1" 200 OK
-INFO:     35.227.62.178:44696 - "GET /frontend/chat.html HTTP/1.1" 200 OK
+2026-05-30 00:37:02,222 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=0e798870-2f9e-4e8a-9b18-7bfd32b8fa36 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=12908.03 fallback_reason=None
+INFO:     127.0.0.1:48396 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-30 00:37:14,802 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=d6b1bd80-243f-4c1c-afc7-4bcbd3609602 execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=5 latency_ms=12555.216 fallback_reason=None
+INFO:     127.0.0.1:56944 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-30 00:37:22,041 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=34a55002-4946-4a68-a98d-17830c76d43d execution_path=inventory_fashion_retail_structured intent=fashion_product_detail answer_engine=deterministic total_hits=1 latency_ms=7212.86 fallback_reason=None
+INFO:     127.0.0.1:59314 - "POST /inventory/ask HTTP/1.1" 200 OK
+2026-05-30 00:37:38,487 | INFO | app.services.inventory_service | inventory_chat_trace trace_id=775c40dc-4ed1-4255-938d-82bc8f0608fd execution_path=inventory_fashion_retail_structured intent=fashion_search answer_engine=deterministic total_hits=3 latency_ms=16419.247 fallback_reason=None
+INFO:     127.0.0.1:59318 - "POST /inventory/ask HTTP/1.1" 200 OK
+INFO:     147.185.133.84:49918 - "GET / HTTP/1.0" 404 Not Found
 WARNING:  Invalid HTTP request received.
+INFO:     35.203.210.190:65438 - "GET /v1/metadata HTTP/1.1" 404 Not Found
+INFO:     35.203.210.236:64206 - "GET /metrics HTTP/1.1" 404 Not Found
+INFO:     162.216.150.133:58134 - "GET /metrics HTTP/1.1" 404 Not Found

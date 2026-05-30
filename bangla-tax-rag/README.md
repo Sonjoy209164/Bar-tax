@@ -35,6 +35,7 @@ This repository has grown beyond one classic legal RAG README. Use this map as t
 
 - [README_inventory_current_architecture.md](README_inventory_current_architecture.md) - current inventory chatbot architecture and workflow.
 - [readmefullbuildtheory.md](readmefullbuildtheory.md) - full build theory for the boutique inventory chatbot, including frontend, API gateway, orchestrator, domain engines, image matcher, and order flow.
+- [learn_memory.md](learn_memory.md) - full conversation-memory and flow-control guide: flow actions, state fields, write guards, examples, and tests.
 - [learn_image.md](learn_image.md) - image-search workflow and theory for screenshot-to-product matching.
 - [docs/q1_image_search_research_pipeline.md](docs/q1_image_search_research_pipeline.md) - Q1-style research pipeline: dataset contract, baselines, ablations, metrics, and report command.
 - [docs/cif_rag_architecture_plan.md](docs/cif_rag_architecture_plan.md) - proposed architectural novelty: Counterfactual Identity-Factorized RAG for safe screenshot-based commerce answers.
